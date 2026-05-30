@@ -1,4 +1,5 @@
 mod db;
+mod domain;
 mod error;
 
 use axum::{routing::get, Router};
