@@ -30,9 +30,15 @@ pub fn compute_cost_basis(txns: &[Transaction]) -> CostBasis {
                 qty = new_qty;
             }
             TxnType::Sell | TxnType::Withdrawal => {
-                realized += (t.price_native - avg) * t.quantity - t.fee_native;
-                qty -= t.quantity;
-                if qty <= Decimal::ZERO {
+                // Cap the sold quantity at what is actually held. Overselling (recording a
+                // sell larger than the current position) would otherwise realize P&L on
+                // phantom units. We realize only on owned units and zero the position.
+                // NOTE: surfacing the oversell as a user-facing validation error is a
+                // Phase 3 (review-queue) concern; here we keep the math sound.
+                let sold = if t.quantity > qty { qty } else { t.quantity };
+                realized += (t.price_native - avg) * sold - t.fee_native;
+                qty -= sold;
+                if qty < Decimal::ZERO {
                     qty = Decimal::ZERO;
                 }
             }
@@ -127,5 +133,17 @@ mod tests {
         let cb = compute_cost_basis(&txns);
         assert_eq!(cb.quantity, dec!(3));
         assert_eq!(cb.avg_cost, dec!(50));
+    }
+
+    #[test]
+    fn oversell_caps_at_held_quantity() {
+        // Hold 1 @ 100, then sell 2 @ 150: only 1 unit is owned, so realize on 1 unit.
+        let txns = vec![
+            tx(TxnType::Buy, dec!(1), dec!(100), dec!(0)),
+            tx(TxnType::Sell, dec!(2), dec!(150), dec!(0)),
+        ];
+        let cb = compute_cost_basis(&txns);
+        assert_eq!(cb.quantity, dec!(0));
+        assert_eq!(cb.realized_pnl, dec!(50)); // (150-100)*1, NOT *2
     }
 }
