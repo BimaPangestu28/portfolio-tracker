@@ -31,11 +31,24 @@ pub struct IngestResult {
     pub items: Vec<review_items::ReviewItemRow>,
 }
 
+/// Strip any directory components from a client-supplied filename to prevent path traversal.
+fn safe_filename(name: &str) -> anyhow::Result<String> {
+    let base = std::path::Path::new(name)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(|| anyhow::anyhow!("invalid filename: {name}"))?;
+    if base.is_empty() || base == "." || base == ".." {
+        return Err(anyhow::anyhow!("invalid filename: {name}"));
+    }
+    Ok(base.to_string())
+}
+
 /// Decode + save a file to data/uploads/<batch_id>/, returning (kind, path).
 fn save_file(batch_id: &str, f: &UploadFile) -> anyhow::Result<(String, String)> {
     let dir = format!("data/uploads/{batch_id}");
     std::fs::create_dir_all(&dir)?;
-    let path = format!("{dir}/{}", f.filename);
+    let safe = safe_filename(&f.filename)?;
+    let path = format!("{dir}/{safe}");
     let bytes = base64::engine::general_purpose::STANDARD.decode(f.data_base64.as_bytes())
         .map_err(|e| anyhow::anyhow!("bad base64 for {}: {e}", f.filename))?;
     std::fs::write(&path, &bytes)?;
@@ -62,6 +75,22 @@ pub async fn ingest_batch(db: &Db, client: &ClaudeClient, batch_id: &str, files:
             .map_err(|e| anyhow::anyhow!("llm error: {e}"))?;
         let extraction = parse_extraction(&raw)
             .map_err(|e| anyhow::anyhow!("parse error: {e}; raw={raw}"))?;
+        if extraction.entries.is_empty() {
+            let row = review_items::create(db, &NewReviewItem {
+                batch_id,
+                source_kind: &kind,
+                source_filename: &f.filename,
+                source_path: &path,
+                doc_type: &extraction.doc_type,
+                needs_attention: true,
+                payload_json: "{\"note\":\"no entries extracted from this document\"}",
+                raw_llm_json: &raw,
+                suggested_instrument_id: None,
+                suggested_account_id: None,
+            }).await?;
+            items.push(row);
+            continue;
+        }
         for entry in &extraction.entries {
             let payload = serde_json::to_string(entry)?;
             let sug_ins = match &entry.symbol { Some(s) => suggest_instrument(db, s).await?, None => None };
@@ -106,6 +135,15 @@ mod tests {
     #[test]
     fn complete_high_confidence_ok() {
         assert!(!needs_attention(&entry(0.9, Some("BTC"), Some("1"))));
+    }
+
+    #[test]
+    fn safe_filename_strips_traversal() {
+        assert_eq!(super::safe_filename("../../etc/passwd").unwrap(), "passwd");
+        assert_eq!(super::safe_filename("a.png").unwrap(), "a.png");
+        assert_eq!(super::safe_filename("sub/dir/x.pdf").unwrap(), "x.pdf");
+        assert!(super::safe_filename("..").is_err());
+        assert!(super::safe_filename("").is_err());
     }
 
     #[tokio::test]
