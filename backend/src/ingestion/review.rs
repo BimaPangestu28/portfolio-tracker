@@ -27,6 +27,14 @@ use rust_decimal::Decimal;
 /// Confirm a review item: build a ledger transaction from the payload and mark the item confirmed.
 /// FX fields default from the latest USD/IDR rate when absent. Returns the new txn id.
 pub async fn confirm(db: &Db, item_id: i64, p: &ConfirmPayload) -> anyhow::Result<i64> {
+    let item = crate::repo::review_items::get(db, item_id).await?;
+    if item.status != "pending" {
+        return Err(anyhow::anyhow!("review item {item_id} is already {}", item.status));
+    }
+    crate::repo::instruments::get(db, p.instrument_id).await
+        .map_err(|_| anyhow::anyhow!("unknown instrument_id {}", p.instrument_id))?;
+    crate::repo::accounts::get(db, p.account_id).await
+        .map_err(|_| anyhow::anyhow!("unknown account_id {}", p.account_id))?;
     let usd_idr = prices::latest_fx(db, "USD", "IDR").await?.unwrap_or(Decimal::ONE);
     let fx_to_idr = p.fx_to_idr.clone().unwrap_or_else(|| usd_idr.to_string());
     let fx_to_usd = p.fx_to_usd.clone().unwrap_or_else(|| "1".to_string());
@@ -52,6 +60,10 @@ pub async fn confirm(db: &Db, item_id: i64, p: &ConfirmPayload) -> anyhow::Resul
 }
 
 pub async fn reject(db: &Db, item_id: i64) -> anyhow::Result<()> {
+    let item = crate::repo::review_items::get(db, item_id).await?;
+    if item.status != "pending" {
+        return Err(anyhow::anyhow!("review item {item_id} is already {}", item.status));
+    }
     review_items::mark_rejected(db, item_id).await
 }
 
@@ -93,6 +105,39 @@ mod tests {
         let reloaded = review_items::get(&db, item.id).await.unwrap();
         assert_eq!(reloaded.status, "confirmed");
         assert_eq!(reloaded.created_txn_id, Some(txn_id));
+    }
+
+    #[tokio::test]
+    async fn double_confirm_is_rejected_and_inserts_one_txn() {
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        let (account_id, instrument_id) = seed(&db).await;
+        let item = review_items::create(&db, &review_items::NewReviewItem {
+            batch_id:"b", source_kind:"image", source_filename:"f.png", source_path:"p",
+            doc_type:"trade_confirmation", needs_attention:false, payload_json:"{}", raw_llm_json:"{}",
+            suggested_instrument_id:Some(instrument_id), suggested_account_id:Some(account_id),
+        }).await.unwrap();
+        let payload = ConfirmPayload { account_id, instrument_id, entry_type:"buy".into(),
+            executed_at:"2026-01-02T00:00:00Z".into(), quantity:"1".into(), price_native:"100".into(),
+            fee_native:None, currency:"USD".into(), fx_to_idr:None, fx_to_usd:None, note:None };
+        confirm(&db, item.id, &payload).await.unwrap();
+        assert!(confirm(&db, item.id, &payload).await.is_err()); // second confirm refused
+        assert_eq!(crate::repo::transactions::list_all(&db).await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn reject_after_confirm_is_refused() {
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        let (account_id, instrument_id) = seed(&db).await;
+        let item = review_items::create(&db, &review_items::NewReviewItem {
+            batch_id:"b", source_kind:"image", source_filename:"f.png", source_path:"p",
+            doc_type:"trade_confirmation", needs_attention:false, payload_json:"{}", raw_llm_json:"{}",
+            suggested_instrument_id:Some(instrument_id), suggested_account_id:Some(account_id),
+        }).await.unwrap();
+        let payload = ConfirmPayload { account_id, instrument_id, entry_type:"buy".into(),
+            executed_at:"2026-01-02T00:00:00Z".into(), quantity:"1".into(), price_native:"100".into(),
+            fee_native:None, currency:"USD".into(), fx_to_idr:None, fx_to_usd:None, note:None };
+        confirm(&db, item.id, &payload).await.unwrap();
+        assert!(reject(&db, item.id).await.is_err());
     }
 
     #[tokio::test]
