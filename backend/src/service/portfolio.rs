@@ -84,7 +84,7 @@ pub async fn build_summary(db: &Db) -> anyhow::Result<PortfolioSummary> {
     // XIRR from cashflows: buys/deposits negative, sells/dividends positive, plus current net worth as terminal inflow.
     let mut flows: Vec<CashFlow> = Vec::new();
     for t in &all_txns {
-        let amount_usd = (t.quantity * t.price_native + t.fee_native).to_string().parse::<f64>().unwrap_or(0.0);
+        let amount_usd = ((t.quantity * t.price_native + t.fee_native) * t.fx_to_usd).to_string().parse::<f64>().unwrap_or(0.0);
         let signed = match t.txn_type {
             TxnType::Buy | TxnType::Deposit | TxnType::OpeningBalance => -amount_usd,
             TxnType::Sell | TxnType::Withdrawal | TxnType::Dividend | TxnType::Interest => amount_usd,

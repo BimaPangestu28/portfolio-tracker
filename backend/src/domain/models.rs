@@ -6,6 +6,7 @@ use std::str::FromStr;
 macro_rules! str_enum {
     ($name:ident { $($variant:ident => $s:literal),+ $(,)? }) => {
         #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+        #[serde(rename_all = "snake_case")]
         pub enum $name { $($variant),+ }
         impl $name {
             pub fn as_str(&self) -> &'static str { match self { $(Self::$variant => $s),+ } }
@@ -94,5 +95,11 @@ mod tests {
     #[test]
     fn invalid_txn_type_errors() {
         assert!(TxnType::from_str("nope").is_err());
+    }
+
+    #[test]
+    fn txn_type_serializes_snake_case() {
+        assert_eq!(serde_json::to_string(&TxnType::OpeningBalance).unwrap(), "\"opening_balance\"");
+        assert_eq!(serde_json::to_string(&TxnType::Buy).unwrap(), "\"buy\"");
     }
 }

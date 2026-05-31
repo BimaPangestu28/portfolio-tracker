@@ -42,6 +42,12 @@ impl TxnRowRaw {
 
 pub async fn create(db: &Db, t: &NewTransaction) -> anyhow::Result<Transaction> {
     TxnType::from_str(&t.txn_type).map_err(|e| anyhow::anyhow!(e))?;
+    // Validate all decimal fields up-front so a malformed value never persists.
+    crate::repo::dec(&t.quantity)?;
+    crate::repo::dec(&t.price_native)?;
+    if let Some(f) = t.fee_native.as_deref() { crate::repo::dec(f)?; }
+    crate::repo::dec(&t.fx_to_idr)?;
+    crate::repo::dec(&t.fx_to_usd)?;
     let now = Utc::now().to_rfc3339();
     let id = sqlx::query(
         "INSERT INTO txn (account_id, instrument_id, txn_type, executed_at, quantity, price_native, fee_native, currency, fx_to_idr, fx_to_usd, note, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)")
@@ -95,5 +101,18 @@ mod tests {
         assert_eq!(all.len(), 1);
         assert_eq!(all[0].quantity, d!(0.5));
         assert_eq!(all[0].fee_native, d!(1));
+    }
+
+    #[tokio::test]
+    async fn create_rejects_bad_decimal_without_persisting() {
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        let acc = accounts::create(&db, &accounts::NewAccount { name:"A".into(), account_type:"manual".into(), institution:None, native_currency:"USD".into(), note:None }).await.unwrap();
+        let ins = instruments::create(&db, &instruments::NewInstrument { symbol:"BTC".into(), name:"B".into(), instrument_type:"crypto".into(), native_currency:"USD".into(), category_id:None, price_source:"manual".into(), decimals:Some(8), note:None }).await.unwrap();
+        let bad = NewTransaction { account_id: acc.id, instrument_id: ins.id, txn_type:"buy".into(),
+            executed_at: Utc::now(), quantity:"not_a_number".into(), price_native:"100".into(),
+            fee_native: None, currency:"USD".into(), fx_to_idr:"16000".into(), fx_to_usd:"1".into(), note:None };
+        assert!(create(&db, &bad).await.is_err());
+        // No row must have been persisted.
+        assert_eq!(list_all(&db).await.unwrap().len(), 0);
     }
 }
