@@ -3,6 +3,7 @@ mod domain;
 mod error;
 mod pricing;
 mod repo;
+mod service;
 
 use axum::{routing::get, Router};
 use db::Db;
