@@ -17,6 +17,8 @@ pub async fn list_categories(State(s): State<AppState>) -> Result<Json<Vec<categ
     Ok(Json(categories::list(&s.db).await.map_err(AppError::Other)?))
 }
 pub async fn create_category(State(s): State<AppState>, Json(b): Json<categories::NewCategory>) -> Result<Json<categories::CategoryRow>, AppError> {
+    dec(&b.target_pct).map_err(|e| AppError::BadRequest(e.to_string()))?;
+    if let Some(t) = b.tolerance_band_pct.as_deref() { dec(t).map_err(|e| AppError::BadRequest(e.to_string()))?; }
     Ok(Json(categories::create(&s.db, &b).await.map_err(AppError::Other)?))
 }
 pub async fn delete_category(State(s): State<AppState>, Path(id): Path<i64>) -> Result<Json<()>, AppError> {
@@ -50,5 +52,13 @@ pub struct ManualPrice { pub instrument_id: i64, pub price: String, pub currency
 pub async fn manual_price(State(s): State<AppState>, Json(b): Json<ManualPrice>) -> Result<Json<()>, AppError> {
     let price = dec(&b.price).map_err(|e| AppError::BadRequest(e.to_string()))?;
     prices::upsert_latest(&s.db, b.instrument_id, price, &b.currency, "manual", &b.as_of).await.map_err(AppError::Other)?;
+    Ok(Json(()))
+}
+
+#[derive(serde::Deserialize)]
+pub struct ManualFx { pub base: String, pub quote: String, pub rate: String, pub as_of: String }
+pub async fn manual_fx(State(s): State<AppState>, Json(b): Json<ManualFx>) -> Result<Json<()>, AppError> {
+    let rate = dec(&b.rate).map_err(|e| AppError::BadRequest(e.to_string()))?;
+    prices::upsert_fx(&s.db, &b.base, &b.quote, rate, &b.as_of).await.map_err(AppError::Other)?;
     Ok(Json(()))
 }

@@ -17,6 +17,7 @@ pub fn router(state: AppState) -> Router {
         .route("/transactions", get(crud::list_transactions).post(crud::create_transaction))
         .route("/transactions/:id", delete(crud::delete_transaction))
         .route("/prices/manual", post(crud::manual_price))
+        .route("/fx/manual", post(crud::manual_fx))
         .route("/prices/refresh", post(portfolio::refresh))
         .route("/portfolio/summary", get(portfolio::summary))
         .route("/portfolio/history", get(portfolio::history))

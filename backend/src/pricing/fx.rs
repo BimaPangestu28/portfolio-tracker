@@ -6,10 +6,10 @@ pub struct FxClient { base: String, client: reqwest::Client }
 
 impl FxClient {
     pub fn new() -> Self {
-        Self { base: "https://api.exchangerate.host".into(), client: reqwest::Client::new() }
+        Self { base: "https://api.frankfurter.app".into(), client: reqwest::Client::new() }
     }
     pub async fn usd_to_idr(&self) -> Result<Decimal, PriceError> {
-        let url = format!("{}/latest?base=USD&symbols=IDR", self.base);
+        let url = format!("{}/latest?from=USD&to=IDR", self.base);
         let resp = self.client.get(&url).send().await.map_err(|e| PriceError::Http(e.to_string()))?;
         let body: serde_json::Value = resp.json().await.map_err(|e| PriceError::Parse(e.to_string()))?;
         parse_fx(&body, "IDR")
