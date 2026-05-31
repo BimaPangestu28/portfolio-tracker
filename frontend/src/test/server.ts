@@ -14,6 +14,7 @@ export const handlers = [
   http.get("/api/instruments", () => HttpResponse.json([])),
   http.get("/api/accounts", () => HttpResponse.json([])),
   http.get("/api/transactions", () => HttpResponse.json([])),
+  http.get("/api/categories", () => HttpResponse.json([])),
 ];
 
 export const server = setupServer(...handlers);
