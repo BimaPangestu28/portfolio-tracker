@@ -1,4 +1,5 @@
 pub mod crud;
+pub mod ingest;
 pub mod portfolio;
 
 use crate::AppState;
@@ -21,6 +22,11 @@ pub fn router(state: AppState) -> Router {
         .route("/prices/refresh", post(portfolio::refresh))
         .route("/portfolio/summary", get(portfolio::summary))
         .route("/portfolio/history", get(portfolio::history))
+        .route("/ingest", post(ingest::ingest))
+        .route("/ingest/review", get(ingest::list_review))
+        .route("/ingest/review/:id", axum::routing::patch(ingest::patch_review))
+        .route("/ingest/review/:id/confirm", post(ingest::confirm_review))
+        .route("/ingest/review/:id/reject", post(ingest::reject_review))
         .layer(CorsLayer::permissive())
         .with_state(state)
 }
