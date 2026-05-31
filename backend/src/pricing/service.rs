@@ -31,6 +31,12 @@ pub async fn refresh_all(db: &Db) -> anyhow::Result<()> {
                 Err(e) => tracing::warn!("price refresh failed for {}: {e}", ins.symbol),
             }
         }
+        if let Some(ext) = ins.price_source.strip_prefix("yahoo:") {
+            match crate::pricing::yahoo::Yahoo::new().latest(ext).await {
+                Ok(q) => { let _ = prices::upsert_latest(db, ins.id, q.price, &q.currency, "yahoo", &today).await; }
+                Err(e) => tracing::warn!("yahoo price refresh failed for {}: {e}", ins.symbol),
+            }
+        }
     }
     Ok(())
 }

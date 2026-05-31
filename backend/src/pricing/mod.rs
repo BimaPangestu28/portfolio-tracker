@@ -1,6 +1,7 @@
 pub mod coingecko;
 pub mod fx;
 pub mod service;
+pub mod yahoo;
 
 use rust_decimal::Decimal;
 
