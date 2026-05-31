@@ -3,6 +3,7 @@ pub mod categories;
 pub mod instruments;
 pub mod transactions;
 pub mod prices;
+pub mod snapshots;
 
 use rust_decimal::Decimal;
 use std::str::FromStr;

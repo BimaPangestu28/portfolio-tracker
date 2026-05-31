@@ -3,6 +3,7 @@ mod domain;
 mod error;
 mod pricing;
 mod repo;
+mod scheduler;
 mod service;
 
 use axum::{routing::get, Router};
