@@ -16,6 +16,7 @@ export default function DashboardPage() {
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold">Dashboard</h1>
         <button
+          type="button"
           onClick={() => refresh.mutate()}
           disabled={refresh.isPending}
           className="rounded bg-blue-600 px-3 py-1.5 text-sm text-white disabled:opacity-50"

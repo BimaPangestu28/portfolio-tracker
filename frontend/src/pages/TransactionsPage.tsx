@@ -42,25 +42,25 @@ export default function TransactionsPage() {
       <h1 className="text-xl font-semibold">Transactions</h1>
 
       <form onSubmit={submit} className="grid grid-cols-2 gap-2 rounded border bg-white p-4 sm:grid-cols-4">
-        <select className={input} value={form.account_id} onChange={set("account_id")} required>
+        <select aria-label="Account" className={input} value={form.account_id} onChange={set("account_id")} required>
           <option value="">Account…</option>
           {(accounts.data ?? []).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
         </select>
-        <select className={input} value={form.instrument_id} onChange={set("instrument_id")} required>
+        <select aria-label="Instrument" className={input} value={form.instrument_id} onChange={set("instrument_id")} required>
           <option value="">Instrument…</option>
           {(instruments.data ?? []).map((i) => <option key={i.id} value={i.id}>{i.symbol}</option>)}
         </select>
-        <select className={input} value={form.txn_type} onChange={set("txn_type")}>
+        <select aria-label="Transaction type" className={input} value={form.txn_type} onChange={set("txn_type")}>
           {TXN_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
         </select>
-        <input className={input} type="datetime-local" value={form.executed_at} onChange={set("executed_at")} />
-        <input className={input} placeholder="Quantity" value={form.quantity} onChange={set("quantity")} required />
-        <input className={input} placeholder="Price (native)" value={form.price_native} onChange={set("price_native")} required />
-        <input className={input} placeholder="Fee" value={form.fee_native} onChange={set("fee_native")} />
-        <input className={input} placeholder="Currency" value={form.currency} onChange={set("currency")} />
-        <input className={input} placeholder="FX→IDR" value={form.fx_to_idr} onChange={set("fx_to_idr")} />
-        <input className={input} placeholder="FX→USD" value={form.fx_to_usd} onChange={set("fx_to_usd")} />
-        <button className="col-span-2 rounded bg-blue-600 px-3 py-1.5 text-sm text-white disabled:opacity-50 sm:col-span-4" disabled={create.isPending}>
+        <input aria-label="Executed at" className={input} type="datetime-local" value={form.executed_at} onChange={set("executed_at")} />
+        <input aria-label="Quantity" className={input} placeholder="Quantity" value={form.quantity} onChange={set("quantity")} required />
+        <input aria-label="Price (native)" className={input} placeholder="Price (native)" value={form.price_native} onChange={set("price_native")} required />
+        <input aria-label="Fee" className={input} placeholder="Fee" value={form.fee_native} onChange={set("fee_native")} />
+        <input aria-label="Currency" className={input} placeholder="Currency" value={form.currency} onChange={set("currency")} />
+        <input aria-label="FX to IDR" className={input} placeholder="FX→IDR" value={form.fx_to_idr} onChange={set("fx_to_idr")} />
+        <input aria-label="FX to USD" className={input} placeholder="FX→USD" value={form.fx_to_usd} onChange={set("fx_to_usd")} />
+        <button type="submit" className="col-span-2 rounded bg-blue-600 px-3 py-1.5 text-sm text-white disabled:opacity-50 sm:col-span-4" disabled={create.isPending}>
           {create.isPending ? "Adding…" : "Add transaction"}
         </button>
         {create.error && <div className="col-span-2 text-sm text-red-600 sm:col-span-4">{(create.error as Error).message}</div>}
@@ -81,7 +81,7 @@ export default function TransactionsPage() {
                   <td className="p-2">{t.quantity}</td>
                   <td className="p-2">{t.price_native} {t.currency}</td>
                   <td className="p-2 text-right">
-                    <button onClick={() => del.mutate(t.id)} className="text-xs text-red-600 hover:underline">delete</button>
+                    <button type="button" onClick={() => del.mutate(t.id)} className="text-xs text-red-600 hover:underline">delete</button>
                   </td>
                 </tr>
               ))}

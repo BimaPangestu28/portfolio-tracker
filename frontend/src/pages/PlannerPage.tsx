@@ -29,10 +29,10 @@ export default function PlannerPage() {
       <h1 className="text-xl font-semibold">Allocation Planner</h1>
 
       <form onSubmit={submit} className="grid grid-cols-2 gap-2 rounded border bg-white p-4 sm:grid-cols-4">
-        <input className={input} placeholder="Category name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
-        <input className={input} placeholder="Target %" value={form.target_pct} onChange={(e) => setForm({ ...form, target_pct: e.target.value })} required />
-        <input className={input} placeholder="Tolerance band % (optional)" value={form.tolerance_band_pct} onChange={(e) => setForm({ ...form, tolerance_band_pct: e.target.value })} />
-        <button className="rounded bg-blue-600 px-3 py-1.5 text-sm text-white disabled:opacity-50" disabled={create.isPending}>Add category</button>
+        <input aria-label="Category name" className={input} placeholder="Category name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
+        <input aria-label="Target percent" className={input} placeholder="Target %" value={form.target_pct} onChange={(e) => setForm({ ...form, target_pct: e.target.value })} required />
+        <input aria-label="Tolerance band percent" className={input} placeholder="Tolerance band % (optional)" value={form.tolerance_band_pct} onChange={(e) => setForm({ ...form, tolerance_band_pct: e.target.value })} />
+        <button type="submit" className="rounded bg-blue-600 px-3 py-1.5 text-sm text-white disabled:opacity-50" disabled={create.isPending}>Add category</button>
         {create.error && <div className="col-span-2 text-sm text-red-600 sm:col-span-4">{(create.error as Error).message}</div>}
       </form>
 
@@ -51,7 +51,7 @@ export default function PlannerPage() {
                   <span className="ml-2 text-gray-500">target {formatPct(c.target_pct)}{c.tolerance_band_pct ? ` ±${c.tolerance_band_pct}%` : ""}</span>
                   {a && <span className={`ml-2 ${a.out_of_band ? "text-red-600" : "text-gray-600"}`}>actual {formatPct(a.actual_pct)}</span>}
                 </div>
-                <button onClick={() => del.mutate(c.id)} className="text-xs text-red-600 hover:underline">delete</button>
+                <button type="button" onClick={() => del.mutate(c.id)} className="text-xs text-red-600 hover:underline">delete</button>
               </div>
             );
           })}
