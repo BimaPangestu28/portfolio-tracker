@@ -3,6 +3,7 @@ mod db;
 mod domain;
 mod error;
 mod ingestion;
+mod llm;
 mod pricing;
 mod repo;
 mod scheduler;
