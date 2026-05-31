@@ -9,6 +9,8 @@ export const handlers = [
       positions: [], allocation: [],
     }),
   ),
+  http.get("/api/portfolio/history", () => HttpResponse.json([])),
+  http.post("/api/prices/refresh", () => HttpResponse.json(null)),
 ];
 
 export const server = setupServer(...handlers);

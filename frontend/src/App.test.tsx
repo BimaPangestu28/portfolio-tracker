@@ -12,5 +12,5 @@ test("renders nav with Dashboard link", () => {
       </MemoryRouter>
     </QueryClientProvider>,
   );
-  expect(screen.getByText("Dashboard")).toBeInTheDocument();
+  expect(screen.getAllByText("Dashboard").length).toBeGreaterThan(0);
 });
