@@ -11,6 +11,7 @@ export const handlers = [
   ),
   http.get("/api/portfolio/history", () => HttpResponse.json([])),
   http.post("/api/prices/refresh", () => HttpResponse.json(null)),
+  http.get("/api/instruments", () => HttpResponse.json([])),
 ];
 
 export const server = setupServer(...handlers);
