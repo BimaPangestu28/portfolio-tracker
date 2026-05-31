@@ -107,4 +107,15 @@ mod tests {
     fn complete_high_confidence_ok() {
         assert!(!needs_attention(&entry(0.9, Some("BTC"), Some("1"))));
     }
+
+    #[tokio::test]
+    #[ignore]
+    async fn live_extract_smoke() {
+        let client = match crate::llm::claude::ClaudeClient::from_env() { Ok(c) => c, Err(_) => return };
+        let png_1x1 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+        let parts = vec![ Part::Text("Extract per instructions.".into()), Part::Image("image/png".into(), png_1x1.into()) ];
+        let out = client.complete(SYSTEM_PROMPT, &parts).await.unwrap();
+        let parsed = crate::ingestion::extract::parse_extraction(&out).unwrap();
+        assert!(["holdings_snapshot","txn_history","bank_statement","trade_confirmation"].contains(&parsed.doc_type.as_str()));
+    }
 }
