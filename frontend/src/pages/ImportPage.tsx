@@ -3,6 +3,7 @@ import { useReviewItems, useIngest, useInstruments, useAccounts } from "../api/h
 import { readFileAsUpload, ACCEPTED_TYPES, type UploadFileIn } from "../lib/upload";
 import { ReviewRow } from "../components/ReviewRow";
 import { QueryState } from "../components/QueryState";
+import { CsvImport } from "../components/CsvImport";
 
 export default function ImportPage() {
   const review = useReviewItems("pending");
@@ -48,6 +49,8 @@ export default function ImportPage() {
         </p>
         {ingest.error && <p className="mt-2 text-sm text-red-600">{(ingest.error as Error).message}</p>}
       </div>
+
+      <CsvImport />
 
       <QueryState isLoading={review.isLoading} error={review.error}>
         {items.length === 0 ? (
