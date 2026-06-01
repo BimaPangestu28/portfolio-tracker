@@ -4,7 +4,8 @@ import { api } from "./client";
 import {
   AccountSchema, CategorySchema, InstrumentSchema, TransactionSchema,
   PortfolioSummarySchema, SnapshotSchema,
-  type Account, type Category, type Instrument, type Transaction,
+  ReviewItemSchema, IngestResultSchema,
+  type Account, type Category, type Instrument, type Transaction, type ReviewItem,
 } from "./schemas";
 
 export const useSummary = () =>
@@ -54,3 +55,24 @@ export const useDeleteInstrument = () => useInvalidatingMutation((id: number) =>
 export const useDeleteTransaction = () => useInvalidatingMutation((id: number) => api.del(`/transactions/${id}`), ["transactions", "summary"]);
 
 export type { Account, Category, Instrument, Transaction };
+
+export interface UploadFileIn { filename: string; media_type: string; data_base64: string }
+
+export const useReviewItems = (status = "pending") =>
+  useQuery({ queryKey: ["review", status], queryFn: () => api.get(`/ingest/review?status=${status}`, z.array(ReviewItemSchema)) });
+
+export const useIngest = () =>
+  useInvalidatingMutation((files: UploadFileIn[]) => api.post("/ingest", IngestResultSchema, { files }), ["review"]);
+
+export const usePatchReview = () =>
+  useInvalidatingMutation((args: { id: number; payload_json: unknown }) =>
+    api.patch(`/ingest/review/${args.id}`, ReviewItemSchema, { payload_json: args.payload_json }), ["review"]);
+
+export const useConfirmReview = () =>
+  useInvalidatingMutation((args: { id: number; payload: Record<string, unknown> }) =>
+    api.post(`/ingest/review/${args.id}/confirm`, z.object({ created_txn_id: z.number() }), args.payload), ["review", "summary", "transactions"]);
+
+export const useRejectReview = () =>
+  useInvalidatingMutation((id: number) => api.post(`/ingest/review/${id}/reject`, z.unknown(), {}), ["review"]);
+
+export type { ReviewItem };

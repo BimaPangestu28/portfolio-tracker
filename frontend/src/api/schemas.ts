@@ -97,3 +97,43 @@ export const SnapshotSchema = z.object({
   breakdown_json: z.string(),
 });
 export type Snapshot = z.infer<typeof SnapshotSchema>;
+
+export const ExtractedEntrySchema = z.object({
+  entry_type: z.string(),
+  symbol: z.string().nullable().optional(),
+  instrument_name: z.string().nullable().optional(),
+  quantity: z.string().nullable().optional(),
+  price_native: z.string().nullable().optional(),
+  fee_native: z.string().nullable().optional(),
+  currency: z.string().nullable().optional(),
+  executed_at: z.string().nullable().optional(),
+  account_hint: z.string().nullable().optional(),
+  note: z.string().nullable().optional(),
+  confidence: z.number().default(1),
+});
+export type ExtractedEntry = z.infer<typeof ExtractedEntrySchema>;
+
+export const ReviewItemSchema = z.object({
+  id: z.number(),
+  batch_id: z.string(),
+  source_kind: z.string(),
+  source_filename: z.string(),
+  source_path: z.string(),
+  doc_type: z.string(),
+  status: z.string(),
+  needs_attention: z.number(),
+  payload_json: z.string(),
+  raw_llm_json: z.string(),
+  suggested_instrument_id: z.number().nullable().optional(),
+  suggested_account_id: z.number().nullable().optional(),
+  created_txn_id: z.number().nullable().optional(),
+  created_at: z.string(),
+  confirmed_at: z.string().nullable().optional(),
+});
+export type ReviewItem = z.infer<typeof ReviewItemSchema>;
+
+export const IngestResultSchema = z.object({
+  batch_id: z.string(),
+  items: z.array(ReviewItemSchema),
+});
+export type IngestResult = z.infer<typeof IngestResultSchema>;

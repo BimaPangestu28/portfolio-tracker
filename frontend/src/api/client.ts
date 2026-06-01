@@ -20,5 +20,7 @@ export const api = {
   get: <T>(path: string, schema: z.ZodType<T>) => request(path, schema, { method: "GET" }),
   post: <T>(path: string, schema: z.ZodType<T>, body: unknown) =>
     request(path, schema, { method: "POST", body: JSON.stringify(body) }),
+  patch: <T>(path: string, schema: z.ZodType<T>, body: unknown) =>
+    request(path, schema, { method: "PATCH", body: JSON.stringify(body) }),
   del: (path: string) => request(path, z.unknown(), { method: "DELETE" }),
 };
