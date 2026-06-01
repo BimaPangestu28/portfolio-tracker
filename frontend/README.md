@@ -59,3 +59,21 @@ ready to be wired up in a follow-up; the factory currently returns an error for 
 
 **Security note:** API keys are stored unencrypted in the connector table. Encryption at rest is
 a planned follow-up.
+
+## Chat (Phase 4)
+
+### Chat page (`/chat`)
+In-app Q&A chatbot that answers questions about your portfolio. The frontend sends a message via
+`POST /chat` (backend calls Claude with a portfolio snapshot injected as context) and displays the
+reply. The full conversation history is fetched from `GET /chat/history`.
+
+- User bubbles appear on the right; assistant replies on the left.
+- A "thinking…" indicator is shown while the backend is processing.
+- Requires `ANTHROPIC_API_KEY` set for the backend.
+
+### WhatsApp channel
+A Baileys Node sidecar (`whatsapp-gateway/`) bridges inbound WhatsApp messages to `POST /chat/whatsapp/inbound`
+on the backend, which reuses the same portfolio Q&A logic (channel=`whatsapp`). The gateway posts the
+assistant reply back over WhatsApp. An optional shared secret (`GATEWAY_TOKEN` env) authenticates
+gateway calls. The live WhatsApp send is handled by Baileys after QR-scanning a phone; no Meta Business
+account is required.
