@@ -1,6 +1,10 @@
 import { useState } from "react";
 import { useChatHistory, useSendChat } from "../api/hooks";
 import { QueryState } from "../components/QueryState";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
 
 export default function ChatPage() {
   const history = useChatHistory();
@@ -21,21 +25,17 @@ export default function ChatPage() {
       <h1 className="text-xl font-semibold">Chat</h1>
 
       <QueryState isLoading={history.isLoading} error={history.error}>
-        <div className="flex flex-col gap-2 rounded border bg-white p-4 min-h-48">
+        <Card className="flex min-h-48 flex-col gap-2 p-4">
           {(history.data ?? []).length === 0 && (
-            <p className="text-gray-400 text-sm">No messages yet. Ask about your portfolio!</p>
+            <p className="text-sm text-muted-foreground">No messages yet. Ask about your portfolio!</p>
           )}
           {(history.data ?? []).map((msg) => (
-            <div
-              key={msg.id}
-              className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
-            >
+            <div key={msg.id} className={cn("flex", msg.role === "user" ? "justify-end" : "justify-start")}>
               <div
-                className={`max-w-xs rounded-lg px-3 py-2 text-sm lg:max-w-md ${
-                  msg.role === "user"
-                    ? "bg-blue-600 text-white"
-                    : "bg-gray-100 text-gray-900"
-                }`}
+                className={cn(
+                  "max-w-xs rounded-lg px-3 py-2 text-sm lg:max-w-md",
+                  msg.role === "user" ? "bg-primary text-primary-foreground" : "bg-muted text-foreground",
+                )}
               >
                 {msg.content}
               </div>
@@ -43,37 +43,27 @@ export default function ChatPage() {
           ))}
           {sendChat.isPending && (
             <div className="flex justify-start">
-              <div className="rounded-lg bg-gray-100 px-3 py-2 text-sm text-gray-500 italic">
-                thinking…
-              </div>
+              <div className="rounded-lg bg-muted px-3 py-2 text-sm italic text-muted-foreground">thinking…</div>
             </div>
           )}
-        </div>
+        </Card>
       </QueryState>
 
       <form onSubmit={handleSend} className="flex gap-2">
-        <input
+        <Input
           aria-label="Chat message"
-          className="flex-1 rounded border px-3 py-2 text-sm"
+          className="flex-1"
           placeholder="Ask about your portfolio…"
           value={input}
           onChange={(e) => setInput(e.target.value)}
           disabled={sendChat.isPending}
         />
-        <button
-          type="submit"
-          className="rounded bg-blue-600 px-4 py-2 text-sm text-white disabled:opacity-50"
-          disabled={sendChat.isPending || !input.trim()}
-        >
+        <Button type="submit" disabled={sendChat.isPending || !input.trim()}>
           Send
-        </button>
+        </Button>
       </form>
 
-      {sendChat.error && (
-        <div className="text-sm text-red-600">
-          {(sendChat.error as Error).message}
-        </div>
-      )}
+      {sendChat.error && <div className="text-sm text-destructive">{(sendChat.error as Error).message}</div>}
     </div>
   );
 }

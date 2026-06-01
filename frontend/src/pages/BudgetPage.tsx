@@ -10,6 +10,20 @@ import {
 import { StatCard } from "../components/StatCard";
 import { QueryState } from "../components/QueryState";
 import { formatIDR } from "../lib/format";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+
+const nativeSelect =
+  "flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring";
 
 export default function BudgetPage() {
   const defaultMonth = new Date().toISOString().slice(0, 7);
@@ -42,8 +56,6 @@ export default function BudgetPage() {
 
   const setCat = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
     setCatForm({ ...catForm, [k]: e.target.value });
-
-  const input = "rounded border px-2 py-1 text-sm";
 
   const submitEntry = (e: React.FormEvent) => {
     e.preventDefault();
@@ -83,10 +95,10 @@ export default function BudgetPage() {
     <div className="space-y-6">
       <div className="flex items-center gap-4">
         <h1 className="text-xl font-semibold">Budget</h1>
-        <input
+        <Input
           aria-label="Month"
           type="month"
-          className={input}
+          className="w-40"
           value={month}
           onChange={(e) => setMonth(e.target.value)}
         />
@@ -105,25 +117,25 @@ export default function BudgetPage() {
 
         {(summaryData?.categories ?? []).length > 0 ? (
           <div className="space-y-2">
-            <h2 className="text-sm font-semibold text-gray-700">By Category</h2>
+            <h2 className="text-sm font-semibold text-muted-foreground">By Category</h2>
             {(summaryData?.categories ?? []).map((cat) => {
               const actualNum = Number(cat.actual);
               const budgetNum = cat.budget != null ? Number(cat.budget) : null;
               const pct = budgetNum != null && budgetNum > 0 ? Math.min((actualNum / budgetNum) * 100, 100) : 0;
               return (
-                <div key={cat.category_id ?? "uncategorized"} className="rounded border bg-white p-3">
+                <div key={cat.category_id ?? "uncategorized"} className="rounded-lg border bg-card p-3">
                   <div className="mb-1 flex items-center justify-between text-sm">
-                    <span className={cat.over_budget ? "font-medium text-red-600" : "font-medium"}>{cat.name}</span>
-                    <span className="text-gray-500">
+                    <span className={cat.over_budget ? "font-medium text-destructive" : "font-medium"}>{cat.name}</span>
+                    <span className="text-muted-foreground">
                       {formatIDR(cat.actual)}
                       {cat.budget != null ? ` / ${formatIDR(cat.budget)}` : ""}
-                      {cat.over_budget && <span className="ml-1 text-red-600 font-semibold">over budget</span>}
+                      {cat.over_budget && <span className="ml-1 font-semibold text-destructive">over budget</span>}
                     </span>
                   </div>
                   {budgetNum != null && (
-                    <div className="h-2 w-full rounded bg-gray-100">
+                    <div className="h-2 w-full rounded bg-muted">
                       <div
-                        className={`h-2 rounded ${cat.over_budget ? "bg-red-500" : "bg-blue-500"}`}
+                        className={`h-2 rounded ${cat.over_budget ? "bg-destructive" : "bg-primary"}`}
                         style={{ width: `${pct}%` }}
                       />
                     </div>
@@ -133,163 +145,168 @@ export default function BudgetPage() {
             })}
           </div>
         ) : (
-          <div className="text-sm text-gray-500">No category data for this month.</div>
+          <div className="text-sm text-muted-foreground">No category data for this month.</div>
         )}
       </QueryState>
 
       {/* Cashflow entry form */}
-      <div className="rounded border bg-white p-4">
-        <h2 className="mb-3 text-sm font-semibold">Add Cashflow Entry</h2>
-        <form onSubmit={submitEntry} className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-          <input
-            aria-label="Date"
-            type="date"
-            className={input}
-            value={entryForm.occurred_on}
-            onChange={setEntry("occurred_on")}
-            required
-          />
-          <select
-            aria-label="Direction"
-            className={input}
-            value={entryForm.direction}
-            onChange={setEntry("direction")}
-          >
-            <option value="in">in (income)</option>
-            <option value="out">out (expense)</option>
-          </select>
-          <input
-            aria-label="Amount"
-            className={input}
-            placeholder="Amount"
-            value={entryForm.amount}
-            onChange={setEntry("amount")}
-            required
-          />
-          <input
-            aria-label="Currency"
-            className={input}
-            placeholder="Currency"
-            value={entryForm.currency}
-            onChange={setEntry("currency")}
-          />
-          <select
-            aria-label="Category"
-            className={input}
-            value={entryForm.category_id}
-            onChange={setEntry("category_id")}
-          >
-            <option value="">— no category —</option>
-            {(categories.data ?? []).map((c) => (
-              <option key={c.id} value={c.id}>{c.name}</option>
-            ))}
-          </select>
-          <input
-            aria-label="Note"
-            className={input}
-            placeholder="Note (optional)"
-            value={entryForm.note}
-            onChange={setEntry("note")}
-          />
-          <button
-            type="submit"
-            className="col-span-2 rounded bg-blue-600 px-3 py-1.5 text-sm text-white disabled:opacity-50 sm:col-span-3"
-            disabled={createCashflow.isPending}
-          >
-            {createCashflow.isPending ? "Adding…" : "Add entry"}
-          </button>
-          {createCashflow.error && (
-            <div className="col-span-2 text-sm text-red-600 sm:col-span-3">
-              {(createCashflow.error as Error).message}
-            </div>
-          )}
-        </form>
-      </div>
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm">Add Cashflow Entry</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={submitEntry} className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+            <Input
+              aria-label="Date"
+              type="date"
+              value={entryForm.occurred_on}
+              onChange={setEntry("occurred_on")}
+              required
+            />
+            <select
+              aria-label="Direction"
+              className={nativeSelect}
+              value={entryForm.direction}
+              onChange={setEntry("direction")}
+            >
+              <option value="in">in (income)</option>
+              <option value="out">out (expense)</option>
+            </select>
+            <Input
+              aria-label="Amount"
+              placeholder="Amount"
+              value={entryForm.amount}
+              onChange={setEntry("amount")}
+              required
+            />
+            <Input
+              aria-label="Currency"
+              placeholder="Currency"
+              value={entryForm.currency}
+              onChange={setEntry("currency")}
+            />
+            <select
+              aria-label="Category"
+              className={nativeSelect}
+              value={entryForm.category_id}
+              onChange={setEntry("category_id")}
+            >
+              <option value="">— no category —</option>
+              {(categories.data ?? []).map((c) => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+            <Input
+              aria-label="Note"
+              placeholder="Note (optional)"
+              value={entryForm.note}
+              onChange={setEntry("note")}
+            />
+            <Button
+              type="submit"
+              className="col-span-2 sm:col-span-3"
+              disabled={createCashflow.isPending}
+            >
+              {createCashflow.isPending ? "Adding…" : "Add entry"}
+            </Button>
+            {createCashflow.error && (
+              <div className="col-span-2 text-sm text-destructive sm:col-span-3">
+                {(createCashflow.error as Error).message}
+              </div>
+            )}
+          </form>
+        </CardContent>
+      </Card>
 
       {/* Category form */}
-      <div className="rounded border bg-white p-4">
-        <h2 className="mb-3 text-sm font-semibold">Add Budget Category</h2>
-        <form onSubmit={submitCat} className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-          <input
-            aria-label="Category name"
-            className={input}
-            placeholder="Category name"
-            value={catForm.name}
-            onChange={setCat("name")}
-            required
-          />
-          <select
-            aria-label="Kind"
-            className={input}
-            value={catForm.kind}
-            onChange={setCat("kind")}
-          >
-            <option value="income">income</option>
-            <option value="expense">expense</option>
-          </select>
-          <input
-            aria-label="Monthly budget"
-            className={input}
-            placeholder="Monthly budget (optional)"
-            value={catForm.monthly_budget}
-            onChange={setCat("monthly_budget")}
-          />
-          <button
-            type="submit"
-            className="rounded bg-blue-600 px-3 py-1.5 text-sm text-white disabled:opacity-50"
-            disabled={createCategory.isPending}
-          >
-            Add category
-          </button>
-          {createCategory.error && (
-            <div className="col-span-2 text-sm text-red-600 sm:col-span-4">
-              {(createCategory.error as Error).message}
-            </div>
-          )}
-        </form>
-      </div>
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm">Add Budget Category</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={submitCat} className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <Input
+              aria-label="Category name"
+              placeholder="Category name"
+              value={catForm.name}
+              onChange={setCat("name")}
+              required
+            />
+            <select
+              aria-label="Kind"
+              className={nativeSelect}
+              value={catForm.kind}
+              onChange={setCat("kind")}
+            >
+              <option value="income">income</option>
+              <option value="expense">expense</option>
+            </select>
+            <Input
+              aria-label="Monthly budget"
+              placeholder="Monthly budget (optional)"
+              value={catForm.monthly_budget}
+              onChange={setCat("monthly_budget")}
+            />
+            <Button
+              type="submit"
+              disabled={createCategory.isPending}
+            >
+              Add category
+            </Button>
+            {createCategory.error && (
+              <div className="col-span-2 text-sm text-destructive sm:col-span-4">
+                {(createCategory.error as Error).message}
+              </div>
+            )}
+          </form>
+        </CardContent>
+      </Card>
 
       {/* Recent cashflow list */}
       <QueryState isLoading={cashflow.isLoading} error={cashflow.error}>
-        <div className="rounded border bg-white">
-          <h2 className="border-b px-4 py-2 text-sm font-semibold">Recent Entries</h2>
+        <Card className="overflow-hidden">
+          <CardHeader className="border-b px-4 py-2">
+            <CardTitle className="text-sm">Recent Entries</CardTitle>
+          </CardHeader>
           {(cashflow.data ?? []).length === 0 ? (
-            <div className="p-4 text-sm text-gray-500">No cashflow entries yet.</div>
+            <div className="p-4 text-sm text-muted-foreground">No cashflow entries yet.</div>
           ) : (
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50 text-left text-xs uppercase text-gray-500">
-                <tr>
-                  <th className="p-2">Date</th>
-                  <th className="p-2">Direction</th>
-                  <th className="p-2">Amount</th>
-                  <th className="p-2">Currency</th>
-                  <th className="p-2">Note</th>
-                  <th className="p-2"></th>
-                </tr>
-              </thead>
-              <tbody>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Date</TableHead>
+                  <TableHead>Direction</TableHead>
+                  <TableHead>Amount</TableHead>
+                  <TableHead>Currency</TableHead>
+                  <TableHead>Note</TableHead>
+                  <TableHead />
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {(cashflow.data ?? []).map((cf) => (
-                  <tr key={cf.id} className="border-t">
-                    <td className="p-2">{cf.occurred_on}</td>
-                    <td className="p-2">{cf.direction}</td>
-                    <td className="p-2">{cf.amount}</td>
-                    <td className="p-2">{cf.currency}</td>
-                    <td className="p-2">{cf.note ?? ""}</td>
-                    <td className="p-2 text-right">
-                      <button
+                  <TableRow key={cf.id}>
+                    <TableCell>{cf.occurred_on}</TableCell>
+                    <TableCell>{cf.direction}</TableCell>
+                    <TableCell>{cf.amount}</TableCell>
+                    <TableCell>{cf.currency}</TableCell>
+                    <TableCell>{cf.note ?? ""}</TableCell>
+                    <TableCell className="text-right">
+                      <Button
                         type="button"
+                        variant="ghost"
+                        size="sm"
                         onClick={() => deleteCashflow.mutate(cf.id)}
-                        className="text-xs text-red-600 hover:underline"
+                        className="text-destructive hover:text-destructive"
                       >
                         delete
-                      </button>
-                    </td>
-                  </tr>
+                      </Button>
+                    </TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           )}
-        </div>
+        </Card>
       </QueryState>
     </div>
   );
