@@ -1,70 +1,153 @@
+import { useState } from "react";
+import { ArrowUp, ArrowDown, Clock, Filter, Plus } from "lucide-react";
 import { useSummary, useInstruments } from "../api/hooks";
 import { QueryState } from "../components/QueryState";
-import { formatIDR, formatUSD, formatPct } from "../lib/format";
-import { Card } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { cn } from "@/lib/utils";
+import { formatIDR, formatUSD, formatPct, parseNum } from "../lib/format";
+
+type SortKey = "symbol" | "quantity" | "avg_cost" | "latest_price" | "market_value_idr" | "unrealized_pnl";
+type SortDir = "asc" | "desc";
 
 export default function HoldingsPage() {
   const summary = useSummary();
   const instruments = useInstruments();
+  const [sort, setSort] = useState<{ key: SortKey; dir: SortDir }>({ key: "market_value_idr", dir: "desc" });
+
   const nameOf = (id: number) => instruments.data?.find((i) => i.id === id)?.symbol ?? `#${id}`;
   const positions = summary.data?.positions ?? [];
 
+  const sorted = [...positions].sort((a, b) => {
+    const av = a[sort.key];
+    const bv = b[sort.key];
+    let r: number;
+    if (sort.key === "symbol") {
+      r = (nameOf(a.instrument_id)).localeCompare(nameOf(b.instrument_id));
+    } else {
+      r = parseNum(av) - parseNum(bv);
+    }
+    return sort.dir === "asc" ? r : -r;
+  });
+
+  const toggleSort = (key: SortKey) =>
+    setSort((s) => ({ key, dir: s.key === key && s.dir === "desc" ? "asc" : "desc" }));
+
+  const th = (key: SortKey, label: string, right?: boolean) => (
+    <th
+      className={"sortable" + (right ? " r" : "")}
+      onClick={() => toggleSort(key)}
+      aria-sort={sort.key === key ? (sort.dir === "asc" ? "ascending" : "descending") : "none"}
+    >
+      <span style={{ display: "inline-flex", alignItems: "center", gap: 4, flexDirection: right ? "row-reverse" : "row" }}>
+        {label}
+        {sort.key === key && (
+          sort.dir === "asc"
+            ? <ArrowUp size={12} strokeWidth={2.6} />
+            : <ArrowDown size={12} strokeWidth={2.6} />
+        )}
+      </span>
+    </th>
+  );
+
+  const totalMv = summary.data?.net_worth_idr ?? "0";
+  const sub = `${positions.length} instrumen · nilai pasar ${formatIDR(totalMv)}`;
+
   return (
-    <div className="space-y-4">
-      <h1 className="text-xl font-semibold">Holdings</h1>
+    <div>
+      {/* Page header */}
+      <div className="flex items-center justify-between" style={{ marginBottom: 18, flexWrap: "wrap", gap: 12 }}>
+        <div>
+          <h1 className="t-h1">Holdings</h1>
+          <div className="t-sm t-muted" style={{ marginTop: 2 }}>{sub}</div>
+        </div>
+        <div className="flex items-center" style={{ gap: 8 }}>
+          <button type="button" className="btn btn-outline btn-sm" aria-label="Filter holdings">
+            <Filter size={15} />
+            Filter
+          </button>
+          <button type="button" className="btn btn-primary btn-sm" aria-label="Tambah holding">
+            <Plus size={15} />
+            Tambah
+          </button>
+        </div>
+      </div>
+
       <QueryState isLoading={summary.isLoading} error={summary.error}>
-        <Card className="overflow-hidden">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Instrument</TableHead>
-                <TableHead>Qty</TableHead>
-                <TableHead>Avg cost</TableHead>
-                <TableHead>Price</TableHead>
-                <TableHead>Value (IDR)</TableHead>
-                <TableHead>Unrealized</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {positions.map((p) => (
-                <TableRow key={p.instrument_id}>
-                  <TableCell className="font-medium">
-                    {nameOf(p.instrument_id)}
-                    {p.price_stale && (
-                      <Badge variant="outline" className="ml-2 border-amber-500 text-amber-600 dark:text-amber-400" title="Price may be outdated">
-                        ⚠ stale
-                      </Badge>
-                    )}
-                  </TableCell>
-                  <TableCell>{p.quantity}</TableCell>
-                  <TableCell>{formatUSD(p.avg_cost)}</TableCell>
-                  <TableCell>{formatUSD(p.latest_price)}</TableCell>
-                  <TableCell>{formatIDR(p.market_value_idr)}</TableCell>
-                  <TableCell className={cn(Number(p.unrealized_pnl) >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400")}>
-                    {formatUSD(p.unrealized_pnl)} ({formatPct(((Number(p.unrealized_pnl) / (Number(p.cost_basis_total) || 1)) * 100).toString())})
-                  </TableCell>
-                </TableRow>
-              ))}
-              {positions.length === 0 && (
-                <TableRow>
-                  <TableCell className="text-muted-foreground" colSpan={6}>
-                    No positions yet. Add transactions to see holdings.
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
-        </Card>
+        <div className="card">
+          {sorted.length === 0 ? (
+            <div className="empty">
+              <div className="empty-icon">
+                <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/><path d="M3 5v14a2 2 0 0 0 2 2h16v-5"/><path d="M18 12a2 2 0 0 0 0 4h4v-4Z"/>
+                </svg>
+              </div>
+              <div>
+                <div className="t-h3">Belum ada posisi</div>
+                <div className="t-sm t-muted" style={{ marginTop: 4 }}>
+                  Tambahkan transaksi untuk mulai melacak holdings.
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="table-wrap">
+              <table className="tbl">
+                <thead>
+                  <tr>
+                    {th("symbol", "Instrumen")}
+                    {th("quantity", "Jumlah", true)}
+                    {th("avg_cost", "Avg Cost", true)}
+                    {th("latest_price", "Harga Terakhir", true)}
+                    {th("market_value_idr", "Nilai Pasar", true)}
+                    {th("unrealized_pnl", "Unrealized P&L", true)}
+                  </tr>
+                </thead>
+                <tbody>
+                  {sorted.map((p) => {
+                    const symbol = nameOf(p.instrument_id);
+                    const pnl = parseNum(p.unrealized_pnl);
+                    const costBasis = parseNum(p.cost_basis_total);
+                    const pnlPct = costBasis !== 0 ? (pnl / costBasis) * 100 : 0;
+                    return (
+                      <tr key={p.instrument_id}>
+                        <td>
+                          <div className="flex items-center" style={{ gap: 12 }}>
+                            <div
+                              className="dot"
+                              style={{ background: "hsl(var(--primary))", width: 10, height: 10, flexShrink: 0 }}
+                            />
+                            <div>
+                              <div style={{ fontWeight: 600 }}>{symbol}</div>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="r num">{p.quantity}</td>
+                        <td className="r num t-muted">{formatUSD(p.avg_cost)}</td>
+                        <td className="r">
+                          <div className="flex items-center justify-end" style={{ gap: 8 }}>
+                            {p.price_stale && (
+                              <span className="badge badge-warn" title="Harga mungkin sudah usang">
+                                <Clock size={11} />
+                                stale
+                              </span>
+                            )}
+                            <span className="num">{formatUSD(p.latest_price)}</span>
+                          </div>
+                        </td>
+                        <td className="r num" style={{ fontWeight: 580 }}>{formatIDR(p.market_value_idr)}</td>
+                        <td className="r">
+                          <div className={"num " + (pnl >= 0 ? "gain" : "loss")} style={{ fontWeight: 580 }}>
+                            {pnl >= 0 ? "+" : "−"}{formatUSD(Math.abs(pnl))}
+                          </div>
+                          <div className={"t-xs num " + (pnl >= 0 ? "gain" : "loss")}>
+                            {formatPct(pnlPct)}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
       </QueryState>
     </div>
   );
