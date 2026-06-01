@@ -23,6 +23,7 @@ pub fn router(state: AppState) -> Router {
         .route("/portfolio/summary", get(portfolio::summary))
         .route("/portfolio/history", get(portfolio::history))
         .route("/ingest", post(ingest::ingest))
+        .route("/ingest/csv", post(ingest::ingest_csv))
         .route("/ingest/review", get(ingest::list_review))
         .route("/ingest/review/:id", axum::routing::patch(ingest::patch_review))
         .route("/ingest/review/:id/confirm", post(ingest::confirm_review))

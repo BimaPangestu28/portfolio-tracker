@@ -1,8 +1,10 @@
 use crate::error::AppError;
-use crate::ingestion::ingest::{ingest_batch, UploadFile};
+use crate::ingestion::csv::{parse_csv_rows, ColumnMapping};
+use crate::ingestion::ingest::{ingest_batch, needs_attention, UploadFile};
+use crate::ingestion::matching::{suggest_account, suggest_instrument};
 use crate::ingestion::review::{confirm, reject, ConfirmPayload};
 use crate::llm::claude::ClaudeClient;
-use crate::repo::review_items;
+use crate::repo::review_items::{self, NewReviewItem};
 use crate::AppState;
 use axum::{extract::{Path, Query, State}, Json};
 use serde::Deserialize;
@@ -59,4 +61,32 @@ pub async fn confirm_review(State(s): State<AppState>, Path(id): Path<i64>, Json
 pub async fn reject_review(State(s): State<AppState>, Path(id): Path<i64>) -> Result<Json<()>, AppError> {
     reject(&s.db, id).await.map_err(AppError::Other)?;
     Ok(Json(()))
+}
+
+#[derive(serde::Deserialize)]
+pub struct CsvIngestIn {
+    pub filename: String,
+    pub csv_text: String,
+    pub mapping: std::collections::HashMap<String, String>,
+    pub entry_type_const: Option<String>,
+}
+
+pub async fn ingest_csv(State(s): State<AppState>, Json(b): Json<CsvIngestIn>) -> Result<Json<IngestOut>, AppError> {
+    let mapping: ColumnMapping = b.mapping.into_iter().collect();
+    let entries = parse_csv_rows(&b.csv_text, &mapping, b.entry_type_const.as_deref())
+        .map_err(|e| AppError::BadRequest(e.to_string()))?;
+    let batch_id = format!("csv-{}", chrono::Utc::now().timestamp_millis());
+    let mut items = Vec::new();
+    for entry in &entries {
+        let payload = serde_json::to_string(entry).map_err(|e| AppError::Other(e.into()))?;
+        let sug_ins = match &entry.symbol { Some(x) => suggest_instrument(&s.db, x).await.map_err(AppError::Other)?, None => None };
+        let sug_acc = match &entry.account_hint { Some(x) => suggest_account(&s.db, x).await.map_err(AppError::Other)?, None => None };
+        let row = review_items::create(&s.db, &NewReviewItem {
+            batch_id: &batch_id, source_kind: "csv", source_filename: &b.filename, source_path: "(csv)",
+            doc_type: "csv_import", needs_attention: needs_attention(entry),
+            payload_json: &payload, raw_llm_json: "{}", suggested_instrument_id: sug_ins, suggested_account_id: sug_acc,
+        }).await.map_err(AppError::Other)?;
+        items.push(row);
+    }
+    Ok(Json(IngestOut { batch_id, items }))
 }
