@@ -7,8 +7,9 @@ import {
   PortfolioSummarySchema, SnapshotSchema,
   ReviewItemSchema, IngestResultSchema,
   CashflowCategorySchema, CashflowSchema, MonthSummarySchema,
+  ConnectorSchema, SyncReportSchema,
   type Account, type Category, type Instrument, type Transaction, type ReviewItem,
-  type CashflowCategory, type Cashflow,
+  type CashflowCategory, type Cashflow, type Connector,
 } from "./schemas";
 
 export const useSummary = () =>
@@ -115,3 +116,26 @@ export const useIngestCsv = () =>
   );
 
 export type { CashflowCategory, Cashflow };
+
+// ── Connectors hooks ──────────────────────────────────────────────────────────
+
+export const useConnectors = () =>
+  useQuery({ queryKey: ["connectors"], queryFn: () => api.get("/connectors", z.array(ConnectorSchema)) });
+
+export const useCreateConnector = () =>
+  useInvalidatingMutation(
+    (b: { account_id: number; kind: string; label: string; config_json: string }) =>
+      api.post("/connectors", ConnectorSchema, b),
+    ["connectors"],
+  );
+
+export const useDeleteConnector = () =>
+  useInvalidatingMutation((id: number) => api.del(`/connectors/${id}`), ["connectors"]);
+
+export const useSyncConnector = () =>
+  useInvalidatingMutation(
+    (id: number) => api.post(`/connectors/${id}/sync`, SyncReportSchema, {}),
+    ["connectors", "summary", "transactions", "review"],
+  );
+
+export type { Connector };

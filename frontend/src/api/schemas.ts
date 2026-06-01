@@ -177,3 +177,23 @@ export const MonthSummarySchema = z.object({
   ),
 });
 export type MonthSummary = z.infer<typeof MonthSummarySchema>;
+
+export const ConnectorSchema = z.object({
+  id: z.number(),
+  account_id: z.number(),
+  kind: z.string(),
+  label: z.string(),
+  config_json: z.string(),
+  cursor: z.string().nullable(),
+  last_synced_at: z.string().nullable(),
+  enabled: z.number(),
+  created_at: z.string(),
+});
+export type Connector = z.infer<typeof ConnectorSchema>;
+
+export const SyncReportSchema = z.object({
+  inserted: z.number(),
+  staged: z.number(),
+  skipped: z.number(),
+});
+export type SyncReport = z.infer<typeof SyncReportSchema>;
