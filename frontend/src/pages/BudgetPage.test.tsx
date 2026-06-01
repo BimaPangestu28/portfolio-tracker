@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import BudgetPage from "./BudgetPage";
 
 function renderPage() {
@@ -14,18 +14,24 @@ function renderPage() {
   );
 }
 
-test("renders Income, Expense, Net stat cards and cashflow entry form", async () => {
+test("renders Income, Expense, Net stat cards and cashflow entry button", async () => {
   renderPage();
   await waitFor(() => expect(screen.getByText("Income")).toBeInTheDocument());
   expect(screen.getByText("Expense")).toBeInTheDocument();
   expect(screen.getByText("Net")).toBeInTheDocument();
-  // entry form
-  expect(screen.getByLabelText("Amount")).toBeInTheDocument();
-  expect(screen.getByLabelText("Direction")).toBeInTheDocument();
-  expect(screen.getByText("Add entry")).toBeInTheDocument();
+  // Catat button is always present
+  expect(screen.getByRole("button", { name: /catat arus kas/i })).toBeInTheDocument();
 });
 
 test("shows empty category hint when no categories", async () => {
   renderPage();
   await waitFor(() => expect(screen.getByText(/No category data for this month/i)).toBeInTheDocument());
+});
+
+test("opens add cashflow dialog with Amount and Direction fields", async () => {
+  renderPage();
+  fireEvent.click(screen.getByRole("button", { name: /catat arus kas/i }));
+  await waitFor(() => expect(screen.getByRole("dialog")).toBeInTheDocument());
+  expect(screen.getByLabelText("Amount")).toBeInTheDocument();
+  expect(screen.getByLabelText("Direction")).toBeInTheDocument();
 });
