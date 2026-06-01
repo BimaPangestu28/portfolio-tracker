@@ -63,6 +63,62 @@ export const handlers = [
   ),
   http.get("/api/chat/history", () => HttpResponse.json([])),
   http.post("/api/chat", () => HttpResponse.json({ reply: "Your net worth is Rp 4,875,000." })),
+
+  // ── Phase 5A endpoints ──────────────────────────────────────────────────
+  http.get("/api/portfolio/insights", () =>
+    HttpResponse.json({
+      net_worth_idr: "1520000000",
+      day_delta_idr: "8500000",
+      day_delta_pct: "0.56",
+      savings_rate: "0.32",
+      dividend_ttm_idr: "24000000",
+      yield_pct: "1.58",
+      liquid_idr: "250000000",
+      runway_months: 16,
+      concentration: { symbol: "BBCA", pct: "18.5" },
+      composition: [
+        {
+          as_of: "2026-05-01",
+          total_idr: "1480000000",
+          parts: [
+            { category: "Saham", value_idr: "740000000" },
+            { category: "Crypto", value_idr: "222000000" },
+            { category: "Reksadana", value_idr: "296000000" },
+            { category: "Kas", value_idr: "222000000" },
+          ],
+        },
+        {
+          as_of: "2026-06-01",
+          total_idr: "1520000000",
+          parts: [
+            { category: "Saham", value_idr: "760000000" },
+            { category: "Crypto", value_idr: "228000000" },
+            { category: "Reksadana", value_idr: "304000000" },
+            { category: "Kas", value_idr: "228000000" },
+          ],
+        },
+      ],
+      monthly_income_idr: "18000000",
+      monthly_expense_idr: "12200000",
+    }),
+  ),
+  http.get("/api/goals", () => HttpResponse.json([])),
+  http.post("/api/goals", ({ request }) =>
+    request.json().then((body) => {
+      const b = body as Record<string, unknown>;
+      return HttpResponse.json({
+        id: 1,
+        label: b.label ?? "Dana Darurat",
+        note: b.note ?? null,
+        target_idr: b.target_idr ?? "100000000",
+        current_kind: b.current_kind ?? "savings",
+        current_idr: b.current_idr ?? "0",
+        sort_order: b.sort_order ?? 0,
+        created_at: "2026-06-01T00:00:00Z",
+      });
+    }),
+  ),
+  http.delete("/api/goals/:id", () => HttpResponse.json(null)),
 ];
 
 export const server = setupServer(...handlers);

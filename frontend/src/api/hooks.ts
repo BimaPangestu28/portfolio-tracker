@@ -9,8 +9,9 @@ import {
   CashflowCategorySchema, CashflowSchema, MonthSummarySchema,
   ConnectorSchema, SyncReportSchema,
   ChatMessageSchema, ChatReplySchema,
+  InsightsSchema, GoalSchema,
   type Account, type Category, type Instrument, type Transaction, type ReviewItem,
-  type CashflowCategory, type Cashflow, type Connector,
+  type CashflowCategory, type Cashflow, type Connector, type Goal,
 } from "./schemas";
 
 export const useSummary = () =>
@@ -140,6 +141,28 @@ export const useSyncConnector = () =>
   );
 
 export type { Connector };
+
+// ── Phase 5A: Insights + Goals hooks ──────────────────────────────────────
+
+export const useInsights = () =>
+  useQuery({
+    queryKey: ["insights"],
+    queryFn: () => api.get("/portfolio/insights", InsightsSchema),
+  });
+
+export const useGoals = () =>
+  useQuery({ queryKey: ["goals"], queryFn: () => api.get("/goals", z.array(GoalSchema)) });
+
+export const useCreateGoal = () =>
+  useInvalidatingMutation(
+    (b: Omit<Goal, "id" | "created_at">) => api.post("/goals", GoalSchema, b),
+    ["goals"],
+  );
+
+export const useDeleteGoal = () =>
+  useInvalidatingMutation((id: number) => api.del(`/goals/${id}`), ["goals"]);
+
+export type { Goal };
 
 // ── Chat hooks ─────────────────────────────────────────────────────────────
 

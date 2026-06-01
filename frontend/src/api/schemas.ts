@@ -211,3 +211,60 @@ export const ChatReplySchema = z.object({
   reply: z.string(),
 });
 export type ChatReply = z.infer<typeof ChatReplySchema>;
+
+// ── Phase 5A: Insights endpoint ───────────────────────────────────────────
+
+export const InsightsSchema = z.object({
+  /** Net worth in IDR (returned as string from API) */
+  net_worth_idr: z.string(),
+  /** Day-over-day delta in IDR (string) */
+  day_delta_idr: z.string(),
+  /** Day-over-day delta as a percentage (string, e.g. "1.25") */
+  day_delta_pct: z.string(),
+  /** Savings rate, e.g. "0.32" (string) */
+  savings_rate: z.string(),
+  /** Trailing-twelve-months dividend income in IDR (string) */
+  dividend_ttm_idr: z.string(),
+  /** Portfolio yield percentage (string) */
+  yield_pct: z.string(),
+  /** Liquid assets in IDR (string) */
+  liquid_idr: z.string(),
+  /** Emergency fund runway in months (number) */
+  runway_months: z.number(),
+  /** Largest concentration position, or null if empty */
+  concentration: z
+    .object({ symbol: z.string(), pct: z.string() })
+    .nullable(),
+  /** Composition time-series for the stacked-area chart */
+  composition: z.array(
+    z.object({
+      as_of: z.string(),
+      total_idr: z.string(),
+      parts: z.array(
+        z.object({ category: z.string(), value_idr: z.string() }),
+      ),
+    }),
+  ),
+  /** Monthly income in IDR (string) */
+  monthly_income_idr: z.string(),
+  /** Monthly expense in IDR (string) */
+  monthly_expense_idr: z.string(),
+});
+export type Insights = z.infer<typeof InsightsSchema>;
+
+// ── Phase 5A: Goals endpoint ──────────────────────────────────────────────
+
+export const GoalSchema = z.object({
+  id: z.number(),
+  label: z.string(),
+  note: z.string().nullable().optional(),
+  /** Target amount in IDR (string) */
+  target_idr: z.string(),
+  /** How the "current" progress is computed: "portfolio" | "savings" | "manual" */
+  current_kind: z.string(),
+  /** Current progress amount in IDR (string) */
+  current_idr: z.string(),
+  sort_order: z.number(),
+  created_at: z.string(),
+});
+export type Goal = z.infer<typeof GoalSchema>;
