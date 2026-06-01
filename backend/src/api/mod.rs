@@ -2,6 +2,7 @@ pub mod cashflow;
 pub mod chat;
 pub mod connectors;
 pub mod crud;
+pub mod goals;
 pub mod ingest;
 pub mod portfolio;
 pub mod whatsapp;
@@ -29,6 +30,9 @@ pub fn router(state: AppState) -> Router {
         .route("/prices/refresh", post(portfolio::refresh))
         .route("/portfolio/summary", get(portfolio::summary))
         .route("/portfolio/history", get(portfolio::history))
+        .route("/portfolio/insights", get(portfolio::insights))
+        .route("/goals", get(goals::list_goals).post(goals::create_goal))
+        .route("/goals/:id", delete(goals::delete_goal))
         .route("/cashflow", get(cashflow::list_cashflow).post(cashflow::create_cashflow))
         .route("/cashflow/categories", get(cashflow::list_categories).post(cashflow::create_category))
         .route("/cashflow/categories/:id", delete(cashflow::delete_category))
