@@ -1,5 +1,5 @@
 import { NavLink, Outlet, useLocation } from "react-router-dom";
-import { LayoutDashboard, Wallet, ArrowLeftRight, Target, Settings, Upload, PiggyBank, Plug } from "lucide-react";
+import { LayoutDashboard, Wallet, ArrowLeftRight, Target, Settings, Upload, PiggyBank, Plug, MessageSquare } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -24,6 +24,7 @@ const links = [
   { to: "/budget", label: "Budget", icon: PiggyBank, end: false },
   { to: "/import", label: "Import", icon: Upload, end: false },
   { to: "/connectors", label: "Connectors", icon: Plug, end: false },
+  { to: "/chat", label: "Chat", icon: MessageSquare, end: false },
   { to: "/settings", label: "Settings", icon: Settings, end: false },
 ];
 
