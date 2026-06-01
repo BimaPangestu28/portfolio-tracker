@@ -6,6 +6,7 @@ import TransactionsPage from "./pages/TransactionsPage";
 import PlannerPage from "./pages/PlannerPage";
 import SettingsPage from "./pages/SettingsPage";
 import ImportPage from "./pages/ImportPage";
+import BudgetPage from "./pages/BudgetPage";
 
 export default function App() {
   return (
@@ -17,6 +18,7 @@ export default function App() {
         <Route path="planner" element={<PlannerPage />} />
         <Route path="settings" element={<SettingsPage />} />
         <Route path="import" element={<ImportPage />} />
+        <Route path="budget" element={<BudgetPage />} />
       </Route>
     </Routes>
   );
