@@ -1,7 +1,13 @@
 import { useState } from "react";
+import { Trash2 } from "lucide-react";
 import { useCategories, useCreateCategory, useDeleteCategory, useSummary } from "../api/hooks";
 import { QueryState } from "../components/QueryState";
 import { formatPct } from "../lib/format";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { cn } from "@/lib/utils";
 
 export default function PlannerPage() {
   const cats = useCategories();
@@ -11,6 +17,7 @@ export default function PlannerPage() {
   const [form, setForm] = useState({ name: "", target_pct: "", tolerance_band_pct: "" });
 
   const totalTarget = (cats.data ?? []).reduce((acc, c) => acc + Number(c.target_pct), 0);
+  const offTarget = Math.abs(totalTarget - 100) > 0.01;
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -22,22 +29,40 @@ export default function PlannerPage() {
     });
     setForm({ name: "", target_pct: "", tolerance_band_pct: "" });
   };
-  const input = "rounded border px-2 py-1 text-sm";
 
   return (
     <div className="space-y-6">
       <h1 className="text-xl font-semibold">Allocation Planner</h1>
 
-      <form onSubmit={submit} className="grid grid-cols-2 gap-2 rounded border bg-white p-4 sm:grid-cols-4">
-        <input aria-label="Category name" className={input} placeholder="Category name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
-        <input aria-label="Target percent" className={input} placeholder="Target %" value={form.target_pct} onChange={(e) => setForm({ ...form, target_pct: e.target.value })} required />
-        <input aria-label="Tolerance band percent" className={input} placeholder="Tolerance band % (optional)" value={form.tolerance_band_pct} onChange={(e) => setForm({ ...form, tolerance_band_pct: e.target.value })} />
-        <button type="submit" className="rounded bg-blue-600 px-3 py-1.5 text-sm text-white disabled:opacity-50" disabled={create.isPending}>Add category</button>
-        {create.error && <div className="col-span-2 text-sm text-red-600 sm:col-span-4">{(create.error as Error).message}</div>}
-      </form>
+      <Card>
+        <CardContent className="pt-6">
+          <form onSubmit={submit} className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <div className="space-y-1">
+              <Label>Category name</Label>
+              <Input aria-label="Category name" placeholder="Category name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
+            </div>
+            <div className="space-y-1">
+              <Label>Target %</Label>
+              <Input aria-label="Target percent" placeholder="Target %" value={form.target_pct} onChange={(e) => setForm({ ...form, target_pct: e.target.value })} required />
+            </div>
+            <div className="space-y-1">
+              <Label>Tolerance band %</Label>
+              <Input aria-label="Tolerance band percent" placeholder="Tolerance band % (optional)" value={form.tolerance_band_pct} onChange={(e) => setForm({ ...form, tolerance_band_pct: e.target.value })} />
+            </div>
+            <div className="flex items-end">
+              <Button type="submit" className="w-full" disabled={create.isPending}>
+                Add category
+              </Button>
+            </div>
+            {create.error && (
+              <div className="col-span-2 text-sm text-destructive sm:col-span-4">{(create.error as Error).message}</div>
+            )}
+          </form>
+        </CardContent>
+      </Card>
 
-      <div className={`text-sm ${Math.abs(totalTarget - 100) > 0.01 ? "text-amber-600" : "text-gray-500"}`}>
-        Total target: {totalTarget.toFixed(1)}% {Math.abs(totalTarget - 100) > 0.01 ? "(should sum to 100%)" : "✓"}
+      <div className={cn("text-sm", offTarget ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground")}>
+        Total target: {totalTarget.toFixed(1)}% {offTarget ? "(should sum to 100%)" : "✓"}
       </div>
 
       <QueryState isLoading={cats.isLoading} error={cats.error}>
@@ -45,17 +70,28 @@ export default function PlannerPage() {
           {(cats.data ?? []).map((c) => {
             const a = summary.data?.allocation.find((x) => x.category_id === c.id);
             return (
-              <div key={c.id} className="flex items-center justify-between rounded border bg-white p-3 text-sm">
-                <div>
-                  <span className="font-medium">{c.name}</span>
-                  <span className="ml-2 text-gray-500">target {formatPct(c.target_pct)}{c.tolerance_band_pct ? ` ±${c.tolerance_band_pct}%` : ""}</span>
-                  {a && <span className={`ml-2 ${a.out_of_band ? "text-red-600" : "text-gray-600"}`}>actual {formatPct(a.actual_pct)}</span>}
-                </div>
-                <button type="button" onClick={() => del.mutate(c.id)} className="text-xs text-red-600 hover:underline">delete</button>
-              </div>
+              <Card key={c.id}>
+                <CardContent className="flex items-center justify-between py-3 text-sm">
+                  <div>
+                    <span className="font-medium">{c.name}</span>
+                    <span className="ml-2 text-muted-foreground">
+                      target {formatPct(c.target_pct)}
+                      {c.tolerance_band_pct ? ` ±${c.tolerance_band_pct}%` : ""}
+                    </span>
+                    {a && (
+                      <span className={cn("ml-2", a.out_of_band ? "text-destructive" : "text-muted-foreground")}>
+                        actual {formatPct(a.actual_pct)}
+                      </span>
+                    )}
+                  </div>
+                  <Button type="button" variant="ghost" size="icon" aria-label="delete" onClick={() => del.mutate(c.id)} className="text-destructive hover:text-destructive">
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </CardContent>
+              </Card>
             );
           })}
-          {(cats.data ?? []).length === 0 && <div className="text-gray-500">No categories yet.</div>}
+          {(cats.data ?? []).length === 0 && <div className="text-muted-foreground">No categories yet.</div>}
         </div>
       </QueryState>
     </div>
