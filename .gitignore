@@ -9,3 +9,5 @@ frontend/vite.config.d.ts
 backend/data/
 
 .claude/
+whatsapp-gateway/auth_state/
+whatsapp-gateway/node_modules/
