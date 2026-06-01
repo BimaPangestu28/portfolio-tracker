@@ -1,4 +1,5 @@
 pub mod evm;
+pub mod factory;
 pub mod mock;
 
 use async_trait::async_trait;

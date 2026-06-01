@@ -1,4 +1,5 @@
 pub mod cashflow;
+pub mod connectors;
 pub mod crud;
 pub mod ingest;
 pub mod portfolio;
@@ -28,6 +29,9 @@ pub fn router(state: AppState) -> Router {
         .route("/cashflow/categories/:id", delete(cashflow::delete_category))
         .route("/cashflow/summary", get(cashflow::summary))
         .route("/cashflow/:id", delete(cashflow::delete_cashflow))
+        .route("/connectors", get(connectors::list).post(connectors::create))
+        .route("/connectors/:id/sync", post(connectors::sync))
+        .route("/connectors/:id", delete(connectors::delete))
         .route("/ingest", post(ingest::ingest))
         .route("/ingest/csv", post(ingest::ingest_csv))
         .route("/ingest/review", get(ingest::list_review))
