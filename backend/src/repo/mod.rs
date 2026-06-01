@@ -2,6 +2,7 @@ pub mod accounts;
 pub mod cashflow;
 pub mod cashflow_categories;
 pub mod categories;
+pub mod connectors;
 pub mod instruments;
 pub mod transactions;
 pub mod prices;
