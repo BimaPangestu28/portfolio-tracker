@@ -1,5 +1,5 @@
 import { Routes, Route } from "react-router-dom";
-import Layout from "./components/Layout";
+import AppLayout from "./components/AppLayout";
 import DashboardPage from "./pages/DashboardPage";
 import HoldingsPage from "./pages/HoldingsPage";
 import TransactionsPage from "./pages/TransactionsPage";
@@ -12,7 +12,7 @@ import ConnectorsPage from "./pages/ConnectorsPage";
 export default function App() {
   return (
     <Routes>
-      <Route element={<Layout />}>
+      <Route element={<AppLayout />}>
         <Route index element={<DashboardPage />} />
         <Route path="holdings" element={<HoldingsPage />} />
         <Route path="transactions" element={<TransactionsPage />} />
