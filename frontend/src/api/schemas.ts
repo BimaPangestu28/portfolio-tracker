@@ -197,3 +197,17 @@ export const SyncReportSchema = z.object({
   skipped: z.number(),
 });
 export type SyncReport = z.infer<typeof SyncReportSchema>;
+
+export const ChatMessageSchema = z.object({
+  id: z.number(),
+  role: z.string(),
+  content: z.string(),
+  channel: z.string(),
+  created_at: z.string(),
+});
+export type ChatMessage = z.infer<typeof ChatMessageSchema>;
+
+export const ChatReplySchema = z.object({
+  reply: z.string(),
+});
+export type ChatReply = z.infer<typeof ChatReplySchema>;

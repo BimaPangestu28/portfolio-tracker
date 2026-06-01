@@ -8,6 +8,7 @@ import {
   ReviewItemSchema, IngestResultSchema,
   CashflowCategorySchema, CashflowSchema, MonthSummarySchema,
   ConnectorSchema, SyncReportSchema,
+  ChatMessageSchema, ChatReplySchema,
   type Account, type Category, type Instrument, type Transaction, type ReviewItem,
   type CashflowCategory, type Cashflow, type Connector,
 } from "./schemas";
@@ -139,3 +140,16 @@ export const useSyncConnector = () =>
   );
 
 export type { Connector };
+
+// ── Chat hooks ─────────────────────────────────────────────────────────────
+
+export const useChatHistory = () =>
+  useQuery({ queryKey: ["chat-history"], queryFn: () => api.get("/chat/history", z.array(ChatMessageSchema)) });
+
+export const useSendChat = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (message: string) => api.post("/chat", ChatReplySchema, { message }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["chat-history"] }); },
+  });
+};

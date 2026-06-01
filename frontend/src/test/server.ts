@@ -61,6 +61,8 @@ export const handlers = [
   http.post("/api/connectors/:id/sync", () =>
     HttpResponse.json({ inserted: 0, staged: 0, skipped: 0 }),
   ),
+  http.get("/api/chat/history", () => HttpResponse.json([])),
+  http.post("/api/chat", () => HttpResponse.json({ reply: "Your net worth is Rp 4,875,000." })),
 ];
 
 export const server = setupServer(...handlers);
