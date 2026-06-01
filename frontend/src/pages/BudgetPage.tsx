@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import ReactDOM from "react-dom";
 import { Plus, ArrowDown, ArrowUp, Scale, Check, X } from "lucide-react";
+import { toast } from "sonner";
 import {
   useCashflow,
   useCashflowCategories,
@@ -112,6 +113,7 @@ export default function BudgetPage() {
       },
       {
         onSuccess: () => {
+          toast.success("Transaksi kas ditambahkan");
           setEntryForm({
             occurred_on: new Date().toISOString().slice(0, 10),
             direction: "out",
@@ -122,6 +124,7 @@ export default function BudgetPage() {
           });
           setEntryOpen(false);
         },
+        onError: (err) => toast.error((err as Error).message),
       },
     );
   };
@@ -137,9 +140,11 @@ export default function BudgetPage() {
       },
       {
         onSuccess: () => {
+          toast.success("Kategori ditambahkan");
           setCatForm({ name: "", kind: "expense", monthly_budget: "" });
           setCatOpen(false);
         },
+        onError: (err) => toast.error((err as Error).message),
       },
     );
   };
@@ -314,7 +319,12 @@ export default function BudgetPage() {
                         type="button"
                         className="icon-btn"
                         style={{ width: 26, height: 26 }}
-                        onClick={() => deleteCashflow.mutate(f.id)}
+                        onClick={() =>
+                          deleteCashflow.mutate(f.id, {
+                            onSuccess: () => toast.success("Entri dihapus"),
+                            onError: (err) => toast.error((err as Error).message),
+                          })
+                        }
                         aria-label={`Hapus entri ${f.id}`}
                       >
                         <X size={13} />

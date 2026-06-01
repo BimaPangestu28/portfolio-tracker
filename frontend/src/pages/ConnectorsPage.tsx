@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import ReactDOM from "react-dom";
 import { Plus, RefreshCw, Check, X, Coins, Landmark, Plug } from "lucide-react";
+import { toast } from "sonner";
 import {
   useConnectors,
   useCreateConnector,
@@ -107,9 +108,11 @@ export default function ConnectorsPage() {
       { account_id: 0, kind: form.kind, label: form.label, config_json: config },
       {
         onSuccess: () => {
+          toast.success("Connector ditambahkan");
           setForm(EMPTY_FORM);
           setOpen(false);
         },
+        onError: (err) => toast.error((err as Error).message),
       },
     );
   };
@@ -120,8 +123,13 @@ export default function ConnectorsPage() {
       onSuccess: (report) => {
         setSyncResults((prev) => ({ ...prev, [id]: report }));
         setSyncing(null);
+        const { inserted, staged, skipped } = report;
+        toast.success(`Sync selesai — ${inserted} baru, ${staged} staged, ${skipped} dilewati`);
       },
-      onError: () => setSyncing(null),
+      onError: (err) => {
+        setSyncing(null);
+        toast.error((err as Error).message);
+      },
     });
   };
 

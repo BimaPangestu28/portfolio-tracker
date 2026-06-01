@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { toast } from "sonner";
 import {
   useReviewItems,
   useIngest,
@@ -122,8 +123,10 @@ function ReviewCard({
           currency: form.currency,
         },
       });
+      toast.success("Transaksi dikonfirmasi");
     } catch (err) {
       setActionError(err instanceof Error ? err.message : "Konfirmasi gagal");
+      toast.error(err instanceof Error ? err.message : "Konfirmasi gagal");
     }
   };
 
@@ -245,7 +248,12 @@ function ReviewCard({
         <button
           type="button"
           className="btn btn-ghost btn-sm"
-          onClick={() => reject.mutate(item.id)}
+          onClick={() =>
+            reject.mutate(item.id, {
+              onSuccess: () => toast.success("Item ditolak"),
+              onError: (err) => toast.error((err as Error).message),
+            })
+          }
           disabled={reject.isPending}
           aria-label="Tolak item ini"
         >
@@ -281,7 +289,10 @@ export default function ImportPage() {
     try {
       const uploads: UploadFileIn[] = [];
       for (const f of Array.from(fileList)) uploads.push(await readFileAsUpload(f));
-      await ingest.mutateAsync(uploads);
+      const result = await ingest.mutateAsync(uploads);
+      toast.success(`${result.items.length} item diantrekan untuk review`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Upload gagal");
     } finally {
       setBusy(false);
     }

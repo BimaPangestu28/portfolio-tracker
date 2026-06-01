@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import ReactDOM from "react-dom";
 import { Plus, Check, X, CheckCircle, AlertTriangle, Trash2 } from "lucide-react";
+import { toast } from "sonner";
 import { useCategories, useCreateCategory, useDeleteCategory, useSummary } from "../api/hooks";
 import { QueryState } from "../components/QueryState";
 import { formatIDR, formatPct, parseNum } from "../lib/format";
@@ -91,9 +92,11 @@ export default function PlannerPage() {
       },
       {
         onSuccess: () => {
+          toast.success("Kategori alokasi ditambahkan");
           setForm({ name: "", target_pct: "", tolerance_band_pct: "" });
           setOpen(false);
         },
+        onError: (err) => toast.error((err as Error).message),
       },
     );
   };
@@ -201,7 +204,12 @@ export default function PlannerPage() {
                         type="button"
                         className="icon-btn"
                         style={{ width: 26, height: 26 }}
-                        onClick={() => del.mutate(c.id)}
+                        onClick={() =>
+                          del.mutate(c.id, {
+                            onSuccess: () => toast.success(`Kategori "${c.name}" dihapus`),
+                            onError: (err) => toast.error((err as Error).message),
+                          })
+                        }
                         aria-label={`Hapus kategori ${c.name}`}
                       >
                         <Trash2 size={13} />
