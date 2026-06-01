@@ -1,4 +1,5 @@
 pub mod cashflow;
+pub mod chat;
 pub mod connectors;
 pub mod crud;
 pub mod ingest;
@@ -11,6 +12,8 @@ use tower_http::cors::CorsLayer;
 pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/health", get(|| async { "ok" }))
+        .route("/chat", post(chat::post_chat))
+        .route("/chat/history", get(chat::history))
         .route("/accounts", get(crud::list_accounts).post(crud::create_account))
         .route("/accounts/:id", delete(crud::delete_account))
         .route("/categories", get(crud::list_categories).post(crud::create_category))
