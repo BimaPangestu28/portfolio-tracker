@@ -18,9 +18,11 @@ Chatbot LLM (Claude) yang bisa **tanya-jawab tentang portfolio** lewat dua chann
   panggilan Claude — bukan loop tool-use multi-langkah. Sederhana, deterministik, gampang dites (mock Claude).
 - **A2. Write via chat (mis. "catat beli 0.1 BTC") DITUNDA** ke follow-up; bila ditambah, harus lewat
   review_item (prinsip "LLM nggak auto-commit"). Tidak di MVP.
-- **A3. In-app channel fully tested; WhatsApp adapter = inbound parser (Meta Cloud API webhook shape)
-  + core bersama; outbound send (Graph API) butuh kredensial → live DITUNDA**, didesain mockable. Verify
-  token webhook via env `WHATSAPP_VERIFY_TOKEN`.
+- **A3. WhatsApp pakai Baileys (`@whiskeysockets/baileys`)** — library Node WhatsApp-Web (pairing QR, tanpa
+  akun Meta Business). Karena Baileys itu JS, ia jalan sebagai **Node sidecar `whatsapp-gateway/`** yang
+  memegang koneksi WA dan menjembatani ke endpoint Rust tipis `POST /chat/whatsapp/inbound` (auth via
+  shared `GATEWAY_TOKEN`). Logika chat tetap di service Rust `answer` yang teruji; gateway tipis & koneksi
+  WA live (scan QR) bersifat manual (tanpa automated test). In-app channel fully tested.
 - **A4. Satu percakapan** (single-user): histori disimpan di tabel `chat_message`. Tidak ada multi-session.
 - **A5. Model** reuse `llm::claude` (Claude Messages API) dari Fase 3A; chat memakai system prompt + pesan
   user berisi pertanyaan + konteks portfolio yang disuntik. Model default sama (`claude-sonnet-4-6`,
