@@ -1,4 +1,5 @@
 mod api;
+mod connectors;
 mod db;
 mod domain;
 mod error;
