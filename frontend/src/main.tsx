@@ -11,7 +11,8 @@ const queryClient = new QueryClient();
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <ThemeProvider defaultTheme="system" storageKey="portfolio-theme">
+    {/* defaultTheme="dark" per Phase 5B spec */}
+    <ThemeProvider defaultTheme="dark" storageKey="portfolio-theme">
       <QueryClientProvider client={queryClient}>
         <BrowserRouter>
           <App />
