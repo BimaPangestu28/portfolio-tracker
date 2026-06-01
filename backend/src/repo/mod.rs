@@ -4,6 +4,7 @@ pub mod cashflow_categories;
 pub mod categories;
 pub mod chat;
 pub mod connectors;
+pub mod goals;
 pub mod instruments;
 pub mod transactions;
 pub mod prices;
