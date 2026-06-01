@@ -28,7 +28,9 @@ import {
 } from "lucide-react";
 import { useTheme } from "@/components/theme-provider";
 import { useRefreshPrices } from "@/api/hooks";
+import { useAuth } from "@/auth/AuthContext";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
 
 /* ── Nav items ──────────────────────────────────────────────────────── */
 
@@ -140,6 +142,7 @@ function NavList({ collapsed, onNavigate }: { collapsed?: boolean; onNavigate?: 
 /* ── Full sidebar (desktop) ─────────────────────────────────────────── */
 
 function Sidebar({ collapsed, onCollapse }: { collapsed: boolean; onCollapse: () => void }) {
+  const { lock } = useAuth();
   return (
     <aside className={cn("pt-sidebar", collapsed && "collapsed")}>
       {/* Brand */}
@@ -158,9 +161,7 @@ function Sidebar({ collapsed, onCollapse }: { collapsed: boolean; onCollapse: ()
         <button
           type="button"
           className="pt-nav-item"
-          onClick={() => {
-            /* Lock: could be wired to auth; no-op for now */
-          }}
+          onClick={lock}
           title="Kunci"
         >
           <Lock size={18} strokeWidth={1.8} />
@@ -189,7 +190,14 @@ function Sidebar({ collapsed, onCollapse }: { collapsed: boolean; onCollapse: ()
 /* ── Mobile sheet ───────────────────────────────────────────────────── */
 
 function MobileSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const { lock } = useAuth();
   if (!open) return null;
+
+  function handleLock() {
+    onClose();
+    lock();
+  }
+
   return (
     <>
       <div className="pt-scrim" onClick={onClose} />
@@ -208,7 +216,7 @@ function MobileSheet({ open, onClose }: { open: boolean; onClose: () => void }) 
           <button
             type="button"
             className="pt-nav-item"
-            onClick={onClose}
+            onClick={handleLock}
             title="Kunci"
           >
             <Lock size={18} strokeWidth={1.8} />
@@ -311,7 +319,12 @@ function Topbar({
       />
 
       <IconBtn
-        onClick={() => refresh.mutate()}
+        onClick={() =>
+          refresh.mutate(undefined, {
+            onSuccess: () => toast.success("Harga diperbarui"),
+            onError: (err) => toast.error((err as Error).message),
+          })
+        }
         title="Perbarui harga"
         className={refresh.isPending ? "animate-spin" : ""}
       >

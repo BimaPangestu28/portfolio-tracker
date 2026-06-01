@@ -1,5 +1,7 @@
 import { Navigate, Routes, Route } from "react-router-dom";
 import AppShell from "./components/AppShell";
+import LoginPage from "./pages/LoginPage";
+import { useAuth } from "./auth/AuthContext";
 
 // Primary 6-item IA pages
 import DashboardPage from "./pages/DashboardPage";
@@ -11,6 +13,15 @@ import ChatPage from "./pages/ChatPage";
 import SettingsPage from "./pages/SettingsPage";
 
 export default function App() {
+  const { isUnlocked } = useAuth();
+
+  // ── Auth gate ─────────────────────────────────────────────────────────────
+  // If not unlocked, show LoginPage (setup or login depending on hasPassword).
+  // This is a frontend-only mock; see AuthContext.tsx for security notes.
+  if (!isUnlocked) {
+    return <LoginPage />;
+  }
+
   return (
     <Routes>
       <Route element={<AppShell />}>

@@ -3,19 +3,38 @@ import { MemoryRouter } from "react-router-dom";
 import { render, screen } from "@testing-library/react";
 import App from "./App";
 import { ThemeProvider } from "@/components/theme-provider";
+import { AuthProvider } from "@/auth/AuthContext";
 
+/**
+ * Tests run in "unlocked (demo)" state — we seed localStorage before render
+ * so the auth gate passes and the AppShell + nav render normally.
+ *
+ * localStorage key "pt-auth-demo" === "1" triggers demo/unlocked path in AuthContext.
+ */
 function renderApp(initialPath = "/") {
+  // Seed demo session so AuthContext.isUnlocked === true from the start
+  localStorage.setItem("pt-auth-demo", "1");
+
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <ThemeProvider defaultTheme="dark" storageKey="test-theme">
-      <QueryClientProvider client={qc}>
-        <MemoryRouter initialEntries={[initialPath]}>
-          <App />
-        </MemoryRouter>
-      </QueryClientProvider>
+      <AuthProvider>
+        <QueryClientProvider client={qc}>
+          <MemoryRouter initialEntries={[initialPath]}>
+            <App />
+          </MemoryRouter>
+        </QueryClientProvider>
+      </AuthProvider>
     </ThemeProvider>,
   );
 }
+
+afterEach(() => {
+  // Clean up auth localStorage between tests
+  localStorage.removeItem("pt-auth-demo");
+  localStorage.removeItem("pt-auth-session");
+  localStorage.removeItem("pt-auth-hash");
+});
 
 test("renders nav with Dashboard link", () => {
   renderApp();
