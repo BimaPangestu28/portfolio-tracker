@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { z } from "zod";
 import { api } from "./client";
+import type { UploadFileIn } from "../lib/upload";
 import {
   AccountSchema, CategorySchema, InstrumentSchema, TransactionSchema,
   PortfolioSummarySchema, SnapshotSchema,
@@ -55,8 +56,6 @@ export const useDeleteInstrument = () => useInvalidatingMutation((id: number) =>
 export const useDeleteTransaction = () => useInvalidatingMutation((id: number) => api.del(`/transactions/${id}`), ["transactions", "summary"]);
 
 export type { Account, Category, Instrument, Transaction };
-
-export interface UploadFileIn { filename: string; media_type: string; data_base64: string }
 
 export const useReviewItems = (status = "pending") =>
   useQuery({ queryKey: ["review", status], queryFn: () => api.get(`/ingest/review?status=${status}`, z.array(ReviewItemSchema)) });

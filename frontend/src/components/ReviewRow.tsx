@@ -20,6 +20,7 @@ export function ReviewRow({ item, instruments, accounts }: { item: ReviewItem; i
   const reject = useRejectReview();
   const createInstrument = useCreateInstrument();
   const createAccount = useCreateAccount();
+  const [actionError, setActionError] = useState<string | null>(null);
 
   // If a symbol is extracted but no instrument is matched, pre-select inline-create so the symbol is visible
   const defaultInstrumentId = item.suggested_instrument_id
@@ -44,44 +45,53 @@ export function ReviewRow({ item, instruments, accounts }: { item: ReviewItem; i
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setForm({ ...form, [k]: e.target.value });
 
   const onConfirm = async () => {
-    let instrumentId = form.instrument_id ? Number(form.instrument_id) : 0;
-    if (form.instrument_id === CREATE_NEW) {
-      const created = await createInstrument.mutateAsync({
-        symbol: form.new_symbol,
-        name: p.instrument_name ?? form.new_symbol,
-        instrument_type: "other",
-        native_currency: form.currency,
-        category_id: null,
-        price_source: "manual",
-        decimals: 8,
-        note: null,
+    setActionError(null);
+    try {
+      let instrumentId = form.instrument_id ? Number(form.instrument_id) : 0;
+      if (form.instrument_id === CREATE_NEW) {
+        const created = await createInstrument.mutateAsync({
+          symbol: form.new_symbol,
+          name: p.instrument_name ?? form.new_symbol,
+          instrument_type: "other",
+          native_currency: form.currency,
+          category_id: null,
+          price_source: "manual",
+          decimals: 8,
+          note: null,
+        });
+        instrumentId = created.id;
+      }
+      let accountId = form.account_id ? Number(form.account_id) : 0;
+      if (form.account_id === CREATE_NEW) {
+        const created = await createAccount.mutateAsync({
+          name: form.new_account_name || "Imported",
+          account_type: "manual",
+          institution: null,
+          native_currency: form.currency,
+          note: null,
+        });
+        accountId = created.id;
+      }
+      if (!instrumentId || !accountId) {
+        setActionError("Select or create both an instrument and an account first.");
+        return;
+      }
+      await confirm.mutateAsync({
+        id: item.id,
+        payload: {
+          account_id: accountId,
+          instrument_id: instrumentId,
+          entry_type: form.entry_type,
+          executed_at: new Date(form.executed_at).toISOString(),
+          quantity: form.quantity,
+          price_native: form.price_native,
+          fee_native: form.fee_native,
+          currency: form.currency,
+        },
       });
-      instrumentId = created.id;
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Confirm failed");
     }
-    let accountId = form.account_id ? Number(form.account_id) : 0;
-    if (form.account_id === CREATE_NEW) {
-      const created = await createAccount.mutateAsync({
-        name: form.new_account_name || "Imported",
-        account_type: "manual",
-        institution: null,
-        native_currency: form.currency,
-        note: null,
-      });
-      accountId = created.id;
-    }
-    await confirm.mutateAsync({
-      id: item.id,
-      payload: {
-        account_id: accountId,
-        instrument_id: instrumentId,
-        entry_type: form.entry_type,
-        executed_at: new Date(form.executed_at).toISOString(),
-        quantity: form.quantity,
-        price_native: form.price_native,
-        fee_native: form.fee_native,
-        currency: form.currency,
-      },
-    });
   };
 
   const input = "w-full rounded border px-1 py-0.5 text-xs";
@@ -150,7 +160,7 @@ export function ReviewRow({ item, instruments, accounts }: { item: ReviewItem; i
         >
           reject
         </button>
-        {confirm.error && <div className="text-xs text-red-600">{(confirm.error as Error).message}</div>}
+        {actionError && <div className="text-xs text-red-600">{actionError}</div>}
       </td>
     </tr>
   );
