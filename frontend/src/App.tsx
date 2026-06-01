@@ -1,28 +1,33 @@
-import { Routes, Route } from "react-router-dom";
-import AppLayout from "./components/AppLayout";
+import { Navigate, Routes, Route } from "react-router-dom";
+import AppShell from "./components/AppShell";
+
+// Primary 6-item IA pages
 import DashboardPage from "./pages/DashboardPage";
-import HoldingsPage from "./pages/HoldingsPage";
-import TransactionsPage from "./pages/TransactionsPage";
+import PortfolioPage from "./pages/PortfolioPage";
 import PlannerPage from "./pages/PlannerPage";
-import SettingsPage from "./pages/SettingsPage";
-import ImportPage from "./pages/ImportPage";
 import BudgetPage from "./pages/BudgetPage";
-import ConnectorsPage from "./pages/ConnectorsPage";
+import DataPage from "./pages/DataPage";
 import ChatPage from "./pages/ChatPage";
+import SettingsPage from "./pages/SettingsPage";
 
 export default function App() {
   return (
     <Routes>
-      <Route element={<AppLayout />}>
+      <Route element={<AppShell />}>
+        {/* ── Primary 6-item IA ── */}
         <Route index element={<DashboardPage />} />
-        <Route path="holdings" element={<HoldingsPage />} />
-        <Route path="transactions" element={<TransactionsPage />} />
+        <Route path="portfolio" element={<PortfolioPage />} />
         <Route path="planner" element={<PlannerPage />} />
-        <Route path="settings" element={<SettingsPage />} />
-        <Route path="import" element={<ImportPage />} />
         <Route path="budget" element={<BudgetPage />} />
-        <Route path="connectors" element={<ConnectorsPage />} />
+        <Route path="data" element={<DataPage />} />
         <Route path="chat" element={<ChatPage />} />
+
+        {/* ── Legacy route redirects ── */}
+        <Route path="holdings" element={<Navigate to="/portfolio" replace />} />
+        <Route path="transactions" element={<Navigate to="/portfolio" replace />} />
+        <Route path="connectors" element={<Navigate to="/data" replace />} />
+        <Route path="import" element={<Navigate to="/data" replace />} />
+        <Route path="settings" element={<SettingsPage />} />
       </Route>
     </Routes>
   );
