@@ -25,6 +25,21 @@ export const handlers = [
       source_path: "p", doc_type: "txn_history", status: "pending", needs_attention: 0,
       payload_json: "{}", raw_llm_json: "{}", created_at: "2026-06-01T00:00:00Z",
     })),
+  http.get("/api/cashflow", () => HttpResponse.json([])),
+  http.get("/api/cashflow/categories", () => HttpResponse.json([])),
+  http.get("/api/cashflow/summary", () =>
+    HttpResponse.json({ month: "2026-06", total_in: "0", total_out: "0", net: "0", categories: [] }),
+  ),
+  http.post("/api/cashflow", () => HttpResponse.json({
+    id: 1, occurred_on: "2026-06-01", direction: "in", amount: "100000",
+    currency: "IDR", created_at: "2026-06-01T00:00:00Z",
+  })),
+  http.delete("/api/cashflow/:id", () => HttpResponse.json(null)),
+  http.post("/api/cashflow/categories", () => HttpResponse.json({
+    id: 1, name: "Food", kind: "expense",
+  })),
+  http.delete("/api/cashflow/categories/:id", () => HttpResponse.json(null)),
+  http.post("/api/ingest/csv", () => HttpResponse.json({ batch_id: "c", items: [] })),
 ];
 
 export const server = setupServer(...handlers);

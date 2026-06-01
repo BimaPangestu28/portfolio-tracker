@@ -6,7 +6,9 @@ import {
   AccountSchema, CategorySchema, InstrumentSchema, TransactionSchema,
   PortfolioSummarySchema, SnapshotSchema,
   ReviewItemSchema, IngestResultSchema,
+  CashflowCategorySchema, CashflowSchema, MonthSummarySchema,
   type Account, type Category, type Instrument, type Transaction, type ReviewItem,
+  type CashflowCategory, type Cashflow,
 } from "./schemas";
 
 export const useSummary = () =>
@@ -75,3 +77,41 @@ export const useRejectReview = () =>
   useInvalidatingMutation((id: number) => api.post(`/ingest/review/${id}/reject`, z.unknown(), {}), ["review"]);
 
 export type { ReviewItem };
+
+// ── Cashflow + Budget hooks ────────────────────────────────────────────────
+
+export const useCashflow = () =>
+  useQuery({ queryKey: ["cashflow"], queryFn: () => api.get("/cashflow", z.array(CashflowSchema)) });
+
+export const useCashflowCategories = () =>
+  useQuery({ queryKey: ["cashflow-categories"], queryFn: () => api.get("/cashflow/categories", z.array(CashflowCategorySchema)) });
+
+export const useMonthSummary = (month: string) =>
+  useQuery({ queryKey: ["cashflow-summary", month], queryFn: () => api.get(`/cashflow/summary?month=${month}`, MonthSummarySchema) });
+
+export const useCreateCashflow = () =>
+  useInvalidatingMutation(
+    (b: Omit<Cashflow, "id" | "created_at">) => api.post("/cashflow", CashflowSchema, b),
+    ["cashflow", "cashflow-summary"],
+  );
+
+export const useDeleteCashflow = () =>
+  useInvalidatingMutation((id: number) => api.del(`/cashflow/${id}`), ["cashflow", "cashflow-summary"]);
+
+export const useCreateCashflowCategory = () =>
+  useInvalidatingMutation(
+    (b: Omit<CashflowCategory, "id">) => api.post("/cashflow/categories", CashflowCategorySchema, b),
+    ["cashflow-categories"],
+  );
+
+export const useDeleteCashflowCategory = () =>
+  useInvalidatingMutation((id: number) => api.del(`/cashflow/categories/${id}`), ["cashflow-categories"]);
+
+export const useIngestCsv = () =>
+  useInvalidatingMutation(
+    (args: { filename: string; csv_text: string; mapping: Record<string, string>; entry_type_const?: string }) =>
+      api.post("/ingest/csv", IngestResultSchema, args),
+    ["review"],
+  );
+
+export type { CashflowCategory, Cashflow };

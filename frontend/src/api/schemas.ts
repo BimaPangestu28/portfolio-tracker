@@ -137,3 +137,43 @@ export const IngestResultSchema = z.object({
   items: z.array(ReviewItemSchema),
 });
 export type IngestResult = z.infer<typeof IngestResultSchema>;
+
+export const CashflowCategorySchema = z.object({
+  id: z.number(),
+  name: z.string(),
+  kind: z.string(),
+  monthly_budget: z.string().nullable().optional(),
+  color: z.string().nullable().optional(),
+});
+export type CashflowCategory = z.infer<typeof CashflowCategorySchema>;
+
+export const CashflowSchema = z.object({
+  id: z.number(),
+  account_id: z.number().nullable().optional(),
+  occurred_on: z.string(),
+  direction: z.string(),
+  amount: z.string(),
+  currency: z.string(),
+  category_id: z.number().nullable().optional(),
+  note: z.string().nullable().optional(),
+  created_at: z.string(),
+});
+export type Cashflow = z.infer<typeof CashflowSchema>;
+
+export const MonthSummarySchema = z.object({
+  month: z.string(),
+  total_in: z.string(),
+  total_out: z.string(),
+  net: z.string(),
+  categories: z.array(
+    z.object({
+      category_id: z.number().nullable(),
+      name: z.string(),
+      kind: z.string(),
+      actual: z.string(),
+      budget: z.string().nullable(),
+      over_budget: z.boolean(),
+    }),
+  ),
+});
+export type MonthSummary = z.infer<typeof MonthSummarySchema>;
