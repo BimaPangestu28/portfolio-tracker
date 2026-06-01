@@ -16,6 +16,16 @@ pub fn spawn(db: Db, interval: Duration) {
                 }
                 Err(e) => tracing::warn!("snapshot build error: {e}"),
             }
+            match crate::repo::connectors::list_enabled(&db).await {
+                Ok(rows) => for row in rows {
+                    if let Ok(conn) = crate::connectors::factory::build(&row) {
+                        if let Err(e) = crate::service::sync::run_sync(&db, &row, conn.as_ref()).await {
+                            tracing::warn!("connector {} sync failed: {e}", row.id);
+                        }
+                    }
+                },
+                Err(e) => tracing::warn!("list connectors failed: {e}"),
+            }
             tokio::time::sleep(interval).await;
         }
     });
