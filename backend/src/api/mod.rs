@@ -4,6 +4,7 @@ pub mod connectors;
 pub mod crud;
 pub mod ingest;
 pub mod portfolio;
+pub mod whatsapp;
 
 use crate::AppState;
 use axum::{routing::{get, post, delete}, Router};
@@ -14,6 +15,7 @@ pub fn router(state: AppState) -> Router {
         .route("/health", get(|| async { "ok" }))
         .route("/chat", post(chat::post_chat))
         .route("/chat/history", get(chat::history))
+        .route("/chat/whatsapp/inbound", post(whatsapp::inbound))
         .route("/accounts", get(crud::list_accounts).post(crud::create_account))
         .route("/accounts/:id", delete(crud::delete_account))
         .route("/categories", get(crud::list_categories).post(crud::create_category))
