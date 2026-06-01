@@ -23,14 +23,14 @@ use crate::repo::chat;
 
 const SYSTEM: &str = "You are a concise personal investment assistant. Answer the user's question using ONLY the portfolio snapshot provided. Amounts are in IDR unless noted. If the snapshot lacks the info, say so briefly. Keep answers short.";
 
-/// Store the user message, build context from the current portfolio, ask Claude, store + return the reply.
+/// Build context, ask Claude, then store BOTH messages only on success (avoids orphaned user msgs).
 pub async fn answer(db: &Db, client: &ClaudeClient, channel: &str, user_msg: &str) -> anyhow::Result<String> {
-    chat::add(db, "user", user_msg, channel).await?;
     let summary = crate::service::portfolio::build_summary(db).await?;
     let context = build_context(&summary);
     let prompt = format!("Portfolio snapshot:\n{context}\n\nUser question: {user_msg}");
     let reply = client.complete(SYSTEM, &[Part::Text(prompt)]).await
         .map_err(|e| anyhow::anyhow!("llm error: {e}"))?;
+    chat::add(db, "user", user_msg, channel).await?;
     chat::add(db, "assistant", &reply, channel).await?;
     Ok(reply)
 }
