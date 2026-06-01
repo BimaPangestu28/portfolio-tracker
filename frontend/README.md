@@ -36,3 +36,26 @@ the field-to-column mapping UI to match CSV headers to recognised fields (`entry
 "Import CSV" calls `POST /ingest/csv`, which stages all rows into the review queue — the same
 confirm/reject workflow used for LLM-extracted entries applies. Note: the CSV parser assumes
 simple comma-separated values with no quoted-comma support.
+
+## Connectors (Phase 2)
+
+### Connectors page (`/connectors`)
+Manage pluggable auto-sync connectors. Currently supports **EVM wallet** connectors that pull
+on-chain native and ERC-20 transfers via a block-explorer API (Etherscan-compatible).
+
+**Adding a connector:** select the account, enter a label, wallet address, optional explorer
+`base_url` (defaults to `https://api.etherscan.io/api`), and optional API key (stored as
+password input). Submitting builds `config_json` and calls `POST /api/connectors`.
+
+**Syncing:** click "Sync now" on any connector row to call `POST /api/connectors/:id/sync`. The
+backend fetches new transfers, deduplicates by `(source, external_id)`, and either inserts
+recognised instruments directly into the ledger or stages unknown token symbols into the Import
+review queue (same confirm/reject workflow). The sync result (`inserted / staged / skipped`)
+is shown inline.
+
+**Exchange connectors** (Binance, etc.) share the same `Connector` trait on the backend and are
+ready to be wired up in a follow-up; the factory currently returns an error for unsupported
+`kind` values.
+
+**Security note:** API keys are stored unencrypted in the connector table. Encryption at rest is
+a planned follow-up.
