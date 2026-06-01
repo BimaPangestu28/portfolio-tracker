@@ -36,3 +36,21 @@ the field-to-column mapping UI to match CSV headers to recognised fields (`entry
 "Import CSV" calls `POST /ingest/csv`, which stages all rows into the review queue — the same
 confirm/reject workflow used for LLM-extracted entries applies. Note: the CSV parser assumes
 simple comma-separated values with no quoted-comma support.
+
+## Connectors (Phase 2)
+
+### Connectors page (`/connectors`)
+Auto-sync connectors that pull on-chain or exchange transactions into the ledger without manual
+CSV exports. Currently supports **EVM wallet** connectors (public explorer API e.g. Etherscan):
+supply a wallet address, label, optional explorer base URL, and optional API key. On sync the
+backend fetches all native transfers and ERC-20 token transfers for the wallet, deduplicates them
+via `(source, external_id)`, and inserts recognised instruments directly into the ledger. Tokens
+whose symbol cannot be matched to a known instrument are **staged to the Import review queue**
+(visible on the Import page) for manual confirmation — the same confirm/reject workflow applies.
+
+The Connectors page shows each connector's kind, label, last-synced timestamp, and provides a
+"Sync now" button that runs the sync immediately and displays the resulting
+`{inserted, staged, skipped}` count inline.
+
+Exchange connectors (Binance, etc.) are trait-ready but the live implementation is deferred to a
+follow-up; they will appear in the same UI once wired up.
