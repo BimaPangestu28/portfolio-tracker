@@ -18,6 +18,10 @@ pub struct NewTransaction {
     pub fx_to_idr: String,
     pub fx_to_usd: String,
     pub note: Option<String>,
+    #[serde(default)]
+    pub source: Option<String>,
+    #[serde(default)]
+    pub external_id: Option<String>,
 }
 
 #[derive(sqlx::FromRow)]
@@ -50,11 +54,12 @@ pub async fn create(db: &Db, t: &NewTransaction) -> anyhow::Result<Transaction> 
     crate::repo::dec(&t.fx_to_usd)?;
     let now = Utc::now().to_rfc3339();
     let id = sqlx::query(
-        "INSERT INTO txn (account_id, instrument_id, txn_type, executed_at, quantity, price_native, fee_native, currency, fx_to_idr, fx_to_usd, note, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)")
+        "INSERT INTO txn (account_id, instrument_id, txn_type, executed_at, quantity, price_native, fee_native, currency, fx_to_idr, fx_to_usd, note, created_at, source, external_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
         .bind(t.account_id).bind(t.instrument_id).bind(&t.txn_type)
         .bind(t.executed_at.to_rfc3339()).bind(&t.quantity).bind(&t.price_native)
         .bind(t.fee_native.clone().unwrap_or_else(|| "0".into()))
         .bind(&t.currency).bind(&t.fx_to_idr).bind(&t.fx_to_usd).bind(&t.note).bind(&now)
+        .bind(&t.source).bind(&t.external_id)
         .execute(db).await?.last_insert_rowid();
     get(db, id).await
 }
@@ -82,6 +87,13 @@ pub async fn delete(db: &Db, id: i64) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Returns the set of external_ids already present for the given source.
+pub async fn existing_external_ids(db: &Db, source: &str) -> anyhow::Result<std::collections::HashSet<String>> {
+    let rows = sqlx::query_as::<_, (String,)>("SELECT external_id FROM txn WHERE source = ? AND external_id IS NOT NULL")
+        .bind(source).fetch_all(db).await?;
+    Ok(rows.into_iter().map(|(e,)| e).collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -95,7 +107,8 @@ mod tests {
         let ins = instruments::create(&db, &instruments::NewInstrument { symbol:"BTC".into(), name:"Bitcoin".into(), instrument_type:"crypto".into(), native_currency:"USD".into(), category_id:None, price_source:"coingecko:bitcoin".into(), decimals:Some(8), note:None }).await.unwrap();
         let nt = NewTransaction { account_id: acc.id, instrument_id: ins.id, txn_type:"buy".into(),
             executed_at: Utc::now(), quantity:"0.5".into(), price_native:"100".into(),
-            fee_native: Some("1".into()), currency:"USD".into(), fx_to_idr:"16000".into(), fx_to_usd:"1".into(), note:None };
+            fee_native: Some("1".into()), currency:"USD".into(), fx_to_idr:"16000".into(), fx_to_usd:"1".into(), note:None,
+            source: None, external_id: None };
         create(&db, &nt).await.unwrap();
         let all = list_for_instrument(&db, ins.id).await.unwrap();
         assert_eq!(all.len(), 1);
@@ -110,9 +123,24 @@ mod tests {
         let ins = instruments::create(&db, &instruments::NewInstrument { symbol:"BTC".into(), name:"B".into(), instrument_type:"crypto".into(), native_currency:"USD".into(), category_id:None, price_source:"manual".into(), decimals:Some(8), note:None }).await.unwrap();
         let bad = NewTransaction { account_id: acc.id, instrument_id: ins.id, txn_type:"buy".into(),
             executed_at: Utc::now(), quantity:"not_a_number".into(), price_native:"100".into(),
-            fee_native: None, currency:"USD".into(), fx_to_idr:"16000".into(), fx_to_usd:"1".into(), note:None };
+            fee_native: None, currency:"USD".into(), fx_to_idr:"16000".into(), fx_to_usd:"1".into(), note:None,
+            source: None, external_id: None };
         assert!(create(&db, &bad).await.is_err());
         // No row must have been persisted.
         assert_eq!(list_all(&db).await.unwrap().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn external_id_dedup_via_unique_index() {
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        let acc = accounts::create(&db, &accounts::NewAccount{ name:"A".into(), account_type:"manual".into(), institution:None, native_currency:"USD".into(), note:None }).await.unwrap();
+        let ins = instruments::create(&db, &instruments::NewInstrument{ symbol:"ETH".into(), name:"e".into(), instrument_type:"crypto".into(), native_currency:"USD".into(), category_id:None, price_source:"manual".into(), decimals:Some(18), note:None }).await.unwrap();
+        let mk = || NewTransaction { account_id: acc.id, instrument_id: ins.id, txn_type:"deposit".into(),
+            executed_at: Utc::now(), quantity:"1".into(), price_native:"0".into(), fee_native:None,
+            currency:"ETH".into(), fx_to_idr:"1".into(), fx_to_usd:"1".into(), note:None,
+            source: Some("evm".into()), external_id: Some("0xabc".into()) };
+        create(&db, &mk()).await.unwrap();
+        assert!(create(&db, &mk()).await.is_err()); // unique index blocks duplicate
+        assert_eq!(existing_external_ids(&db, "evm").await.unwrap().len(), 1);
     }
 }

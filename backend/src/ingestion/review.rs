@@ -53,6 +53,8 @@ pub async fn confirm(db: &Db, item_id: i64, p: &ConfirmPayload) -> anyhow::Resul
         fx_to_idr,
         fx_to_usd,
         note: p.note.clone(),
+        source: None,
+        external_id: None,
     };
     let txn = transactions::create(db, &nt).await?;
     review_items::mark_confirmed(db, item_id, txn.id).await?;
