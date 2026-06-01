@@ -22,6 +22,9 @@ pub async fn create(db: &Db, c: &NewCashflowCategory) -> anyhow::Result<Cashflow
     if c.kind != "income" && c.kind != "expense" {
         anyhow::bail!("kind must be 'income' or 'expense', got '{}'", c.kind);
     }
+    if let Some(b) = c.monthly_budget.as_deref() {
+        crate::repo::dec(b)?;
+    }
     let id = sqlx::query(
         "INSERT INTO cashflow_category (name, kind, monthly_budget, color) VALUES (?,?,?,?)")
         .bind(&c.name).bind(&c.kind).bind(&c.monthly_budget).bind(&c.color)
@@ -77,5 +80,14 @@ mod tests {
             color: None,
         };
         assert!(create(&db, &c).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn rejects_bad_monthly_budget() {
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        let bad = NewCashflowCategory { name: "X".into(), kind: "expense".into(), monthly_budget: Some("notnum".into()), color: None };
+        assert!(create(&db, &bad).await.is_err());
+        // nothing persisted
+        assert_eq!(list(&db).await.unwrap().len(), 0);
     }
 }
