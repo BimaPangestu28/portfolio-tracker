@@ -26,7 +26,7 @@ export const useInstruments = () =>
 export const useTransactions = () =>
   useQuery({ queryKey: ["transactions"], queryFn: () => api.get("/transactions", z.array(TransactionSchema)) });
 
-function useInvalidatingMutation<TInput>(fn: (input: TInput) => Promise<unknown>, keys: string[]) {
+function useInvalidatingMutation<TInput, TData = unknown>(fn: (input: TInput) => Promise<TData>, keys: string[]) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: fn,
