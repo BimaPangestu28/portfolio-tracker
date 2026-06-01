@@ -14,15 +14,23 @@ function wrapper({ children }: { children: React.ReactNode }) {
 
 test("renders chat input and Send button", async () => {
   render(<ChatPage />, { wrapper });
-
   expect(screen.getByLabelText("Chat message")).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: /send/i })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /kirim pesan/i })).toBeInTheDocument();
 });
 
 test("shows empty-history message when no messages exist", async () => {
   render(<ChatPage />, { wrapper });
-
   await waitFor(() =>
     expect(screen.getByText(/no messages yet/i)).toBeInTheDocument(),
   );
+});
+
+test("renders suggestion chips", async () => {
+  render(<ChatPage />, { wrapper });
+  expect(screen.getByRole("button", { name: /rebalancing/i })).toBeInTheDocument();
+});
+
+test("shows WhatsApp sync badge", async () => {
+  render(<ChatPage />, { wrapper });
+  expect(screen.getByText(/Sinkron dengan WhatsApp/)).toBeInTheDocument();
 });
