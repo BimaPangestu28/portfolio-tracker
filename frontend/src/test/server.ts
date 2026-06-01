@@ -40,6 +40,27 @@ export const handlers = [
   })),
   http.delete("/api/cashflow/categories/:id", () => HttpResponse.json(null)),
   http.post("/api/ingest/csv", () => HttpResponse.json({ batch_id: "c", items: [] })),
+  http.get("/api/connectors", () => HttpResponse.json([])),
+  http.post("/api/connectors", ({ request }) =>
+    request.json().then((body) => {
+      const b = body as Record<string, unknown>;
+      return HttpResponse.json({
+        id: 1,
+        account_id: b.account_id ?? 1,
+        kind: b.kind ?? "evm_wallet",
+        label: b.label ?? "test",
+        config_json: b.config_json ?? "{}",
+        cursor: null,
+        last_synced_at: null,
+        enabled: 1,
+        created_at: "2026-06-01T00:00:00Z",
+      });
+    }),
+  ),
+  http.delete("/api/connectors/:id", () => HttpResponse.json(null)),
+  http.post("/api/connectors/:id/sync", () =>
+    HttpResponse.json({ inserted: 0, staged: 0, skipped: 0 }),
+  ),
 ];
 
 export const server = setupServer(...handlers);
