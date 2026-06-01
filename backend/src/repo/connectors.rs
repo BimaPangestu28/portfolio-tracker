@@ -9,6 +9,7 @@ pub struct ConnectorRow {
     pub account_id: i64,
     pub kind: String,
     pub label: String,
+    #[serde(skip)]
     pub config_json: String,
     pub cursor: Option<String>,
     pub last_synced_at: Option<String>,

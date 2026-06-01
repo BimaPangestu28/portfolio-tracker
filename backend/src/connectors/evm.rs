@@ -12,10 +12,10 @@ pub struct EvmConnector {
 }
 
 /// Convert an integer string of base units + decimals to a decimal-string quantity.
-fn from_base_units(raw: &str, decimals: u32) -> String {
-    let v = Decimal::from_str(raw).unwrap_or(Decimal::ZERO);
+fn from_base_units(raw: &str, decimals: u32) -> Result<String, ConnectorError> {
+    let v = Decimal::from_str(raw).map_err(|e| ConnectorError::Parse(format!("value '{raw}' out of range: {e}")))?;
     let scale = Decimal::from(10u64).powu(decimals as u64);
-    (v / scale).normalize().to_string()
+    Ok((v / scale).normalize().to_string())
 }
 
 /// Parse Etherscan `txlist` (native transfers) for `address` into ExternalTxn.
@@ -35,7 +35,7 @@ pub fn parse_txlist(json: &serde_json::Value, address: &str, native_symbol: &str
             external_id: format!("{hash}:native"),
             occurred_at: chrono::DateTime::from_timestamp(ts, 0).map(|d| d.to_rfc3339()).unwrap_or_default(),
             kind: kind.into(), symbol: native_symbol.to_string(),
-            quantity: from_base_units(value, 18), fee: None, currency: native_symbol.to_string(),
+            quantity: from_base_units(value, 18)?, fee: None, currency: native_symbol.to_string(),
         });
     }
     Ok(out)
@@ -58,7 +58,7 @@ pub fn parse_tokentx(json: &serde_json::Value, address: &str) -> Result<Vec<Exte
         out.push(ExternalTxn {
             external_id: format!("{hash}:{symbol}"),
             occurred_at: chrono::DateTime::from_timestamp(ts, 0).map(|d| d.to_rfc3339()).unwrap_or_default(),
-            kind: kind.into(), symbol, quantity: from_base_units(value, decimals), fee: None, currency: "".into(),
+            kind: kind.into(), symbol, quantity: from_base_units(value, decimals)?, fee: None, currency: "".into(),
         });
     }
     Ok(out)
@@ -121,5 +121,13 @@ mod tests {
     #[test]
     fn missing_result_errors() {
         assert!(parse_txlist(&serde_json::json!({}), "0xabc", "ETH").is_err());
+    }
+    #[test]
+    fn oversized_value_errors_not_silent_zero() {
+        // 40-digit raw value exceeds Decimal's ~28-digit capacity
+        let json = serde_json::json!({"result":[
+            {"hash":"0x1","from":"0xother","to":"0xabc","value":"1234567890123456789012345678901234567890","timeStamp":"1700000000"}
+        ]});
+        assert!(parse_txlist(&json, "0xabc", "ETH").is_err());
     }
 }
