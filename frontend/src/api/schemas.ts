@@ -229,8 +229,8 @@ export const InsightsSchema = z.object({
   yield_pct: z.string(),
   /** Liquid assets in IDR (string) */
   liquid_idr: z.string(),
-  /** Emergency fund runway in months (number) */
-  runway_months: z.number(),
+  /** Emergency fund runway in months (string — Decimal serialized as string by the API) */
+  runway_months: z.string(),
   /** Largest concentration position, or null if empty */
   concentration: z
     .object({ symbol: z.string(), pct: z.string() })

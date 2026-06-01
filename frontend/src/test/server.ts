@@ -74,7 +74,7 @@ export const handlers = [
       dividend_ttm_idr: "24000000",
       yield_pct: "1.58",
       liquid_idr: "250000000",
-      runway_months: 16,
+      runway_months: "16",
       concentration: { symbol: "BBCA", pct: "18.5" },
       composition: [
         {
