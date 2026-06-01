@@ -8,6 +8,7 @@ const links = [
   { to: "/settings", label: "Settings" },
   { to: "/import", label: "Import" },
   { to: "/budget", label: "Budget" },
+  { to: "/connectors", label: "Connectors" },
 ];
 
 export default function Layout() {
