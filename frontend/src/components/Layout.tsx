@@ -6,6 +6,7 @@ const links = [
   { to: "/transactions", label: "Transactions" },
   { to: "/planner", label: "Planner" },
   { to: "/settings", label: "Settings" },
+  { to: "/import", label: "Import" },
 ];
 
 export default function Layout() {
