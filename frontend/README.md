@@ -19,3 +19,20 @@ Defaults to `/api` (proxied in dev). Override with `VITE_API_BASE` for productio
 The Import page uploads screenshots/PDFs to `POST /ingest`; the backend (Phase 3A) calls Claude
 to extract candidate entries into a review queue. Review, edit, map/create instrument+account,
 then confirm (writes to the ledger) or reject. Requires `ANTHROPIC_API_KEY` set for the backend.
+
+## Budget / CSV (Phase 3B)
+
+### Budget page (`/budget`)
+Monthly cashflow tracker with Income / Expense / Net stat cards, per-category budget-vs-actual
+progress bars (red when over budget), a cashflow entry form, a budget category form, and a
+recent entries list with delete. Backed by `GET /cashflow`, `GET /cashflow/categories`, and
+`GET /cashflow/summary?month=YYYY-MM`.
+
+### CSV import (Import page)
+The Import page includes a "Or import a CSV" section. Paste or upload a `.csv` file, then use
+the field-to-column mapping UI to match CSV headers to recognised fields (`entry_type`, `symbol`,
+`quantity`, `price_native`, `fee_native`, `currency`, `executed_at`, `account_hint`). An
+`entry_type_const` input supplies a constant entry type when there is no mapped column. Clicking
+"Import CSV" calls `POST /ingest/csv`, which stages all rows into the review queue — the same
+confirm/reject workflow used for LLM-extracted entries applies. Note: the CSV parser assumes
+simple comma-separated values with no quoted-comma support.
