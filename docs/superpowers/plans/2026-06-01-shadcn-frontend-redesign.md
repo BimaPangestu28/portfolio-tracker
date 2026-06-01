@@ -520,7 +520,7 @@ git commit -m "feat(frontend): theme provider + mode toggle, mount Toaster"
 
 ```tsx
 import { NavLink, Outlet, useLocation } from "react-router-dom";
-import { LayoutDashboard, Wallet, ArrowLeftRight, Target, Settings } from "lucide-react";
+import { LayoutDashboard, Wallet, ArrowLeftRight, Target, Settings, Upload, PiggyBank, Plug } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -542,6 +542,9 @@ const links = [
   { to: "/holdings", label: "Holdings", icon: Wallet, end: false },
   { to: "/transactions", label: "Transactions", icon: ArrowLeftRight, end: false },
   { to: "/planner", label: "Planner", icon: Target, end: false },
+  { to: "/budget", label: "Budget", icon: PiggyBank, end: false },
+  { to: "/import", label: "Import", icon: Upload, end: false },
+  { to: "/connectors", label: "Connectors", icon: Plug, end: false },
   { to: "/settings", label: "Settings", icon: Settings, end: false },
 ];
 
@@ -607,6 +610,9 @@ import HoldingsPage from "./pages/HoldingsPage";
 import TransactionsPage from "./pages/TransactionsPage";
 import PlannerPage from "./pages/PlannerPage";
 import SettingsPage from "./pages/SettingsPage";
+import ImportPage from "./pages/ImportPage";
+import BudgetPage from "./pages/BudgetPage";
+import ConnectorsPage from "./pages/ConnectorsPage";
 
 export default function App() {
   return (
@@ -617,6 +623,9 @@ export default function App() {
         <Route path="transactions" element={<TransactionsPage />} />
         <Route path="planner" element={<PlannerPage />} />
         <Route path="settings" element={<SettingsPage />} />
+        <Route path="import" element={<ImportPage />} />
+        <Route path="budget" element={<BudgetPage />} />
+        <Route path="connectors" element={<ConnectorsPage />} />
       </Route>
     </Routes>
   );
@@ -1681,6 +1690,56 @@ Vite + React + TypeScript dashboard for the Phase 1A backend, styled with shadcn
 ```bash
 git add frontend/README.md
 git commit -m "docs(frontend): note shadcn/ui in README"
+```
+
+---
+
+## Task 13: Restyle emergent pages (Import, Budget, Connectors) + CsvImport + ReviewRow
+
+> **Scope note:** these three pages + two components were added to the frontend by parallel work after the spec was written. They are included so the redesign covers ALL current pages and the sidebar nav (already wired in Task 4) has working routes. Apply the same shadcn conventions established in Tasks 5–11.
+
+**Files:**
+- Modify: `src/pages/BudgetPage.tsx`, `src/pages/ConnectorsPage.tsx`, `src/pages/ImportPage.tsx`, `src/components/CsvImport.tsx`, `src/components/ReviewRow.tsx`
+- Tests (existing — keep green): `src/pages/BudgetPage.test.tsx`, `src/pages/ConnectorsPage.test.tsx`, `src/pages/ImportPage.test.tsx`, `src/components/CsvImport.test.tsx`, `src/components/ReviewRow.test.tsx`
+
+**Conventions to apply (same as Tasks 5–11):**
+- Surfaces (`rounded border bg-white`) → shadcn `Card` (`@/components/ui/card`) or token classes `rounded-lg border bg-card`.
+- Text-ish inputs (`rounded border px-2 py-1 text-sm`) → shadcn `Input` (`@/components/ui/input`), keeping each existing `aria-label` and `placeholder` verbatim.
+- Submit/action buttons → shadcn `Button` (`@/components/ui/button`); destructive "delete" → `variant="ghost"`/`text-destructive`. Keep button text identical.
+- Tables → shadcn `Table` family (`@/components/ui/table`).
+- Color utilities → semantic tokens: `text-gray-500`→`text-muted-foreground`, `bg-white`→`bg-card`, `text-red-600`→`text-destructive`, `text-green-*`→`text-emerald-600 dark:text-emerald-400`, `bg-blue-600`→ rely on `Button` default, `bg-gray-100` badge → `Badge`/`bg-muted`, progress-bar `bg-gray-100`→`bg-muted`, fill `bg-blue-500`→`bg-primary`, `bg-red-500`→`bg-destructive`.
+
+**HARD CONSTRAINTS (do not break tests):**
+- **Keep these `<select>` elements NATIVE** (restyle className only) because they have empty-string options that Radix `Select` cannot represent: BudgetPage **Category** (`— no category —`), CsvImport **all 8 `Map <field>` selects** + their `— skip —` option, ReviewRow **Instrument/Account** selects (`Instrument…`/`Account…` + `➕ create new…`). For native selects, use a shadcn-like class, e.g. `"flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"`. Selects WITHOUT an empty option (Budget **Direction**, Budget **Kind**) may stay native too — simplest is to restyle all selects on these pages natively for consistency.
+- Preserve every `aria-label` exactly: Budget — `Month`, `Amount`, `Direction`, `Currency`, `Category`, `Note`, `Date`, `Category name`, `Kind`, `Monthly budget`; Connectors — `Account`, `Connector label`, `Wallet address`, `Explorer base URL`, `API key`, and the dynamic `Sync ${label}`/`Delete ${label}`; CsvImport — `CSV file`, `CSV text`, `Map ${field}` (×8), `Entry type constant`; ReviewRow — `Entry type`, `Instrument`, `Account`, `New instrument symbol`, `New account name`, `Quantity`, `Price`, `Currency`, `Executed at`.
+- Preserve every asserted string exactly: Budget — `Income`, `Expense`, `Net`, `Add entry`, `No category data for this month.`; Connectors — `No connectors yet.`; Import — `Choose screenshots / PDFs` (the test matches `/Choose screenshots/i`), `No pending items. Upload a document to extract transactions.`; CsvImport — `Map CSV columns to fields`, `Import CSV`; ReviewRow — `holdings_snapshot` (the `item.doc_type`), `needs attention`, button text `confirm` and `reject`, and the validation string `Select or create both an instrument and an account first.`
+- ReviewRow renders `<tr>…<td>` and is rendered inside a parent `<table>`. If you convert the ImportPage table to shadcn `Table`, ReviewRow's row must remain a valid `<tr>` with `<td>`s (shadcn `TableCell` renders `<td>`, `TableRow` renders `<tr>`) — either keep ReviewRow as raw `<tr>/<td>` (restyled) inside a `<TableBody>`, or convert it to `TableRow/TableCell`. Keep the cell count (9) consistent with the header.
+- Do NOT change any logic, hook calls, mutation payloads, or `data-*`/value semantics — visual/className changes only (plus native→shadcn element swaps that preserve labels).
+
+- [ ] **Step 1: Restyle `src/pages/BudgetPage.tsx`** — wrap the month header, the three forms, and the recent-entries list in `Card`; swap text inputs for `Input` and the submit/delete buttons for `Button`; convert the recent-entries table to shadcn `Table`; keep Category/Direction/Kind selects native (restyled); map colors to tokens. Keep `StatCard` usage as-is (already shadcn from Task 5).
+
+- [ ] **Step 2: Restyle `src/pages/ConnectorsPage.tsx`** — sections → `Card` with `CardHeader`/`CardTitle` ("Add EVM Wallet Connector", "Active Connectors"); form fields → `Input` (keep the native Account select restyled); buttons → `Button` (Sync = default, delete = ghost/destructive); the `kind` chip → `Badge`; sync-result line → `text-emerald-600 dark:text-emerald-400`; keep `No connectors yet.`.
+
+- [ ] **Step 3: Restyle `src/pages/ImportPage.tsx`** — dropzone → `Card` with dashed border (`border-2 border-dashed`); the upload `<label>`/`<span>` trigger keeps text `Choose screenshots / PDFs` / `Extracting…`; table → shadcn `Table` (or restyled native) wrapping `ReviewRow`s; keep `No pending items…` empty state. Render `<CsvImport/>` unchanged in place.
+
+- [ ] **Step 4: Restyle `src/components/CsvImport.tsx`** — outer surface → `Card`; the `.csv` file input label + textarea keep `aria-label`s `CSV file`/`CSV text`; mapping `<select aria-label="Map …">` stay native (restyled, keep `— skip —`); `Entry type constant` input → `Input` (keep aria-label); `Import CSV` button → `Button`; success/error lines → token colors. Keep `Map CSV columns to fields` heading.
+
+- [ ] **Step 5: Restyle `src/components/ReviewRow.tsx`** — keep `<tr>/<td>` structure (or `TableRow/TableCell`); `doc_type` chip → `Badge`/`bg-muted`; `needs attention` → token amber; text `<input>`s → `Input` (small) keeping aria-labels; Instrument/Account/Entry-type selects stay native (restyled); `confirm` → `Button size="sm"`, `reject` → `Button variant="secondary" size="sm"`; keep button text `confirm`/`reject` and the validation message.
+
+- [ ] **Step 6: Verify**
+
+Run: `npm test -- src/pages/BudgetPage.test.tsx src/pages/ConnectorsPage.test.tsx src/pages/ImportPage.test.tsx src/components/CsvImport.test.tsx src/components/ReviewRow.test.tsx`
+Expected: all PASS.
+Run: `npm test`
+Expected: ALL suites PASS.
+Run: `npm run build`
+Expected: PASS.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add frontend/src/pages/BudgetPage.tsx frontend/src/pages/ConnectorsPage.tsx frontend/src/pages/ImportPage.tsx frontend/src/components/CsvImport.tsx frontend/src/components/ReviewRow.tsx
+git commit -m "feat(frontend): restyle budget/import/connectors + csv/review to shadcn"
 ```
 
 ---
