@@ -1,9 +1,16 @@
 import { useState } from "react";
 import { useConfirmReview, useRejectReview, useCreateInstrument, useCreateAccount } from "../api/hooks";
 import { ExtractedEntrySchema, type ReviewItem, type Instrument, type Account } from "../api/schemas";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { TableCell, TableRow } from "@/components/ui/table";
 
 const ENTRY_TYPES = ["buy", "sell", "dividend", "interest", "fee", "deposit", "withdrawal", "opening_balance"];
 const CREATE_NEW = "__new__";
+
+const nativeSelect =
+  "flex h-7 w-full rounded-md border border-input bg-transparent px-2 py-0.5 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring";
 
 function parsePayload(json: string) {
   try {
@@ -94,74 +101,86 @@ export function ReviewRow({ item, instruments, accounts }: { item: ReviewItem; i
     }
   };
 
-  const input = "w-full rounded border px-1 py-0.5 text-xs";
   return (
-    <tr className="border-t align-top">
-      <td className="p-1 text-xs">
-        <span className="rounded bg-gray-100 px-1">{item.doc_type}</span>
-        {item.needs_attention === 1 && <div className="mt-1 rounded bg-amber-100 px-1 text-amber-700">needs attention</div>}
-        <div className="mt-1 text-gray-400">{item.source_filename}</div>
-      </td>
-      <td className="p-1">
-        <select aria-label="Entry type" className={input} value={form.entry_type} onChange={set("entry_type")}>
+    <TableRow className="align-top">
+      <TableCell className="p-1 text-xs">
+        <Badge variant="secondary" className="px-1">{item.doc_type}</Badge>
+        {item.needs_attention === 1 && (
+          <div className="mt-1 rounded bg-amber-100 px-1 text-xs text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">needs attention</div>
+        )}
+        <div className="mt-1 text-muted-foreground">{item.source_filename}</div>
+      </TableCell>
+      <TableCell className="p-1">
+        <select aria-label="Entry type" className={nativeSelect} value={form.entry_type} onChange={set("entry_type")}>
           {ENTRY_TYPES.map((t) => <option key={t}>{t}</option>)}
         </select>
-      </td>
-      <td className="p-1">
-        <select aria-label="Instrument" className={input} value={form.instrument_id} onChange={set("instrument_id")}>
+      </TableCell>
+      <TableCell className="p-1">
+        <select aria-label="Instrument" className={nativeSelect} value={form.instrument_id} onChange={set("instrument_id")}>
           <option value="">Instrument…</option>
           {instruments.map((i) => <option key={i.id} value={i.id}>{i.symbol}</option>)}
           <option value={CREATE_NEW}>➕ create new…</option>
         </select>
         {form.instrument_id === CREATE_NEW && (
-          <input
+          <Input
             aria-label="New instrument symbol"
-            className={`${input} mt-1`}
+            className="mt-1 h-7 text-xs"
             placeholder="symbol"
             value={form.new_symbol}
             onChange={set("new_symbol")}
           />
         )}
-      </td>
-      <td className="p-1">
-        <select aria-label="Account" className={input} value={form.account_id} onChange={set("account_id")}>
+      </TableCell>
+      <TableCell className="p-1">
+        <select aria-label="Account" className={nativeSelect} value={form.account_id} onChange={set("account_id")}>
           <option value="">Account…</option>
           {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
           <option value={CREATE_NEW}>➕ create new…</option>
         </select>
         {form.account_id === CREATE_NEW && (
-          <input
+          <Input
             aria-label="New account name"
-            className={`${input} mt-1`}
+            className="mt-1 h-7 text-xs"
             placeholder="account name"
             value={form.new_account_name}
             onChange={set("new_account_name")}
           />
         )}
-      </td>
-      <td className="p-1"><input aria-label="Quantity" className={input} value={form.quantity} onChange={set("quantity")} /></td>
-      <td className="p-1"><input aria-label="Price" className={input} value={form.price_native} onChange={set("price_native")} /></td>
-      <td className="p-1"><input aria-label="Currency" className={input} value={form.currency} onChange={set("currency")} /></td>
-      <td className="p-1"><input aria-label="Executed at" type="datetime-local" className={input} value={form.executed_at} onChange={set("executed_at")} /></td>
-      <td className="p-1 whitespace-nowrap">
-        <button
+      </TableCell>
+      <TableCell className="p-1">
+        <Input aria-label="Quantity" className="h-7 text-xs" value={form.quantity} onChange={set("quantity")} />
+      </TableCell>
+      <TableCell className="p-1">
+        <Input aria-label="Price" className="h-7 text-xs" value={form.price_native} onChange={set("price_native")} />
+      </TableCell>
+      <TableCell className="p-1">
+        <Input aria-label="Currency" className="h-7 text-xs" value={form.currency} onChange={set("currency")} />
+      </TableCell>
+      <TableCell className="p-1">
+        <Input aria-label="Executed at" type="datetime-local" className="h-7 text-xs" value={form.executed_at} onChange={set("executed_at")} />
+      </TableCell>
+      <TableCell className="p-1 whitespace-nowrap">
+        <Button
           type="button"
+          size="sm"
           onClick={onConfirm}
           disabled={confirm.isPending}
-          className="rounded bg-green-600 px-2 py-0.5 text-xs text-white disabled:opacity-50"
+          className="h-6 px-2 text-xs"
         >
           confirm
-        </button>
-        <button
+        </Button>
+        <Button
           type="button"
+          variant="secondary"
+          size="sm"
           onClick={() => reject.mutate(item.id)}
           disabled={reject.isPending}
-          className="ml-1 rounded bg-gray-200 px-2 py-0.5 text-xs"
+          className="ml-1 h-6 px-2 text-xs"
         >
           reject
-        </button>
-        {actionError && <div className="text-xs text-red-600">{actionError}</div>}
-      </td>
-    </tr>
+        </Button>
+        {actionError && <div className="text-xs text-destructive">{actionError}</div>}
+      </TableCell>
+    </TableRow>
   );
 }

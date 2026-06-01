@@ -8,8 +8,13 @@ import {
 } from "../api/hooks";
 import { QueryState } from "../components/QueryState";
 import type { SyncReport } from "../api/schemas";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 
-const input = "rounded border px-2 py-1 text-sm";
+const nativeSelect =
+  "flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring";
 
 export default function ConnectorsPage() {
   const accounts = useAccounts();
@@ -67,122 +72,130 @@ export default function ConnectorsPage() {
     <div className="space-y-8">
       <h1 className="text-xl font-semibold">Connectors</h1>
 
-      <section className="space-y-2">
-        <h2 className="font-semibold">Add EVM Wallet Connector</h2>
-        <form
-          onSubmit={submit}
-          className="grid grid-cols-2 gap-2 rounded border bg-white p-4 sm:grid-cols-3"
-        >
-          <select
-            aria-label="Account"
-            className={input}
-            value={form.account_id}
-            onChange={set("account_id")}
-            required
+      <Card>
+        <CardHeader>
+          <CardTitle>Add EVM Wallet Connector</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <form
+            onSubmit={submit}
+            className="grid grid-cols-2 gap-2 sm:grid-cols-3"
           >
-            <option value="">Account…</option>
-            {(accounts.data ?? []).map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.name}
-              </option>
-            ))}
-          </select>
+            <select
+              aria-label="Account"
+              className={nativeSelect}
+              value={form.account_id}
+              onChange={set("account_id")}
+              required
+            >
+              <option value="">Account…</option>
+              {(accounts.data ?? []).map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.name}
+                </option>
+              ))}
+            </select>
 
-          <input
-            aria-label="Connector label"
-            className={input}
-            placeholder="Label"
-            value={form.label}
-            onChange={set("label")}
-            required
-          />
+            <Input
+              aria-label="Connector label"
+              placeholder="Label"
+              value={form.label}
+              onChange={set("label")}
+              required
+            />
 
-          <input
-            aria-label="Wallet address"
-            className={input}
-            placeholder="0x… wallet address"
-            value={form.address}
-            onChange={set("address")}
-            required
-          />
+            <Input
+              aria-label="Wallet address"
+              placeholder="0x… wallet address"
+              value={form.address}
+              onChange={set("address")}
+              required
+            />
 
-          <input
-            aria-label="Explorer base URL"
-            className={input}
-            placeholder="Explorer base URL (optional)"
-            value={form.base_url}
-            onChange={set("base_url")}
-          />
+            <Input
+              aria-label="Explorer base URL"
+              placeholder="Explorer base URL (optional)"
+              value={form.base_url}
+              onChange={set("base_url")}
+            />
 
-          <input
-            aria-label="API key"
-            className={input}
-            placeholder="API key (optional)"
-            value={form.api_key}
-            onChange={set("api_key")}
-          />
+            <Input
+              aria-label="API key"
+              placeholder="API key (optional)"
+              value={form.api_key}
+              onChange={set("api_key")}
+            />
 
-          <button
-            type="submit"
-            className="rounded bg-blue-600 px-3 py-1 text-sm text-white disabled:opacity-50 sm:col-start-3"
-            disabled={createConnector.isPending}
-          >
-            {createConnector.isPending ? "Adding…" : "Add connector"}
-          </button>
+            <Button
+              type="submit"
+              className="sm:col-start-3"
+              disabled={createConnector.isPending}
+            >
+              {createConnector.isPending ? "Adding…" : "Add connector"}
+            </Button>
 
-          {createConnector.error && (
-            <div className="col-span-2 text-sm text-red-600 sm:col-span-3">
-              {(createConnector.error as Error).message}
-            </div>
-          )}
-        </form>
-      </section>
+            {createConnector.error && (
+              <div className="col-span-2 text-sm text-destructive sm:col-span-3">
+                {(createConnector.error as Error).message}
+              </div>
+            )}
+          </form>
+        </CardContent>
+      </Card>
 
       <section className="space-y-2">
         <h2 className="font-semibold">Active Connectors</h2>
         <QueryState isLoading={connectors.isLoading} error={connectors.error}>
           <ul className="space-y-2">
             {(connectors.data ?? []).length === 0 && (
-              <li className="rounded border bg-white p-3 text-sm text-gray-500">
-                No connectors yet.
+              <li>
+                <Card>
+                  <CardContent className="p-3 text-sm text-muted-foreground">
+                    No connectors yet.
+                  </CardContent>
+                </Card>
               </li>
             )}
             {(connectors.data ?? []).map((c) => (
-              <li key={c.id} className="flex flex-wrap items-center gap-3 rounded border bg-white p-3">
-                <span className="text-sm font-medium">{c.label}</span>
-                <span className="rounded bg-gray-100 px-2 py-0.5 text-xs text-gray-600">
-                  {c.kind}
-                </span>
-                <span className="text-xs text-gray-500">
-                  Last synced: {c.last_synced_at ?? "never"}
-                </span>
+              <li key={c.id}>
+                <Card>
+                  <CardContent className="flex flex-wrap items-center gap-3 p-3">
+                    <span className="text-sm font-medium">{c.label}</span>
+                    <Badge variant="secondary">{c.kind}</Badge>
+                    <span className="text-xs text-muted-foreground">
+                      Last synced: {c.last_synced_at ?? "never"}
+                    </span>
 
-                {syncResults[c.id] && (
-                  <span className="text-xs text-green-700">
-                    ✓ inserted {syncResults[c.id].inserted}, staged {syncResults[c.id].staged},
-                    skipped {syncResults[c.id].skipped}
-                  </span>
-                )}
+                    {syncResults[c.id] && (
+                      <span className="text-xs text-emerald-600 dark:text-emerald-400">
+                        ✓ inserted {syncResults[c.id].inserted}, staged {syncResults[c.id].staged},
+                        skipped {syncResults[c.id].skipped}
+                      </span>
+                    )}
 
-                <div className="ml-auto flex gap-2">
-                  <button
-                    type="button"
-                    aria-label={`Sync ${c.label}`}
-                    className="rounded bg-indigo-600 px-2 py-1 text-xs text-white disabled:opacity-50"
-                    disabled={syncConnector.isPending}
-                    onClick={() => handleSync(c.id)}
-                  >
-                    Sync now
-                  </button>
-                  <button
-                    type="button"
-                    aria-label={`Delete ${c.label}`}
-                    className="text-xs text-red-600 hover:underline"
-                    onClick={() => deleteConnector.mutate(c.id)}
-                  >
-                    delete
-                  </button>
-                </div>
+                    <div className="ml-auto flex gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        aria-label={`Sync ${c.label}`}
+                        disabled={syncConnector.isPending}
+                        onClick={() => handleSync(c.id)}
+                      >
+                        Sync now
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        aria-label={`Delete ${c.label}`}
+                        onClick={() => deleteConnector.mutate(c.id)}
+                        className="text-destructive hover:text-destructive"
+                      >
+                        delete
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
               </li>
             ))}
           </ul>
