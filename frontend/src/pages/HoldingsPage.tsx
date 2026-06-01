@@ -4,7 +4,7 @@ import { useSummary, useInstruments } from "../api/hooks";
 import { QueryState } from "../components/QueryState";
 import { formatIDR, formatUSD, formatPct, parseNum } from "../lib/format";
 
-type SortKey = "symbol" | "quantity" | "avg_cost" | "latest_price" | "market_value_idr" | "unrealized_pnl";
+type SortKey = "instrument_id" | "quantity" | "avg_cost" | "latest_price" | "market_value_idr" | "unrealized_pnl";
 type SortDir = "asc" | "desc";
 
 export default function HoldingsPage() {
@@ -16,13 +16,11 @@ export default function HoldingsPage() {
   const positions = summary.data?.positions ?? [];
 
   const sorted = [...positions].sort((a, b) => {
-    const av = a[sort.key];
-    const bv = b[sort.key];
     let r: number;
-    if (sort.key === "symbol") {
-      r = (nameOf(a.instrument_id)).localeCompare(nameOf(b.instrument_id));
+    if (sort.key === "instrument_id") {
+      r = nameOf(a.instrument_id).localeCompare(nameOf(b.instrument_id));
     } else {
-      r = parseNum(av) - parseNum(bv);
+      r = parseNum(a[sort.key]) - parseNum(b[sort.key]);
     }
     return sort.dir === "asc" ? r : -r;
   });
@@ -91,7 +89,7 @@ export default function HoldingsPage() {
               <table className="tbl">
                 <thead>
                   <tr>
-                    {th("symbol", "Instrumen")}
+                    {th("instrument_id", "Instrumen")}
                     {th("quantity", "Jumlah", true)}
                     {th("avg_cost", "Avg Cost", true)}
                     {th("latest_price", "Harga Terakhir", true)}
