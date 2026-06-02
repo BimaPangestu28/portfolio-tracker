@@ -65,17 +65,17 @@ test("dashboard shows XIRR KPI card", async () => {
   );
 });
 
-test("dashboard shows Passive Yield KPI card", async () => {
+test("dashboard shows Imbal Hasil Pasif KPI card", async () => {
   renderPage();
   await waitFor(() =>
-    expect(screen.getByText(/Passive Yield/i)).toBeInTheDocument(),
+    expect(screen.getByText(/Imbal Hasil Pasif/i)).toBeInTheDocument(),
   );
 });
 
-test("dashboard shows Savings Rate KPI card", async () => {
+test("dashboard shows Tingkat Menabung KPI card", async () => {
   renderPage();
   await waitFor(() => {
-    const els = screen.getAllByText(/Savings Rate/i);
+    const els = screen.getAllByText(/Tingkat Menabung/i);
     expect(els.length).toBeGreaterThanOrEqual(1);
   });
 });
@@ -91,9 +91,9 @@ test("dashboard shows Kesehatan Portofolio section", async () => {
 
 test("dashboard shows runway months from insights", async () => {
   renderPage();
-  // MSW insights: runway_months "16"
+  // MSW insights: runway_months "16" — displayed as "16,0 bln"
   await waitFor(() =>
-    expect(screen.getByText(/16.*bulan/i)).toBeInTheDocument(),
+    expect(screen.getByText(/16.*bln/i)).toBeInTheDocument(),
   );
 });
 
@@ -107,17 +107,17 @@ test("dashboard shows concentration symbol from insights", async () => {
 
 // ── Allocation section ────────────────────────────────────────────────────────
 
-test("dashboard shows Alokasi Portofolio section", async () => {
+test("dashboard shows Alokasi Aset section", async () => {
   renderPage();
   await waitFor(() =>
-    expect(screen.getByText("Alokasi Portofolio")).toBeInTheDocument(),
+    expect(screen.getByText("Alokasi Aset")).toBeInTheDocument(),
   );
 });
 
-test("dashboard shows Target vs Aktual Alokasi section", async () => {
+test("dashboard shows Target vs Aktual section", async () => {
   renderPage();
   await waitFor(() =>
-    expect(screen.getByText("Target vs Aktual Alokasi")).toBeInTheDocument(),
+    expect(screen.getByText("Target vs Aktual")).toBeInTheDocument(),
   );
 });
 
@@ -139,10 +139,10 @@ test("dashboard shows Rekomendasi Rebalancing section", async () => {
   );
 });
 
-test("dashboard shows 'semua dalam batas' when allocation is empty (MSW returns [])", async () => {
+test("dashboard shows 'portofolio seimbang' when allocation is empty (MSW returns [])", async () => {
   renderPage();
   await waitFor(() =>
-    expect(screen.getByText(/Semua dalam batas target/i)).toBeInTheDocument(),
+    expect(screen.getByText(/Portofolio seimbang/i)).toBeInTheDocument(),
   );
 });
 

@@ -1,103 +1,128 @@
 /**
- * LoginPage — Phase 5E auth screen.
+ * LoginPage — fidelity-pass to match claude-design-source/app/page_auth.jsx
  *
- * ⚠️  FRONTEND MOCK — NOT REAL SECURITY ⚠️
- * This is a local unlock gate for a single-user self-hosted app.
- * See AuthContext.tsx for details. Not ported to a real server-side
- * session yet — that is a follow-up task.
+ * Layout: auth-shell (CSS grid 1.05fr / 1fr) — aside left, form right.
  *
- * Layout: split left/right on desktop (left brand aside hidden on mobile).
+ * Aside:
+ *   - Brand mark (pie icon gradient box) + "Portfolio"
+ *   - Tagline: "Portofolio kamu, satu tampilan yang tenang."
+ *   - Features: shield (Privat & self-hosted), scale (Dual currency), chat (WhatsApp)
+ *   - Radial gradient + grid overlay via CSS (auth-aside::after)
+ *   - © catalystlabs.id footer
  *
- * States:
+ * Form states:
  *   - First-run setup  (hasPassword === false) — "Buat sandi master" + confirm
  *   - Login            (hasPassword === true)  — unlock field + "Lupa sandi?"
  *
- * Features: show/hide password affix, shake on wrong password, demo shortcut,
- * theme toggle in corner, © catalystlabs.id footer.
+ * ⚠️ FRONTEND MOCK — NOT REAL SECURITY ⚠️
  */
 
 import { useState, useRef, type FormEvent } from "react";
-import { Eye, EyeOff, PieChart, TrendingUp, Shield, Zap, Sun, Moon, AlertCircle } from "lucide-react";
+import {
+  Eye,
+  EyeOff,
+  PieChart as PieIcon,
+  Shield,
+  Scale,
+  MessageCircle,
+  Sun,
+  Moon,
+  AlertCircle,
+  Lock,
+  ArrowRight,
+} from "lucide-react";
 import { useTheme } from "@/components/theme-provider";
 import { useAuth } from "@/auth/AuthContext";
 
-// ── Brand aside features ────────────────────────────────────────────────────
+// ── Brand aside features (matches source FEATURES array) ────────────────────
 
 const FEATURES = [
   {
-    icon: TrendingUp,
-    title: "Lacak net worth real-time",
-    desc: "Semua aset dalam satu tampilan — saham, crypto, reksa dana, kas.",
-  },
-  {
     icon: Shield,
-    title: "Data tersimpan lokal",
-    desc: "Self-hosted, data di tangan Anda. Tidak ada pihak ketiga.",
+    title: "Privat & self-hosted",
+    desc: "Data tetap di server kamu sendiri.",
   },
   {
-    icon: Zap,
-    title: "Analisis dengan AI",
-    desc: "Tanya portofolio dalam bahasa natural, dapat insight langsung.",
+    icon: Scale,
+    title: "Dual currency IDR + USD",
+    desc: "Nilai pasar otomatis di dua mata uang.",
+  },
+  {
+    icon: MessageCircle,
+    title: "Sinkron lewat WhatsApp",
+    desc: "Tanya portofolio dari mana saja.",
   },
 ];
 
-// ── Small sub-components ────────────────────────────────────────────────────
+// ── Brand Aside ──────────────────────────────────────────────────────────────
 
 function BrandAside() {
   return (
     <aside className="auth-aside">
-      <div className="auth-aside-top">
-        <div className="auth-aside-brand">
-          <div className="auth-aside-mark">
-            <PieChart size={20} strokeWidth={2.2} />
-          </div>
-          <span className="auth-aside-name">Portfolio</span>
+      {/* Brand row */}
+      <div className="flex items-center gap-3">
+        <div className="auth-aside-mark">
+          <PieIcon size={22} strokeWidth={2} />
         </div>
-        <p className="auth-aside-tagline">
-          Kelola keuangan<br />lebih cerdas, lebih tenang.
-        </p>
-        <div className="auth-aside-features">
+        <span className="auth-aside-name">Portfolio</span>
+      </div>
+
+      {/* Middle: tagline + features */}
+      <div className="flex col gap-8">
+        <h1 className="auth-tag">Portofolio kamu, satu tampilan yang tenang.</h1>
+        <div className="auth-feat">
           {FEATURES.map((f) => (
-            <div key={f.title} className="auth-aside-feature">
-              <div className="auth-aside-feature-icon">
-                <f.icon size={15} strokeWidth={2} />
-              </div>
+            <div className="auth-feat-row" key={f.title}>
+              <span className="auth-feat-ic">
+                <f.icon size={19} strokeWidth={2} />
+              </span>
               <div>
-                <div style={{ fontWeight: 600, marginBottom: 2 }}>{f.title}</div>
-                <div>{f.desc}</div>
+                <div className="t-sm" style={{ fontWeight: 600 }}>
+                  {f.title}
+                </div>
+                <div className="t-xs t-muted">{f.desc}</div>
               </div>
             </div>
           ))}
         </div>
       </div>
-      <div className="auth-aside-bottom">© 2026 catalystlabs.id</div>
+
+      {/* Footer */}
+      <div className="t-xs t-muted num">
+        © {new Date().getFullYear()} catalystlabs.id · self-hosted
+      </div>
     </aside>
   );
 }
+
+// ── Theme corner button ──────────────────────────────────────────────────────
 
 function ThemeCornerBtn() {
   const { theme, setTheme } = useTheme();
   const isDark = theme === "dark";
   return (
-    <button
-      type="button"
-      className="auth-corner pt-icon-btn"
-      onClick={() => setTheme(isDark ? "light" : "dark")}
-      title={isDark ? "Mode terang" : "Mode gelap"}
-      aria-label={isDark ? "Ganti ke mode terang" : "Ganti ke mode gelap"}
-    >
-      {isDark ? <Sun size={16} /> : <Moon size={16} />}
-    </button>
+    <div className="auth-corner">
+      <button
+        type="button"
+        className="pt-icon-btn"
+        onClick={() => setTheme(isDark ? "light" : "dark")}
+        title={isDark ? "Mode terang" : "Mode gelap"}
+        aria-label={isDark ? "Ganti ke mode terang" : "Ganti ke mode gelap"}
+      >
+        {isDark ? <Sun size={18} /> : <Moon size={18} />}
+      </button>
+    </div>
   );
 }
 
-// ── Password input with show/hide ────────────────────────────────────────────
+// ── Password field with show/hide affix ─────────────────────────────────────
 
 interface PasswordFieldProps {
   id: string;
   label: string;
   value: string;
   onChange: (v: string) => void;
+  onClearError?: () => void;
   placeholder?: string;
   autoComplete?: string;
   autoFocus?: boolean;
@@ -108,23 +133,27 @@ function PasswordField({
   label,
   value,
   onChange,
+  onClearError,
   placeholder = "••••••••",
   autoComplete = "current-password",
   autoFocus = false,
 }: PasswordFieldProps) {
   const [show, setShow] = useState(false);
   return (
-    <div className="auth-field">
-      <label className="auth-label" htmlFor={id}>
+    <label className="field">
+      <span className="field-label" id={`${id}-label`}>
         {label}
-      </label>
+      </span>
       <div className="input-affix">
         <input
           id={id}
           type={show ? "text" : "password"}
           className="input"
           value={value}
-          onChange={(e) => onChange(e.target.value)}
+          onChange={(e) => {
+            onChange(e.target.value);
+            onClearError?.();
+          }}
           placeholder={placeholder}
           autoComplete={autoComplete}
           autoFocus={autoFocus}
@@ -132,15 +161,15 @@ function PasswordField({
         />
         <button
           type="button"
-          className="input-affix-btn"
+          className="affix-btn"
           onClick={() => setShow((s) => !s)}
           tabIndex={-1}
           aria-label={show ? "Sembunyikan sandi" : "Tampilkan sandi"}
         >
-          {show ? <EyeOff size={15} /> : <Eye size={15} />}
+          {show ? <EyeOff size={17} /> : <Eye size={17} />}
         </button>
       </div>
-    </div>
+    </label>
   );
 }
 
@@ -151,44 +180,57 @@ function SetupForm() {
   const [pw, setPw] = useState("");
   const [confirm, setConfirm] = useState("");
   const [error, setError] = useState("");
-  const [pending, setPending] = useState(false);
-  const formRef = useRef<HTMLDivElement>(null);
+  const [busy, setBusy] = useState(false);
+  const formRef = useRef<HTMLFormElement>(null);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError("");
-    setPending(true);
+    setBusy(true);
     const result = await setup(pw, confirm);
-    setPending(false);
+    setBusy(false);
     if (!result.ok) {
       setError(result.error ?? "Gagal membuat sandi.");
-      // Shake animation
       if (formRef.current) {
         formRef.current.classList.remove("auth-shake");
-        void formRef.current.offsetWidth; // reflow
+        void formRef.current.offsetWidth;
         formRef.current.classList.add("auth-shake");
       }
     }
-    // If ok, parent re-renders to AppShell (gate flips isUnlocked)
   }
 
   return (
-    <div className="auth-card" ref={formRef}>
-      <div className="auth-card-header">
-        <h1 className="auth-card-title">Buat sandi master</h1>
-        <p className="auth-card-sub">
-          Buat sandi untuk melindungi data portofolio Anda.
-          Sandi ini disimpan lokal di perangkat ini.
+    <form
+      className="auth-card"
+      onSubmit={handleSubmit}
+      noValidate
+      ref={formRef}
+    >
+      {/* Mobile brand — hidden on desktop (CSS .auth-mobile-brand) */}
+      <div className="auth-mobile-brand">
+        <div className="auth-aside-mark" style={{ width: 34, height: 34, borderRadius: 9 }}>
+          <PieIcon size={19} strokeWidth={2} />
+        </div>
+        <span className="auth-aside-name" style={{ fontSize: 17 }}>
+          Portfolio
+        </span>
+      </div>
+
+      <div>
+        <h2 className="t-h1">Buat sandi master</h2>
+        <p className="t-sm t-muted" style={{ margin: "6px 0 0" }}>
+          Sandi ini membuka akses ke portofolio kamu di perangkat ini.
         </p>
       </div>
-      {/* Using native form for semantics; onSubmit handles validation */}
-      <form className="auth-form" onSubmit={handleSubmit} noValidate>
+
+      <div className="flex col gap-3">
         <PasswordField
           id="setup-pw"
           label="Sandi baru"
           value={pw}
           onChange={setPw}
-          placeholder="min. 6 karakter"
+          onClearError={() => setError("")}
+          placeholder="Minimal 6 karakter"
           autoComplete="new-password"
           autoFocus
         />
@@ -197,36 +239,61 @@ function SetupForm() {
           label="Konfirmasi sandi"
           value={confirm}
           onChange={setConfirm}
-          placeholder="ulangi sandi"
+          onClearError={() => setError("")}
+          placeholder="Ulangi sandi"
           autoComplete="new-password"
         />
-        <div className="auth-error" role="alert" aria-live="polite">
+        <div
+          className="auth-error"
+          role="alert"
+          aria-live="polite"
+        >
           {error && (
             <>
-              <AlertCircle size={13} />
+              <AlertCircle size={14} />
               {error}
             </>
           )}
         </div>
-        <div className="auth-actions">
-          <button
-            type="submit"
-            className="btn btn-primary w-full"
-            disabled={pending}
-          >
-            {pending ? "Menyimpan…" : "Buat sandi & masuk"}
-          </button>
-          <div className="auth-divider">atau</div>
-          <button
-            type="button"
-            className="btn btn-outline w-full"
-            onClick={loginDemo}
-          >
-            Masuk dengan data demo
-          </button>
-        </div>
-      </form>
-    </div>
+      </div>
+
+      <button
+        type="submit"
+        className="btn btn-primary"
+        disabled={busy}
+        style={{ width: "100%", height: 42 }}
+      >
+        {busy ? (
+          "Memverifikasi…"
+        ) : (
+          <>
+            <Lock size={16} />
+            Buat &amp; masuk
+            <ArrowRight size={16} />
+          </>
+        )}
+      </button>
+
+      <div className="flex items-center gap-3">
+        <hr className="divider flex-1" />
+        <span className="t-xs t-muted">atau</span>
+        <hr className="divider flex-1" />
+      </div>
+
+      <button
+        type="button"
+        className="btn btn-outline"
+        style={{ width: "100%" }}
+        onClick={loginDemo}
+      >
+        Masuk dengan data demo
+      </button>
+
+      <div className="auth-foot-note">
+        <Shield size={13} />
+        Terenkripsi di perangkat · tidak ada server pihak ketiga
+      </div>
+    </form>
   );
 }
 
@@ -236,29 +303,27 @@ function LoginForm() {
   const { unlock, resetPassword, loginDemo } = useAuth();
   const [pw, setPw] = useState("");
   const [error, setError] = useState("");
-  const [pending, setPending] = useState(false);
-  const formRef = useRef<HTMLDivElement>(null);
+  const [busy, setBusy] = useState(false);
+  const formRef = useRef<HTMLFormElement>(null);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError("");
-    setPending(true);
+    setBusy(true);
     const result = await unlock(pw);
-    setPending(false);
+    setBusy(false);
     if (!result.ok) {
       setError(result.error ?? "Sandi salah.");
       setPw("");
-      // Shake animation on wrong password
       if (formRef.current) {
         formRef.current.classList.remove("auth-shake");
         void formRef.current.offsetWidth;
         formRef.current.classList.add("auth-shake");
       }
     }
-    // If ok, gate flips isUnlocked → AppShell renders
   }
 
-  function handleReset() {
+  function handleForgot() {
     if (
       window.confirm(
         "Reset sandi akan menghapus sandi tersimpan dan Anda perlu membuat sandi baru. Lanjutkan?",
@@ -269,54 +334,97 @@ function LoginForm() {
   }
 
   return (
-    <div className="auth-card" ref={formRef}>
-      <div className="auth-card-header">
-        <h1 className="auth-card-title">Selamat datang kembali</h1>
-        <p className="auth-card-sub">Masukkan sandi master untuk membuka portofolio Anda.</p>
+    <form
+      className="auth-card"
+      onSubmit={handleSubmit}
+      noValidate
+      ref={formRef}
+    >
+      {/* Mobile brand */}
+      <div className="auth-mobile-brand">
+        <div className="auth-aside-mark" style={{ width: 34, height: 34, borderRadius: 9 }}>
+          <PieIcon size={19} strokeWidth={2} />
+        </div>
+        <span className="auth-aside-name" style={{ fontSize: 17 }}>
+          Portfolio
+        </span>
       </div>
-      <form className="auth-form" onSubmit={handleSubmit} noValidate>
+
+      <div>
+        <h2 className="t-h1">Selamat datang kembali</h2>
+        <p className="t-sm t-muted" style={{ margin: "6px 0 0" }}>
+          Masukkan sandi master untuk membuka portofolio.
+        </p>
+      </div>
+
+      <div className="flex col gap-3">
         <PasswordField
           id="login-pw"
           label="Sandi master"
           value={pw}
           onChange={setPw}
+          onClearError={() => setError("")}
           autoComplete="current-password"
           autoFocus
         />
-        <div className="auth-error" role="alert" aria-live="polite">
+        <div
+          className="auth-error"
+          role="alert"
+          aria-live="polite"
+        >
           {error && (
             <>
-              <AlertCircle size={13} />
+              <AlertCircle size={14} />
               {error}
             </>
           )}
         </div>
-        <div className="auth-actions">
-          <button
-            type="submit"
-            className="btn btn-primary w-full"
-            disabled={pending}
-          >
-            {pending ? "Memeriksa…" : "Masuk"}
-          </button>
-          <button
-            type="button"
-            className="auth-link"
-            onClick={handleReset}
-          >
-            Lupa sandi?
-          </button>
-          <div className="auth-divider">atau</div>
-          <button
-            type="button"
-            className="btn btn-outline w-full"
-            onClick={loginDemo}
-          >
-            Masuk dengan data demo
-          </button>
-        </div>
-      </form>
-    </div>
+        <button
+          type="button"
+          className="auth-link"
+          onClick={handleForgot}
+        >
+          Lupa sandi?
+        </button>
+      </div>
+
+      <button
+        type="submit"
+        className="btn btn-primary"
+        disabled={busy}
+        style={{ width: "100%", height: 42 }}
+      >
+        {busy ? (
+          "Memverifikasi…"
+        ) : (
+          <>
+            <Lock size={16} />
+            Buka portofolio
+            <ArrowRight size={16} />
+          </>
+        )}
+      </button>
+
+      <div className="flex items-center gap-3">
+        <hr className="divider flex-1" />
+        <span className="t-xs t-muted">atau</span>
+        <hr className="divider flex-1" />
+      </div>
+
+      <button
+        type="button"
+        className="btn btn-outline"
+        style={{ width: "100%" }}
+        onClick={loginDemo}
+      >
+        Masuk dengan data demo
+      </button>
+
+      <div className="auth-foot-note">
+        <Shield size={13} />
+        Terenkripsi di perangkat · tidak ada server pihak ketiga
+      </div>
+    </form>
   );
 }
 

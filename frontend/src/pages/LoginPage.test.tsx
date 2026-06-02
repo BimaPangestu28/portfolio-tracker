@@ -53,7 +53,7 @@ test("first-run: shows 'Buat sandi master' when no password stored", () => {
 
 test("first-run: shows setup subtitle copy", () => {
   renderLoginPage();
-  expect(screen.getByText(/Buat sandi untuk melindungi/i)).toBeInTheDocument();
+  expect(screen.getByText(/Sandi ini membuka akses/i)).toBeInTheDocument();
 });
 
 test("first-run: has sandi baru and konfirmasi fields", () => {
@@ -66,7 +66,7 @@ test("first-run: shows error if passwords don't match", async () => {
   renderLoginPage();
   fireEvent.change(screen.getByLabelText("Sandi baru"), { target: { value: "abc123" } });
   fireEvent.change(screen.getByLabelText("Konfirmasi sandi"), { target: { value: "xyz999" } });
-  fireEvent.click(screen.getByRole("button", { name: /Buat sandi/i }));
+  fireEvent.click(screen.getByRole("button", { name: /Buat.*masuk/i }));
   await waitFor(() => {
     expect(screen.getByRole("alert")).toHaveTextContent("Konfirmasi sandi tidak cocok");
   });
@@ -76,7 +76,7 @@ test("first-run: shows error if password too short", async () => {
   renderLoginPage();
   fireEvent.change(screen.getByLabelText("Sandi baru"), { target: { value: "abc" } });
   fireEvent.change(screen.getByLabelText("Konfirmasi sandi"), { target: { value: "abc" } });
-  fireEvent.click(screen.getByRole("button", { name: /Buat sandi/i }));
+  fireEvent.click(screen.getByRole("button", { name: /Buat.*masuk/i }));
   await waitFor(() => {
     expect(screen.getByRole("alert")).toHaveTextContent("minimal 6 karakter");
   });
@@ -134,5 +134,6 @@ test("shows catalystlabs.id copyright in brand aside", () => {
 
 test("shows Portfolio brand name", () => {
   renderLoginPage();
-  expect(screen.getByText("Portfolio")).toBeInTheDocument();
+  const els = screen.getAllByText("Portfolio");
+  expect(els.length).toBeGreaterThanOrEqual(1);
 });
