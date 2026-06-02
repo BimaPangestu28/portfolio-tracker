@@ -1,13 +1,15 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import { render, screen, waitFor } from "@testing-library/react";
-import { afterEach, expect, test, vi } from "vitest";
+import { http, HttpResponse } from "msw";
+import { expect, test } from "vitest";
+import { server } from "../test/server";
 import WhatsAppPage from "./WhatsAppPage";
 
 function renderPage() {
-  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
-    <QueryClientProvider client={qc}>
+    <QueryClientProvider client={queryClient}>
       <MemoryRouter>
         <WhatsAppPage />
       </MemoryRouter>
@@ -15,14 +17,8 @@ function renderPage() {
   );
 }
 
-afterEach(() => vi.restoreAllMocks());
-
 test("shows Connect button when disconnected", async () => {
-  vi.spyOn(global, "fetch").mockResolvedValue(
-    new Response(JSON.stringify({ status: "disconnected", qr: null, number: null }), {
-      headers: { "content-type": "application/json" },
-    }),
-  );
+  // Default handler in server.ts already returns { status: "disconnected", qr: null, number: null }
   renderPage();
   await waitFor(() =>
     expect(screen.getByRole("button", { name: /hubungkan whatsapp/i })).toBeInTheDocument(),
@@ -30,10 +26,10 @@ test("shows Connect button when disconnected", async () => {
 });
 
 test("shows the connected number and Disconnect button when connected", async () => {
-  vi.spyOn(global, "fetch").mockResolvedValue(
-    new Response(JSON.stringify({ status: "connected", qr: null, number: "62812" }), {
-      headers: { "content-type": "application/json" },
-    }),
+  server.use(
+    http.get("/api/whatsapp/status", () =>
+      HttpResponse.json({ status: "connected", qr: null, number: "62812" }),
+    ),
   );
   renderPage();
   await waitFor(() => expect(screen.getByText(/62812/)).toBeInTheDocument());
