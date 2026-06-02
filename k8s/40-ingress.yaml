@@ -1,0 +1,28 @@
+# Routes portfolio.catalystlabs.id to the frontend Service. cert-manager issues
+# and renews the TLS certificate via the letsencrypt-prod ClusterIssuer (HTTP-01
+# through the nginx ingress, which owns ports 80/443). The frontend's Caddy
+# handles /api/* -> backend internally, so a single backend rule suffices.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: portfolio
+  namespace: portfolio
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - portfolio.catalystlabs.id
+      secretName: portfolio-tls
+  rules:
+    - host: portfolio.catalystlabs.id
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend
+                port:
+                  number: 80
