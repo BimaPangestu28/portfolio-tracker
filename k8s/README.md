@@ -28,7 +28,12 @@ kubectl -n portfolio create secret docker-registry ghcr-creds \
   --docker-username=BimaPangestu28 \
   --docker-password=<TOKEN>
 
-# 4. Workloads + ingress
+# 4. Basic-auth credentials (the app has no server-side auth; the ingress
+#    enforces HTTP basic auth in front of everything, including the WhatsApp QR).
+htpasswd -nbB <user> <pass> > /tmp/auth
+kubectl -n portfolio create secret generic portfolio-basic-auth --from-file=auth=/tmp/auth && rm /tmp/auth
+
+# 5. Workloads + ingress
 kubectl apply -f 10-backend.yaml -f 20-frontend.yaml -f 30-gateway.yaml -f 40-ingress.yaml
 ```
 
