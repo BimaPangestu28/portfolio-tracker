@@ -100,6 +100,10 @@ pub async fn poll_commands(
 }
 
 // ── Frontend-facing endpoints ───────────────────────────────────────────────
+//
+// These deliberately do NOT check the gateway token: like every other web API in
+// this single-user, self-hosted app they are gated only by the network boundary
+// (and the client-side unlock), not by the shared gateway secret.
 
 /// Current connection status for the web UI.
 pub async fn status(State(s): State<AppState>) -> Result<Json<WaStatusView>, AppError> {
