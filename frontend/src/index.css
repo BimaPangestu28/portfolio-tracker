@@ -928,3 +928,35 @@ table.tbl { width: 100%; border-collapse: collapse; }
   .auth-main { padding: 40px 24px; }
   .auth-card { max-width: 100%; }
 }
+
+/* ---------- typography + layout utilities (restored from theme.css source) ---------- */
+.t-display { font-size: 40px; font-weight: 680; letter-spacing: -0.03em; line-height: 1.05; }
+.t-h1 { font-size: 24px; font-weight: 640; letter-spacing: -0.02em; }
+.t-h2 { font-size: 18px; font-weight: 620; letter-spacing: -0.015em; }
+.t-h3 { font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
+.t-label { font-size: 12px; font-weight: 560; letter-spacing: 0.02em; text-transform: uppercase; color: hsl(var(--muted-foreground)); }
+.t-muted { color: hsl(var(--muted-foreground)); }
+.t-sm { font-size: 13px; }
+.t-xs { font-size: 12px; }
+.gain { color: hsl(var(--gain)); }
+.loss { color: hsl(var(--loss)); }
+.warn { color: hsl(var(--warn)); }
+
+.flex { display: flex; }
+.col { flex-direction: column; }
+.items-center { align-items: center; }
+.items-start { align-items: flex-start; }
+.items-end { align-items: flex-end; }
+.justify-between { justify-content: space-between; }
+.justify-center { justify-content: center; }
+.justify-end { justify-content: flex-end; }
+.flex-1 { flex: 1 1 0; min-width: 0; }
+.flex-wrap { flex-wrap: wrap; }
+.grid { display: grid; }
+.gap-1 { gap: 4px; } .gap-2 { gap: 8px; } .gap-3 { gap: 12px; } .gap-4 { gap: 16px; }
+.gap-5 { gap: 20px; } .gap-6 { gap: 24px; } .gap-8 { gap: 32px; }
+.w-full { width: 100%; }
+.text-right { text-align: right; }
+.text-center { text-align: center; }
+.truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.relative { position: relative; }
