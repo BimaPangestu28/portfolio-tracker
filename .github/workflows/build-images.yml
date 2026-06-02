@@ -19,6 +19,8 @@ jobs:
       contents: read
       packages: write
     strategy:
+      # Don't cancel the other images if one fails to build.
+      fail-fast: false
       matrix:
         include:
           - name: backend
