@@ -9,6 +9,7 @@ mod pricing;
 mod repo;
 mod scheduler;
 mod service;
+mod wa_state;
 
 use db::Db;
 
