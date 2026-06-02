@@ -5,6 +5,8 @@
 //! gateway's next heartbeat to repopulate it.
 
 use serde::{Deserialize, Serialize};
+// std::sync::Mutex is intentional: every lock scope here is synchronous and short
+// (no .await while holding the guard), so the std mutex is preferred over tokio's.
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -84,6 +86,10 @@ impl WaState {
 
     /// Snapshot for the frontend, downgrading a stale "connected" to "connecting".
     pub fn view(&self, now: Instant) -> WaStatusView {
+        // `last_seen` is None only before the gateway's first push, when status is
+        // still Disconnected — so the "absent => stale" default never downgrades a
+        // real Connected state. The exclusive `>` boundary is deliberate: exactly
+        // STALE_AFTER counts as fresh.
         let stale = self
             .last_seen
             .map_or(true, |seen| now.duration_since(seen) > STALE_AFTER);
@@ -134,5 +140,16 @@ mod tests {
         // A stale heartbeat downgrades it.
         let later = earlier + STALE_AFTER + Duration::from_secs(1);
         assert_eq!(state.view(later).status, WaStatus::Connecting);
+    }
+
+    #[test]
+    fn non_connected_statuses_are_not_downgraded_when_stale() {
+        let earlier = Instant::now();
+        let later = earlier + STALE_AFTER + Duration::from_secs(1);
+        for status in [WaStatus::Qr, WaStatus::Disconnected, WaStatus::Connecting] {
+            let mut state = WaState::default();
+            state.apply_push(status, None, None, earlier);
+            assert_eq!(state.view(later).status, status, "{status:?} must not be downgraded");
+        }
     }
 }
