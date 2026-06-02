@@ -30,7 +30,9 @@ test("renders suggestion chips", async () => {
   expect(screen.getByRole("button", { name: /rebalancing/i })).toBeInTheDocument();
 });
 
-test("shows WhatsApp sync badge", async () => {
+test("shows WhatsApp status badge", async () => {
   render(<ChatPage />, { wrapper });
-  expect(screen.getByText(/Sinkron dengan WhatsApp/)).toBeInTheDocument();
+  await waitFor(() =>
+    expect(screen.getByText(/WhatsApp tidak terhubung/)).toBeInTheDocument(),
+  );
 });

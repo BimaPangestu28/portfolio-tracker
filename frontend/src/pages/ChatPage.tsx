@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { Send, Sparkles, Wallet } from "lucide-react";
-import { useChatHistory, useSendChat } from "../api/hooks";
+import { useChatHistory, useSendChat, useWhatsappStatus } from "../api/hooks";
 import { QueryState } from "../components/QueryState";
 import { MarkdownMessage } from "../components/MarkdownMessage";
 
@@ -13,6 +13,8 @@ const SUGGESTIONS = [
 export default function ChatPage() {
   const history = useChatHistory();
   const sendChat = useSendChat();
+  const waStatus = useWhatsappStatus();
+  const waConnected = waStatus.data?.status === "connected";
   const [input, setInput] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -49,9 +51,9 @@ export default function ChatPage() {
           <h1 className="t-h1">Chat</h1>
           <div className="t-sm t-muted">Tanya jawab portofolio</div>
         </div>
-        <span className="badge badge-gain">
+        <span className={waConnected ? "badge badge-gain" : "badge"}>
           <span className="badge-dot" style={{ background: "currentColor" }} />
-          Sinkron dengan WhatsApp
+          {waConnected ? "Sinkron dengan WhatsApp" : "WhatsApp tidak terhubung"}
         </span>
       </div>
 

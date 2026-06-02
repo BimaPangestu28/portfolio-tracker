@@ -119,6 +119,11 @@ export const handlers = [
     }),
   ),
   http.delete("/api/goals/:id", () => HttpResponse.json(null)),
+
+  // ── WhatsApp gateway ───────────────────────────────────────────────────────
+  http.get("/api/whatsapp/status", () =>
+    HttpResponse.json({ status: "disconnected", qr: null, number: null }),
+  ),
 ];
 
 export const server = setupServer(...handlers);

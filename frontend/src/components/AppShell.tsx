@@ -16,6 +16,7 @@ import {
   Banknote,
   Inbox,
   MessageSquare,
+  MessageCircle,
   Menu,
   X,
   RefreshCw,
@@ -48,6 +49,7 @@ const NAV_ITEMS: NavItem[] = [
   { to: "/budget",    label: "Budget",     icon: Banknote },
   { to: "/data",      label: "Data",       icon: Inbox },
   { to: "/chat",      label: "Chat",       icon: MessageSquare },
+  { to: "/whatsapp", label: "WhatsApp",   icon: MessageCircle },
 ];
 
 /** Bottom nav shows first 4 + "More" (opens sheet) */
