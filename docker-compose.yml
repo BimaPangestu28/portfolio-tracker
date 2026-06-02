@@ -1,0 +1,60 @@
+# Production stack for Portfolio Tracker.
+#
+#   cp .env.production.example .env   # then fill in secrets
+#   docker compose up -d --build
+#
+# Secrets come from the (gitignored) .env file in this directory — never commit it.
+
+services:
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    environment:
+      BIND_ADDR: 0.0.0.0:8080
+      DATABASE_URL: sqlite:///data/portfolio.db
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:?ANTHROPIC_API_KEY is required}
+      INGEST_MODEL: ${INGEST_MODEL:-claude-sonnet-4-6}
+      GATEWAY_TOKEN: ${GATEWAY_TOKEN:?GATEWAY_TOKEN is required}
+      RUST_LOG: ${RUST_LOG:-info}
+    volumes:
+      - backend_data:/data
+    expose:
+      - "8080"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  frontend:
+    build: ./frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    environment:
+      DOMAIN: ${DOMAIN:?DOMAIN is required}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+
+  gateway:
+    build: ./whatsapp-gateway
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      BACKEND_URL: http://backend:8080
+      GATEWAY_TOKEN: ${GATEWAY_TOKEN:?GATEWAY_TOKEN is required}
+    volumes:
+      - gateway_auth:/app/auth_state
+
+volumes:
+  backend_data:
+  caddy_data:
+  caddy_config:
+  gateway_auth:

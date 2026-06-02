@@ -1,0 +1,19 @@
+# Caddy serves the built SPA and reverse-proxies the API. TLS for $DOMAIN is
+# provisioned automatically via Let's Encrypt (requires DNS -> this server and
+# ports 80/443 open).
+{$DOMAIN} {
+	encode zstd gzip
+
+	# /api/* -> backend, stripping the /api prefix so the backend (which serves
+	# routes at root, e.g. /health, /chat) receives /health, /chat, ...
+	handle_path /api/* {
+		reverse_proxy backend:8080
+	}
+
+	# SPA fallback: serve the requested file, else index.html for client routing.
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
+}
