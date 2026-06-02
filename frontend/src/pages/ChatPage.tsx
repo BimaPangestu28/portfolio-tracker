@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { Send, Sparkles, Wallet } from "lucide-react";
 import { useChatHistory, useSendChat } from "../api/hooks";
 import { QueryState } from "../components/QueryState";
+import { MarkdownMessage } from "../components/MarkdownMessage";
 
 const SUGGESTIONS = [
   "Apakah saya perlu rebalancing?",
@@ -111,7 +112,7 @@ export default function ChatPage() {
                       borderTopLeftRadius: isUser ? 14 : 4,
                     }}
                   >
-                    {msg.content}
+                    {isUser ? msg.content : <MarkdownMessage content={msg.content} />}
                   </div>
                 </div>
               );
