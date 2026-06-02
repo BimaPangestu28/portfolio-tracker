@@ -268,3 +268,12 @@ export const GoalSchema = z.object({
   created_at: z.string(),
 });
 export type Goal = z.infer<typeof GoalSchema>;
+
+// ── WhatsApp connection ─────────────────────────────────────────────────────
+
+export const WhatsappStatusSchema = z.object({
+  status: z.enum(["disconnected", "connecting", "qr", "connected"]),
+  qr: z.string().nullable(),
+  number: z.string().nullable(),
+});
+export type WhatsappStatus = z.infer<typeof WhatsappStatusSchema>;

@@ -10,6 +10,7 @@ import {
   ConnectorSchema, SyncReportSchema,
   ChatMessageSchema, ChatReplySchema,
   InsightsSchema, GoalSchema,
+  WhatsappStatusSchema,
   type Account, type Category, type Instrument, type Transaction, type ReviewItem,
   type CashflowCategory, type Cashflow, type Connector, type Goal,
 } from "./schemas";
@@ -174,5 +175,30 @@ export const useSendChat = () => {
   return useMutation({
     mutationFn: (message: string) => api.post("/chat", ChatReplySchema, { message }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["chat-history"] }); },
+  });
+};
+
+// ── WhatsApp connection hooks ────────────────────────────────────────────────
+
+export const useWhatsappStatus = () =>
+  useQuery({
+    queryKey: ["whatsapp-status"],
+    queryFn: () => api.get("/whatsapp/status", WhatsappStatusSchema),
+    refetchInterval: 2000,
+  });
+
+export const useConnectWhatsapp = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.post("/whatsapp/connect", z.unknown(), {}),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["whatsapp-status"] }); },
+  });
+};
+
+export const useDisconnectWhatsapp = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.post("/whatsapp/disconnect", z.unknown(), {}),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["whatsapp-status"] }); },
   });
 };
