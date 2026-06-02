@@ -10,6 +10,7 @@ import PlannerPage from "./pages/PlannerPage";
 import BudgetPage from "./pages/BudgetPage";
 import DataPage from "./pages/DataPage";
 import ChatPage from "./pages/ChatPage";
+import WhatsAppPage from "./pages/WhatsAppPage";
 import SettingsPage from "./pages/SettingsPage";
 
 export default function App() {
@@ -32,6 +33,7 @@ export default function App() {
         <Route path="budget" element={<BudgetPage />} />
         <Route path="data" element={<DataPage />} />
         <Route path="chat" element={<ChatPage />} />
+        <Route path="whatsapp" element={<WhatsAppPage />} />
 
         {/* ── Legacy route redirects ── */}
         <Route path="holdings" element={<Navigate to="/portfolio" replace />} />
