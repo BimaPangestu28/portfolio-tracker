@@ -1,5 +1,12 @@
 # Deployment
 
+> **Production** runs on the k3s cluster at `portfolio.catalystlabs.id` via
+> nginx-ingress + cert-manager. See [`k8s/README.md`](k8s/README.md) — that is
+> the source of truth for the live deployment.
+>
+> The Docker Compose stack below is for **local / single-host self-hosting** on a
+> box where ports 80/443 are free.
+
 Self-contained Docker Compose stack: a Rust/axum **backend**, a Caddy-served
 React **frontend** (also the TLS-terminating reverse proxy), and a Node/Baileys
 **WhatsApp gateway**.
