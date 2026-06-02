@@ -70,7 +70,7 @@ export const handlers = [
       net_worth_idr: "1520000000",
       day_delta_idr: "8500000",
       day_delta_pct: "0.56",
-      savings_rate: "0.32",
+      savings_rate: "32",
       dividend_ttm_idr: "24000000",
       yield_pct: "1.58",
       liquid_idr: "250000000",

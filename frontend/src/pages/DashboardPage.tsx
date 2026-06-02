@@ -161,7 +161,7 @@ function KpiSection({ unrealizedPnl, xirr, yieldPct, dividendTtmIdr, savingsRate
     if (n < 0) return "neg";
     return "neutral";
   };
-  const savingsN = parseNum(savingsRate) * 100;
+  const savingsN = parseNum(savingsRate);
 
   return (
     <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -184,7 +184,7 @@ function KpiSection({ unrealizedPnl, xirr, yieldPct, dividendTtmIdr, savingsRate
       />
       <KpiCard
         label="Savings Rate"
-        value={`${(savingsN).toFixed(0)}%`}
+        value={`${savingsN.toFixed(1)}%`}
         sub={savingsN >= 20 ? "Sehat ✓" : "Perlu ditingkatkan"}
         tone={savingsN >= 20 ? "pos" : savingsN >= 10 ? "neutral" : "neg"}
       />
@@ -245,7 +245,7 @@ interface HealthSectionProps {
 
 function HealthSection({ runwayMonths, concentration, savingsRate, categoryCount }: HealthSectionProps) {
   const runway = parseNum(runwayMonths);
-  const savingsN = parseNum(savingsRate) * 100;
+  const savingsN = parseNum(savingsRate);
 
   const runwayStatus: "sehat" | "perhatikan" | "kritis" =
     runway >= 6 ? "sehat" : runway >= 3 ? "perhatikan" : "kritis";
@@ -407,7 +407,7 @@ function GoalProgress({ goal }: { goal: Goal }) {
         />
       </div>
       <div className="mt-1 flex items-center justify-between text-[10px] text-muted-foreground">
-        <span>{goal.current_kind === "portfolio" ? "dari portofolio" : goal.current_kind === "savings" ? "dari tabungan" : "manual"}</span>
+        <span>{goal.current_kind === "cash" ? "dari aset kas" : goal.current_kind === "networth" ? "dari total aset" : "manual"}</span>
         <span className={cn("num font-semibold", done ? "text-gain" : "text-muted-foreground")}>
           {pct.toFixed(0)}%{done ? " ✓" : ""}
         </span>

@@ -70,11 +70,26 @@ fn compute_current(g: &goals::GoalRow, liquid: Decimal, net_worth: Decimal) -> S
 pub async fn create_goal(
     State(s): State<AppState>,
     Json(body): Json<goals::NewGoal>,
-) -> Result<Json<goals::GoalRow>, AppError> {
+) -> Result<Json<GoalResponse>, AppError> {
     let row = goals::create(&s.db, &body)
         .await
         .map_err(|e| AppError::BadRequest(e.to_string()))?;
-    Ok(Json(row))
+
+    // Build insights to get liquid + net_worth for computed current_idr
+    let insights = build_insights(&s.db).await.map_err(AppError::Other)?;
+    let current_idr = compute_current(&row, insights.liquid_idr, insights.net_worth_idr);
+
+    Ok(Json(GoalResponse {
+        id: row.id,
+        label: row.label,
+        note: row.note,
+        target_idr: row.target_idr,
+        current_kind: row.current_kind,
+        current_manual_idr: row.current_manual_idr,
+        sort_order: row.sort_order,
+        created_at: row.created_at,
+        current_idr,
+    }))
 }
 
 pub async fn delete_goal(

@@ -260,7 +260,7 @@ export const GoalSchema = z.object({
   note: z.string().nullable().optional(),
   /** Target amount in IDR (string) */
   target_idr: z.string(),
-  /** How the "current" progress is computed: "portfolio" | "savings" | "manual" */
+  /** How the "current" progress is computed: "cash" | "networth" | "manual" */
   current_kind: z.string(),
   /** Current progress amount in IDR (string) */
   current_idr: z.string(),

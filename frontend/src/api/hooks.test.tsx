@@ -44,7 +44,7 @@ test("useInsights fetches and validates insights", async () => {
   const data = result.current.data!;
   expect(data.net_worth_idr).toBe("1520000000");
   expect(data.day_delta_pct).toBe("0.56");
-  expect(data.savings_rate).toBe("0.32");
+  expect(data.savings_rate).toBe("32");
   expect(data.runway_months).toBe("16");
   expect(data.concentration).toEqual({ symbol: "BBCA", pct: "18.5" });
   expect(data.monthly_income_idr).toBe("18000000");

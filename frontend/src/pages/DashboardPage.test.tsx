@@ -3,7 +3,7 @@
  *
  * MSW handlers in src/test/server.ts already provide:
  *   GET /api/portfolio/summary  — net_worth_idr "4875000", net_worth_usd "300"
- *   GET /api/portfolio/insights — day_delta_idr "8500000", savings_rate "0.32", etc.
+ *   GET /api/portfolio/insights — day_delta_idr "8500000", savings_rate "32" (percent), etc.
  *   GET /api/goals              — []  (empty)
  *   GET /api/portfolio/history  — []  (empty)
  */
