@@ -2,6 +2,9 @@ target/
 node_modules/
 *.db
 .env
+.env.local
+.env.*.local
+!.env.example
 dist/
 *.tsbuildinfo
 frontend/vite.config.js
