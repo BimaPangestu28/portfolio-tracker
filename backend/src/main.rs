@@ -13,8 +13,8 @@ mod service;
 mod wa_state;
 
 use db::Db;
-use wa_state::{SharedWaState, WaState};
 use std::sync::{Arc, Mutex};
+use wa_state::{SharedWaState, WaState};
 
 #[derive(Clone)]
 pub struct AppState {

@@ -18,7 +18,9 @@ pub struct Claims {
 // ── env config ───────────────────────────────────────────────────────────────
 
 fn auth_password() -> Option<String> {
-    std::env::var("AUTH_PASSWORD").ok().filter(|s| !s.is_empty())
+    std::env::var("AUTH_PASSWORD")
+        .ok()
+        .filter(|s| !s.is_empty())
 }
 
 pub fn jwt_secret() -> Option<String> {
