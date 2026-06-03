@@ -39,6 +39,17 @@ pub fn is_configured() -> bool {
     auth_password().is_some() && jwt_secret().is_some()
 }
 
+/// Validate the auth-related env config, failing closed on a partial setup.
+///
+/// Both set => enforced; both unset => dev/open; exactly one set => error.
+///
+/// @returns `Ok(())` when the config is coherent
+/// @throws `String` describing the misconfiguration when exactly one of
+///         AUTH_PASSWORD / JWT_SECRET is set
+pub fn validate_env_config() -> Result<(), String> {
+    check_config(auth_password().is_some(), jwt_secret().is_some())
+}
+
 // ── env-reading wrappers (used by handlers/middleware) ───────────────────────
 
 pub fn password_ok(candidate: &str) -> bool {
@@ -50,6 +61,17 @@ pub fn issue_token(now: i64) -> anyhow::Result<String> {
 }
 
 // ── pure logic (unit-tested) ─────────────────────────────────────────────────
+
+/// Error when exactly one of AUTH_PASSWORD / JWT_SECRET is set. Both-set =
+/// enforced; both-unset = dev/open; one-set = almost certainly a mistake.
+pub fn check_config(password_set: bool, secret_set: bool) -> Result<(), String> {
+    if password_set != secret_set {
+        return Err(
+            "AUTH_PASSWORD and JWT_SECRET must be set together (or both unset)".into(),
+        );
+    }
+    Ok(())
+}
 
 /// Constant-time password comparison. `None` expected => accept anything (dev).
 pub fn password_ok_with(expected: Option<&str>, candidate: &str) -> bool {
@@ -109,6 +131,26 @@ pub fn authorize(configured: bool, secret: Option<&str>, auth_header: Option<&st
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn check_config_ok_when_both_set() {
+        assert!(check_config(true, true).is_ok());
+    }
+
+    #[test]
+    fn check_config_ok_when_both_unset() {
+        assert!(check_config(false, false).is_ok());
+    }
+
+    #[test]
+    fn check_config_errs_when_only_password_set() {
+        assert!(check_config(true, false).is_err());
+    }
+
+    #[test]
+    fn check_config_errs_when_only_secret_set() {
+        assert!(check_config(false, true).is_err());
+    }
 
     #[test]
     fn password_ok_with_none_allows_anything() {

@@ -108,6 +108,7 @@ mod router_tests {
     use crate::AppState;
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
+    use serial_test::serial;
     use tower::ServiceExt;
 
     async fn test_state() -> AppState {
@@ -119,6 +120,7 @@ mod router_tests {
     }
 
     // These tests mutate process env, so they run serially within this module.
+    #[serial]
     #[tokio::test]
     async fn protected_route_requires_token_when_configured() {
         std::env::set_var("AUTH_PASSWORD", "pw");
@@ -140,6 +142,7 @@ mod router_tests {
         std::env::remove_var("JWT_SECRET");
     }
 
+    #[serial]
     #[tokio::test]
     async fn health_and_login_are_public_when_configured() {
         std::env::set_var("AUTH_PASSWORD", "pw");

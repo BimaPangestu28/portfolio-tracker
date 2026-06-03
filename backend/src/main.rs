@@ -25,6 +25,9 @@ pub struct AppState {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt().with_env_filter("info").init();
+    if let Err(e) = auth::validate_env_config() {
+        anyhow::bail!("{e}");
+    }
     let url = std::env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite://portfolio.db".into());
     let db = db::connect(&url).await?;
     let state = AppState {

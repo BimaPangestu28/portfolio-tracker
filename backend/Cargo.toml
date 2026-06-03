@@ -26,3 +26,4 @@ constant_time_eq = "0.3"
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 tower = { version = "0.5", features = ["util"] }
+serial_test = "3"
