@@ -31,6 +31,7 @@ pub struct Position {
 /// Latest price + FX context for one instrument at valuation time.
 #[derive(Debug, Clone)]
 pub struct PriceContext {
+    #[allow(dead_code)] // identifies the instrument this context is for; not read during valuation
     pub instrument_id: i64,
     pub latest_price_native: Decimal,
     pub price_stale: bool,

@@ -7,8 +7,10 @@ macro_rules! str_enum {
     ($name:ident { $($variant:ident => $s:literal),+ $(,)? }) => {
         #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
         #[serde(rename_all = "snake_case")]
+        #[allow(dead_code)] // some domain enums are modeled for completeness but not yet wired in
         pub enum $name { $($variant),+ }
         impl $name {
+            #[allow(dead_code)] // serialization counterpart to FromStr; kept for completeness
             pub fn as_str(&self) -> &'static str { match self { $(Self::$variant => $s),+ } }
         }
         impl FromStr for $name {
