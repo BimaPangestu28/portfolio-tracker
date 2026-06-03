@@ -1,4 +1,5 @@
 mod api;
+mod auth;
 mod connectors;
 mod db;
 mod domain;
