@@ -277,3 +277,6 @@ export const WhatsappStatusSchema = z.object({
   number: z.string().nullable(),
 });
 export type WhatsappStatus = z.infer<typeof WhatsappStatusSchema>;
+
+export const LoginResponseSchema = z.object({ token: z.string() });
+export type LoginResponse = z.infer<typeof LoginResponseSchema>;
