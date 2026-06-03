@@ -14,7 +14,7 @@ pub struct PerfPoint {
     pub nav: f64,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct PerfMetrics {
     pub total_return: f64,
     pub annualized: f64,
