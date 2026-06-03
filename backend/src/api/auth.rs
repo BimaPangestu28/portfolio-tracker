@@ -51,8 +51,6 @@ pub async fn require_auth(req: Request, next: Next) -> Result<Response, AppError
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[test]
     fn login_rejects_wrong_password() {
         // With a configured password, a wrong candidate must be rejected.
