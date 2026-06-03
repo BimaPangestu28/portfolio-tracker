@@ -9,6 +9,8 @@ pub enum AppError {
     NotFound,
     #[error("invalid input: {0}")]
     BadRequest(String),
+    #[error("unauthorized: {0}")]
+    Unauthorized(String),
     #[error(transparent)]
     Other(#[from] anyhow::Error),
 }
@@ -18,6 +20,7 @@ impl IntoResponse for AppError {
         let (status, msg) = match &self {
             AppError::NotFound => (StatusCode::NOT_FOUND, self.to_string()),
             AppError::BadRequest(_) => (StatusCode::BAD_REQUEST, self.to_string()),
+            AppError::Unauthorized(_) => (StatusCode::UNAUTHORIZED, self.to_string()),
             AppError::Other(e) => {
                 tracing::error!("internal error: {e:#}");
                 (StatusCode::INTERNAL_SERVER_ERROR, "internal error".to_string())

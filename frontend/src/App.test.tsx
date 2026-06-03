@@ -6,14 +6,14 @@ import { ThemeProvider } from "@/components/theme-provider";
 import { AuthProvider } from "@/auth/AuthContext";
 
 /**
- * Tests run in "unlocked (demo)" state — we seed localStorage before render
- * so the auth gate passes and the AppShell + nav render normally.
+ * Tests run in an "unlocked" state — we seed a JWT in localStorage before
+ * render so the auth gate passes and the AppShell + nav render normally.
  *
- * localStorage key "pt-auth-demo" === "1" triggers demo/unlocked path in AuthContext.
+ * localStorage key "pt-auth-token" present === AuthContext.isUnlocked === true.
  */
 function renderApp(initialPath = "/") {
-  // Seed demo session so AuthContext.isUnlocked === true from the start
-  localStorage.setItem("pt-auth-demo", "1");
+  // Seed a token so AuthContext.isUnlocked === true from the start
+  localStorage.setItem("pt-auth-token", "test-token");
 
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
@@ -31,9 +31,7 @@ function renderApp(initialPath = "/") {
 
 afterEach(() => {
   // Clean up auth localStorage between tests
-  localStorage.removeItem("pt-auth-demo");
-  localStorage.removeItem("pt-auth-session");
-  localStorage.removeItem("pt-auth-hash");
+  localStorage.clear();
 });
 
 test("renders nav with Dashboard link", () => {

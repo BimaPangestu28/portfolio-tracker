@@ -17,8 +17,8 @@ export default function App() {
   const { isUnlocked } = useAuth();
 
   // ── Auth gate ─────────────────────────────────────────────────────────────
-  // If not unlocked, show LoginPage (setup or login depending on hasPassword).
-  // This is a frontend-only mock; see AuthContext.tsx for security notes.
+  // No stored JWT => show the master-password login. The token is issued by
+  // POST /auth/login and validated server-side; see AuthContext.tsx.
   if (!isUnlocked) {
     return <LoginPage />;
   }
