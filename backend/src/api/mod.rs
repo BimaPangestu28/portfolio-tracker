@@ -1,3 +1,4 @@
+pub mod auth;
 pub mod cashflow;
 pub mod chat;
 pub mod connectors;
