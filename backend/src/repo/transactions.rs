@@ -76,6 +76,7 @@ pub async fn list_all(db: &Db) -> anyhow::Result<Vec<Transaction>> {
     raws.into_iter().map(|r| r.into_domain()).collect()
 }
 
+#[allow(dead_code)] // exercised by tests; not yet called from non-test code
 pub async fn list_for_instrument(db: &Db, instrument_id: i64) -> anyhow::Result<Vec<Transaction>> {
     let raws = sqlx::query_as::<_, TxnRowRaw>("SELECT id, account_id, instrument_id, txn_type, executed_at, quantity, price_native, fee_native, currency, fx_to_idr, fx_to_usd, note FROM txn WHERE instrument_id = ? ORDER BY executed_at")
         .bind(instrument_id).fetch_all(db).await?;

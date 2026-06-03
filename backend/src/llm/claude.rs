@@ -81,8 +81,6 @@ impl ClaudeClient {
         Ok(Self { api_key, model, client: reqwest::Client::new() })
     }
 
-    pub fn model(&self) -> &str { &self.model }
-
     /// Send a single user message (system + parts) and return the concatenated text output.
     pub async fn complete(&self, system: &str, parts: &[Part]) -> Result<String, LlmError> {
         let body = build_body(&self.model, system, parts);

@@ -20,7 +20,7 @@ pub fn external_to_new_txn(t: &ExternalTxn, account_id: i64, instrument_id: i64,
 }
 
 use crate::connectors::Connector;
-use crate::repo::{connectors, instruments, review_items, transactions};
+use crate::repo::{connectors, review_items, transactions};
 use crate::ingestion::matching::suggest_instrument;
 
 #[derive(Debug, serde::Serialize, Default)]
@@ -84,6 +84,7 @@ mod tests {
 #[cfg(test)]
 mod db_tests {
     use super::*;
+    use crate::repo::instruments;
     use crate::connectors::mock::MockConnector;
     use crate::connectors::ExternalTxn;
     #[tokio::test]
