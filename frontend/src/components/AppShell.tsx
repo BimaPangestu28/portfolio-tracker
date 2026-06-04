@@ -308,7 +308,7 @@ function Topbar({
 
       <div
         className="flex-1 truncate"
-        style={{ fontWeight: 620, fontSize: 17, letterSpacing: "-0.015em" }}
+        style={{ fontWeight: 600, fontSize: 17, letterSpacing: "-0.015em" }}
       >
         {title}
       </div>
@@ -352,7 +352,7 @@ function Topbar({
           padding: "0 12px",
           borderRadius: "var(--radius-sm)",
           fontSize: 13,
-          fontWeight: 560,
+          fontWeight: 500,
           border: "1px solid hsl(var(--border-strong))",
           background: "hsl(var(--card))",
           color: "hsl(var(--foreground))",

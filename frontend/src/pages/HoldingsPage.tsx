@@ -136,9 +136,9 @@ export default function HoldingsPage() {
                             <span className="num">{formatUSD(p.latest_price)}</span>
                           </div>
                         </td>
-                        <td className="r num" style={{ fontWeight: 580 }}>{formatIDR(p.market_value_idr)}</td>
+                        <td className="r num" style={{ fontWeight: 500 }}>{formatIDR(p.market_value_idr)}</td>
                         <td className="r">
-                          <div className={"num " + (pnl >= 0 ? "gain" : "loss")} style={{ fontWeight: 580 }}>
+                          <div className={"num " + (pnl >= 0 ? "gain" : "loss")} style={{ fontWeight: 500 }}>
                             {pnl >= 0 ? "+" : "−"}{formatUSD(Math.abs(pnl))}
                           </div>
                           <div className={"t-xs num " + (pnl >= 0 ? "gain" : "loss")}>

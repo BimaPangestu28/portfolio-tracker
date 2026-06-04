@@ -95,7 +95,7 @@ export default function TransactionsPage() {
                           {txLabel(t.txn_type)}
                         </span>
                       </td>
-                      <td style={{ fontWeight: 580 }}>#{t.instrument_id}</td>
+                      <td style={{ fontWeight: 500 }}>#{t.instrument_id}</td>
                       <td className="t-muted t-sm">#{t.account_id}</td>
                       <td className="r num">{t.quantity}</td>
                       <td className="r num">{t.price_native} {t.currency}</td>

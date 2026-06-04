@@ -248,7 +248,7 @@
   box-shadow: 0 2px 8px hsl(var(--primary) / 0.4);
 }
 .pt-brand-name {
-  font-weight: 660;
+  font-weight: 600;
   font-size: 15.5px;
   letter-spacing: -0.02em;
   white-space: nowrap;
@@ -272,7 +272,7 @@
   padding: 9px 12px;
   border-radius: var(--radius-sm);
   color: hsl(var(--muted-foreground));
-  font-weight: 530;
+  font-weight: 500;
   font-size: 13.5px;
   cursor: pointer;
   border: none;
@@ -368,7 +368,7 @@
   padding: 5px 11px;
   border-radius: 6px;
   font-size: 12px;
-  font-weight: 540;
+  font-weight: 500;
   color: hsl(var(--muted-foreground));
   cursor: pointer;
   font-family: inherit;
@@ -440,7 +440,7 @@
     border-radius: 10px;
     color: hsl(var(--muted-foreground));
     font-size: 10.5px;
-    font-weight: 560;
+    font-weight: 500;
   }
   .pt-bottom-nav .pt-tab.active { color: hsl(var(--primary)); }
 }
@@ -461,7 +461,7 @@
   cursor: pointer;
   font-family: inherit;
   font-size: 14px;
-  font-weight: 540;
+  font-weight: 500;
   color: hsl(var(--muted-foreground));
   border-bottom: 2px solid transparent;
   margin-bottom: -1px;
@@ -471,7 +471,7 @@
 .ptab.active {
   color: hsl(var(--foreground));
   border-bottom-color: hsl(var(--primary));
-  font-weight: 620;
+  font-weight: 600;
 }
 
 /* ============================================================
@@ -499,8 +499,8 @@
    ============================================================ */
 
 /* Typography helpers */
-.t-h1 { font-size: 24px; font-weight: 640; letter-spacing: -0.02em; }
-.t-h2 { font-size: 18px; font-weight: 620; letter-spacing: -0.015em; }
+.t-h1 { font-size: 24px; font-weight: 600; letter-spacing: -0.02em; }
+.t-h2 { font-size: 18px; font-weight: 600; letter-spacing: -0.015em; }
 .t-h3 { font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
 .t-muted { color: hsl(var(--muted-foreground)); }
 .t-sm { font-size: 13px; }
@@ -540,12 +540,12 @@
   justify-content: space-between;
   gap: 12px;
 }
-.card-title { font-size: 15px; font-weight: 620; letter-spacing: -0.01em; }
+.card-title { font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
 .card-sub { font-size: 12.5px; color: hsl(var(--muted-foreground)); margin-top: 2px; }
 
 .stat-card { padding: 18px 20px; display: flex; flex-direction: column; gap: 10px; }
-.stat-label { display: flex; align-items: center; gap: 7px; font-size: 12.5px; color: hsl(var(--muted-foreground)); font-weight: 540; }
-.stat-value { font-size: 23px; font-weight: 660; letter-spacing: -0.02em; }
+.stat-label { display: flex; align-items: center; gap: 7px; font-size: 12.5px; color: hsl(var(--muted-foreground)); font-weight: 500; }
+.stat-value { font-size: 23px; font-weight: 600; letter-spacing: -0.02em; }
 
 /* Buttons */
 .btn {
@@ -557,7 +557,7 @@
   padding: 0 15px;
   border-radius: var(--radius-sm);
   font-size: 13.5px;
-  font-weight: 560;
+  font-weight: 500;
   cursor: pointer;
   border: 1px solid transparent;
   transition: all 0.13s;
@@ -585,7 +585,7 @@
   padding: 0 9px;
   border-radius: 999px;
   font-size: 11.5px;
-  font-weight: 580;
+  font-weight: 500;
   letter-spacing: 0.01em;
 }
 .badge-neutral { background: hsl(var(--muted)); color: hsl(var(--muted-foreground)); }
@@ -599,7 +599,7 @@
 
 /* Inputs */
 .field { display: flex; flex-direction: column; gap: 6px; }
-.field-label { font-size: 12.5px; font-weight: 560; color: hsl(var(--foreground)); }
+.field-label { font-size: 12.5px; font-weight: 500; color: hsl(var(--foreground)); }
 .input, .select {
   height: 38px;
   padding: 0 12px;
@@ -630,7 +630,7 @@ table.tbl { width: 100%; border-collapse: collapse; }
 .tbl th {
   text-align: left;
   font-size: 11.5px;
-  font-weight: 580;
+  font-weight: 500;
   letter-spacing: 0.03em;
   text-transform: uppercase;
   color: hsl(var(--muted-foreground));
@@ -696,7 +696,7 @@ table.tbl { width: 100%; border-collapse: collapse; }
 
 /* Seg control */
 .seg { display: inline-flex; background: hsl(var(--muted)); border-radius: 9px; padding: 3px; gap: 2px; }
-.seg button { border: none; background: none; padding: 6px 13px; border-radius: 6px; font-size: 12.5px; font-weight: 540; color: hsl(var(--muted-foreground)); cursor: pointer; font-family: inherit; transition: all 0.13s; }
+.seg button { border: none; background: none; padding: 6px 13px; border-radius: 6px; font-size: 12.5px; font-weight: 500; color: hsl(var(--muted-foreground)); cursor: pointer; font-family: inherit; transition: all 0.13s; }
 .seg button.active { background: hsl(var(--card)); color: hsl(var(--foreground)); box-shadow: var(--shadow-sm); }
 
 /* Chip */
@@ -813,14 +813,14 @@ table.tbl { width: 100%; border-collapse: collapse; }
 }
 .auth-aside-name {
   font-size: 18px;
-  font-weight: 660;
+  font-weight: 600;
   letter-spacing: -0.02em;
 }
 
 /* Tagline */
 .auth-tag {
   font-size: 30px;
-  font-weight: 680;
+  font-weight: 600;
   letter-spacing: -0.03em;
   line-height: 1.12;
   max-width: 14ch;
@@ -938,11 +938,11 @@ table.tbl { width: 100%; border-collapse: collapse; }
 }
 
 /* ---------- typography + layout utilities (restored from theme.css source) ---------- */
-.t-display { font-size: 40px; font-weight: 680; letter-spacing: -0.03em; line-height: 1.05; }
-.t-h1 { font-size: 24px; font-weight: 640; letter-spacing: -0.02em; }
-.t-h2 { font-size: 18px; font-weight: 620; letter-spacing: -0.015em; }
+.t-display { font-size: 40px; font-weight: 600; letter-spacing: -0.03em; line-height: 1.05; }
+.t-h1 { font-size: 24px; font-weight: 600; letter-spacing: -0.02em; }
+.t-h2 { font-size: 18px; font-weight: 600; letter-spacing: -0.015em; }
 .t-h3 { font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
-.t-label { font-size: 12px; font-weight: 560; letter-spacing: 0.02em; text-transform: uppercase; color: hsl(var(--muted-foreground)); }
+.t-label { font-size: 12px; font-weight: 500; letter-spacing: 0.02em; text-transform: uppercase; color: hsl(var(--muted-foreground)); }
 .t-muted { color: hsl(var(--muted-foreground)); }
 .t-sm { font-size: 13px; }
 .t-xs { font-size: 12px; }
