@@ -43,7 +43,11 @@ pub async fn build_performance(
     base: &str,
     period: &str,
 ) -> anyhow::Result<PerformanceView> {
-    let usd = base == "usd";
+    let usd = match base {
+        "usd" => true,
+        "idr" => false,
+        other => anyhow::bail!("unknown base: {other}"),
+    };
     let today = Utc::now().date_naive();
     let floor = period_start(period, today);
 
@@ -59,9 +63,9 @@ pub async fn build_performance(
         }
         let raw = if usd { &s.total_usd } else { &s.total_idr };
         let v = Decimal::from_str(raw)
-            .unwrap_or_default()
+            .map_err(|e| anyhow::anyhow!("bad snapshot total '{raw}': {e}"))?
             .to_f64()
-            .unwrap_or(0.0);
+            .ok_or_else(|| anyhow::anyhow!("snapshot total out of f64 range: {raw}"))?;
         navs.push((date, v));
     }
 
@@ -189,6 +193,44 @@ mod tests {
         assert_eq!(view.base, "idr");
         assert!(view.points.last().unwrap().cum_return.abs() < 1e-9);
         assert!(view.metrics.total_return.abs() < 1e-9);
+    }
+
+    #[tokio::test]
+    async fn deposit_does_not_create_return_usd_base() {
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        // Snapshots' USD totals also double via the deposit -> TWR must net to 0.
+        crate::repo::snapshots::upsert(&db, "2026-01-01", "1000000", "65", "{}")
+            .await
+            .unwrap();
+        crate::repo::snapshots::upsert(&db, "2026-01-02", "2000000", "130", "{}")
+            .await
+            .unwrap();
+        let acc = crate::repo::accounts::create(
+            &db,
+            &NewAccount {
+                name: "Cash".into(),
+                account_type: "bank".into(),
+                institution: None,
+                native_currency: "IDR".into(),
+                note: None,
+            },
+        )
+        .await
+        .unwrap();
+        let inst = crate::repo::instruments::create(&db, &new_cash_instrument())
+            .await
+            .unwrap();
+        crate::repo::transactions::create(
+            &db,
+            &deposit_txn(acc.id, inst.id, "2026-01-02", "1000000"),
+        )
+        .await
+        .unwrap();
+
+        let view = build_performance(&db, "usd", "all").await.unwrap();
+        assert_eq!(view.base, "usd");
+        assert!(!view.insufficient_data);
+        assert!(view.points.last().unwrap().cum_return.abs() < 1e-9);
     }
 
     #[tokio::test]

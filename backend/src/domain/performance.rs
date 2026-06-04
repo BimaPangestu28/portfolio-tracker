@@ -95,6 +95,7 @@ pub fn compute(
         let (prev_date, v_prev) = w[0];
         let (cur_date, v_cur) = w[1];
         let f = flow_in(flows, prev_date, cur_date);
+        // v_prev > 0 holds after the start-skip; guard covers a mid-series liquidation-to-zero (treated as flat).
         let r = if v_prev > 0.0 {
             (v_cur - f) / v_prev - 1.0
         } else {
@@ -176,6 +177,21 @@ mod tests {
         // wealth peaks at 1.1 then drops to 0.88 -> dd = 0.88/1.1 - 1 = -0.2
         let wealth = vec![1.0, 1.1, 0.88, 0.924];
         assert!((max_drawdown(&wealth) - (-0.2)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn max_drawdown_of_increasing_series_is_zero() {
+        // A strictly increasing wealth index never declines from a peak.
+        let wealth = vec![1.0, 1.1, 1.2];
+        assert_eq!(max_drawdown(&wealth), 0.0);
+    }
+
+    #[test]
+    fn annualized_over_a_full_year_span() {
+        // 100 -> 110 over ~365 days, no flows: annualized should equal the period return.
+        let navs = vec![(d("2025-01-01"), 100.0), (d("2026-01-01"), 110.0)];
+        let (_p, m) = compute(&navs, &[]);
+        assert!((m.annualized - 0.10).abs() < 1e-3);
     }
 
     #[test]
