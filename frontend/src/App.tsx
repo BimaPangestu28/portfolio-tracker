@@ -6,6 +6,7 @@ import { useAuth } from "./auth/AuthContext";
 // Primary 6-item IA pages
 import DashboardPage from "./pages/DashboardPage";
 import PortfolioPage from "./pages/PortfolioPage";
+import PerformancePage from "./pages/PerformancePage";
 import PlannerPage from "./pages/PlannerPage";
 import BudgetPage from "./pages/BudgetPage";
 import DataPage from "./pages/DataPage";
@@ -29,6 +30,7 @@ export default function App() {
         {/* ── Primary 6-item IA ── */}
         <Route index element={<DashboardPage />} />
         <Route path="portfolio" element={<PortfolioPage />} />
+        <Route path="performance" element={<PerformancePage />} />
         <Route path="planner" element={<PlannerPage />} />
         <Route path="budget" element={<BudgetPage />} />
         <Route path="data" element={<DataPage />} />
