@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import { http, HttpResponse } from "msw";
 import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { server } from "../test/server";
 import PerformancePage from "./PerformancePage";
 
@@ -45,4 +46,26 @@ test("shows empty state when insufficient data", async () => {
   );
   wrap();
   await waitFor(() => expect(screen.getByText(/belum cukup data/i)).toBeInTheDocument());
+});
+
+test("toggling period refetches with the new period param", async () => {
+  const seenPeriods: string[] = [];
+  server.use(
+    http.get("/api/portfolio/performance", ({ request }) => {
+      seenPeriods.push(new URL(request.url).searchParams.get("period") ?? "");
+      return HttpResponse.json({
+        base: "idr",
+        points: [],
+        metrics: { total_return: 0, annualized: 0, max_drawdown: 0, volatility: 0 },
+        insufficient_data: true,
+      });
+    }),
+  );
+  wrap();
+  await waitFor(() => expect(seenPeriods.length).toBeGreaterThan(0));
+
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("button", { name: "Semua" }));
+
+  await waitFor(() => expect(seenPeriods).toContain("all"));
 });

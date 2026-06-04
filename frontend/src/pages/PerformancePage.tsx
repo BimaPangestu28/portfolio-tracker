@@ -48,7 +48,7 @@ function returnTone(ratio: number): "pos" | "neg" | "neutral" {
   return "neutral";
 }
 
-/** Reuses the app-wide `pt-seg` segmented control (see AppShell.SegControl). */
+/** Local segmented control; matches the `pt-seg` styling used by AppShell's (non-exported) nav control. */
 function Segmented<T extends string>({
   value,
   onChange,
@@ -64,6 +64,7 @@ function Segmented<T extends string>({
         <button
           key={option.value}
           type="button"
+          aria-pressed={value === option.value}
           className={value === option.value ? "active" : ""}
           onClick={() => onChange(option.value)}
         >
