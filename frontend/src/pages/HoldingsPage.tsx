@@ -3,7 +3,7 @@ import { ArrowUp, ArrowDown, Clock, Filter, Plus } from "lucide-react";
 import { useSummary, useInstruments } from "../api/hooks";
 import { QueryState } from "../components/QueryState";
 import { AddTransactionDialog } from "../components/AddTransactionDialog";
-import { formatIDR, formatUSD, formatPct, parseNum } from "../lib/format";
+import { formatIDR, formatCurrency, formatPct, parseNum } from "../lib/format";
 
 type SortKey = "instrument_id" | "quantity" | "avg_cost" | "latest_price" | "market_value_idr" | "unrealized_pnl";
 type SortDir = "asc" | "desc";
@@ -14,7 +14,13 @@ export default function HoldingsPage() {
   const [sort, setSort] = useState<{ key: SortKey; dir: SortDir }>({ key: "market_value_idr", dir: "desc" });
   const [addOpen, setAddOpen] = useState(false);
 
-  const nameOf = (id: number) => instruments.data?.find((i) => i.id === id)?.symbol ?? `#${id}`;
+  const instrumentOf = (id: number) => instruments.data?.find((i) => i.id === id);
+  const nameOf = (id: number) => instrumentOf(id)?.symbol ?? `#${id}`;
+  // avg_cost, latest_price and unrealized_pnl are computed by the backend in the
+  // instrument's native currency (see domain/valuation.rs + domain/cost_basis.rs),
+  // so they must be formatted with that currency — not hardcoded to USD. Default to
+  // IDR while instruments are still loading, matching the rest of the IDR-first UI.
+  const currencyOf = (id: number) => instrumentOf(id)?.native_currency ?? "IDR";
   const positions = summary.data?.positions ?? [];
 
   const sorted = [...positions].sort((a, b) => {
@@ -107,6 +113,7 @@ export default function HoldingsPage() {
                 <tbody>
                   {sorted.map((p) => {
                     const symbol = nameOf(p.instrument_id);
+                    const currency = currencyOf(p.instrument_id);
                     const pnl = parseNum(p.unrealized_pnl);
                     const costBasis = parseNum(p.cost_basis_total);
                     const pnlPct = costBasis !== 0 ? (pnl / costBasis) * 100 : 0;
@@ -124,7 +131,7 @@ export default function HoldingsPage() {
                           </div>
                         </td>
                         <td className="r num">{p.quantity}</td>
-                        <td className="r num t-muted">{formatUSD(p.avg_cost)}</td>
+                        <td className="r num t-muted">{formatCurrency(p.avg_cost, currency)}</td>
                         <td className="r">
                           <div className="flex items-center justify-end" style={{ gap: 8 }}>
                             {p.price_stale && (
@@ -133,13 +140,13 @@ export default function HoldingsPage() {
                                 stale
                               </span>
                             )}
-                            <span className="num">{formatUSD(p.latest_price)}</span>
+                            <span className="num">{formatCurrency(p.latest_price, currency)}</span>
                           </div>
                         </td>
                         <td className="r num" style={{ fontWeight: 500 }}>{formatIDR(p.market_value_idr)}</td>
                         <td className="r">
                           <div className={"num " + (pnl >= 0 ? "gain" : "loss")} style={{ fontWeight: 500 }}>
-                            {pnl >= 0 ? "+" : "−"}{formatUSD(Math.abs(pnl))}
+                            {pnl >= 0 ? "+" : "−"}{formatCurrency(Math.abs(pnl), currency)}
                           </div>
                           <div className={"t-xs num " + (pnl >= 0 ? "gain" : "loss")}>
                             {formatPct(pnlPct)}
