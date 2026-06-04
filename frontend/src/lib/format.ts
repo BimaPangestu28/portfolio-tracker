@@ -19,3 +19,20 @@ export function formatUSD(v: string | number): string {
 export function formatPct(v: string | number): string {
   return `${parseNum(v).toFixed(1)}%`;
 }
+
+/**
+ * Format a value in its native currency. IDR and USD use the dedicated
+ * formatters; any other ISO code is formatted via Intl with a graceful
+ * fallback to "<CODE> <number>" when the runtime rejects the currency.
+ */
+export function formatCurrency(v: string | number, currency: string): string {
+  const code = currency.toUpperCase();
+  if (code === "IDR") return formatIDR(v);
+  if (code === "USD") return formatUSD(v);
+  const n = parseNum(v);
+  try {
+    return new Intl.NumberFormat(undefined, { style: "currency", currency: code }).format(n);
+  } catch {
+    return `${code} ${n.toLocaleString()}`;
+  }
+}
