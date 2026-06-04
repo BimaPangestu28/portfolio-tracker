@@ -2,6 +2,7 @@ import { useState } from "react";
 import { ArrowUp, ArrowDown, Clock, Filter, Plus } from "lucide-react";
 import { useSummary, useInstruments } from "../api/hooks";
 import { QueryState } from "../components/QueryState";
+import { AddTransactionDialog } from "../components/AddTransactionDialog";
 import { formatIDR, formatUSD, formatPct, parseNum } from "../lib/format";
 
 type SortKey = "instrument_id" | "quantity" | "avg_cost" | "latest_price" | "market_value_idr" | "unrealized_pnl";
@@ -11,6 +12,7 @@ export default function HoldingsPage() {
   const summary = useSummary();
   const instruments = useInstruments();
   const [sort, setSort] = useState<{ key: SortKey; dir: SortDir }>({ key: "market_value_idr", dir: "desc" });
+  const [addOpen, setAddOpen] = useState(false);
 
   const nameOf = (id: number) => instruments.data?.find((i) => i.id === id)?.symbol ?? `#${id}`;
   const positions = summary.data?.positions ?? [];
@@ -61,7 +63,12 @@ export default function HoldingsPage() {
             <Filter size={15} />
             Filter
           </button>
-          <button type="button" className="btn btn-primary btn-sm" aria-label="Tambah holding">
+          <button
+            type="button"
+            className="btn btn-primary btn-sm"
+            onClick={() => setAddOpen(true)}
+            aria-label="Tambah holding"
+          >
             <Plus size={15} />
             Tambah
           </button>
@@ -147,6 +154,9 @@ export default function HoldingsPage() {
           )}
         </div>
       </QueryState>
+
+      {/* Add Transaction Dialog */}
+      <AddTransactionDialog open={addOpen} onClose={() => setAddOpen(false)} />
     </div>
   );
 }
