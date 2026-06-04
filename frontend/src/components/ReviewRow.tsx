@@ -56,17 +56,29 @@ export function ReviewRow({ item, instruments, accounts }: { item: ReviewItem; i
     try {
       let instrumentId = form.instrument_id ? Number(form.instrument_id) : 0;
       if (form.instrument_id === CREATE_NEW) {
-        const created = await createInstrument.mutateAsync({
-          symbol: form.new_symbol,
-          name: p.instrument_name ?? form.new_symbol,
-          instrument_type: "other",
-          native_currency: form.currency,
-          category_id: null,
-          price_source: "manual",
-          decimals: 8,
-          note: null,
-        });
-        instrumentId = created.id;
+        // Dedup: if an instrument with this symbol already exists (e.g. created
+        // when a prior review row for the same symbol was confirmed), reuse it
+        // instead of creating a duplicate. Match is case-insensitive, mirroring
+        // the backend's suggest_instrument / find_or_create.
+        const symbol = form.new_symbol.trim();
+        const existing = instruments.find(
+          (i) => i.symbol.toLowerCase() === symbol.toLowerCase(),
+        );
+        if (existing) {
+          instrumentId = existing.id;
+        } else {
+          const created = await createInstrument.mutateAsync({
+            symbol: form.new_symbol,
+            name: p.instrument_name ?? form.new_symbol,
+            instrument_type: "other",
+            native_currency: form.currency,
+            category_id: null,
+            price_source: "manual",
+            decimals: 8,
+            note: null,
+          });
+          instrumentId = created.id;
+        }
       }
       let accountId = form.account_id ? Number(form.account_id) : 0;
       if (form.account_id === CREATE_NEW) {
