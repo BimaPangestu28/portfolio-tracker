@@ -12,6 +12,7 @@ import { NavLink, Outlet, useLocation } from "react-router-dom";
 import {
   LayoutDashboard,
   Wallet,
+  LineChart,
   Target,
   Banknote,
   Inbox,
@@ -45,6 +46,7 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { to: "/",          label: "Dashboard",  icon: LayoutDashboard, end: true },
   { to: "/portfolio", label: "Portofolio", icon: Wallet },
+  { to: "/performance", label: "Performa",   icon: LineChart },
   { to: "/planner",   label: "Rencana",    icon: Target },
   { to: "/budget",    label: "Budget",     icon: Banknote },
   { to: "/data",      label: "Data",       icon: Inbox },
