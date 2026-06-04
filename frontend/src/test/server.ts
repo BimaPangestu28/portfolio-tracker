@@ -14,6 +14,25 @@ export const handlers = [
   http.get("/api/instruments", () => HttpResponse.json([])),
   http.get("/api/accounts", () => HttpResponse.json([])),
   http.get("/api/transactions", () => HttpResponse.json([])),
+  http.post("/api/transactions", ({ request }) =>
+    request.json().then((body) => {
+      const b = body as Record<string, unknown>;
+      return HttpResponse.json({
+        id: 1,
+        account_id: b.account_id ?? 1,
+        instrument_id: b.instrument_id ?? 1,
+        txn_type: b.txn_type ?? "buy",
+        executed_at: b.executed_at ?? "2026-06-01T00:00:00Z",
+        quantity: b.quantity ?? "1",
+        price_native: b.price_native ?? "100",
+        fee_native: b.fee_native ?? "0",
+        currency: b.currency ?? "USD",
+        fx_to_idr: b.fx_to_idr ?? "16000",
+        fx_to_usd: b.fx_to_usd ?? "1",
+        note: null,
+      });
+    }),
+  ),
   http.get("/api/categories", () => HttpResponse.json([])),
   http.get("/api/ingest/review", () => HttpResponse.json([])),
   http.post("/api/ingest", () => HttpResponse.json({ batch_id: "b-test", items: [] })),
