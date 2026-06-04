@@ -96,7 +96,7 @@ export function AddTransactionDialog({ open, onClose }: AddTransactionDialogProp
               aria-label="Tipe transaksi"
             >
               {TXN_TYPES.map((t) => (
-                <option key={t} value={t}>{TX_LABEL[t] ?? t}</option>
+                <option key={t} value={t}>{TX_LABEL[t]}</option>
               ))}
             </select>
           </label>

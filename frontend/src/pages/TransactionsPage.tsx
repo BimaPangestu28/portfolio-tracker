@@ -5,7 +5,7 @@ import { useTransactions, useDeleteTransaction } from "../api/hooks";
 import { QueryState } from "../components/QueryState";
 import { Dialog } from "../components/Dialog";
 import { AddTransactionDialog } from "../components/AddTransactionDialog";
-import { TX_TONE, TX_LABEL } from "../lib/txn";
+import { txTone, txLabel } from "../lib/txn";
 
 export default function TransactionsPage() {
   const txns = useTransactions();
@@ -91,8 +91,8 @@ export default function TransactionsPage() {
                     <tr key={t.id}>
                       <td className="num t-muted">{t.executed_at.slice(0, 10)}</td>
                       <td>
-                        <span className={"badge " + (TX_TONE[t.txn_type] ?? "badge-neutral")}>
-                          {TX_LABEL[t.txn_type] ?? t.txn_type}
+                        <span className={"badge " + txTone(t.txn_type)}>
+                          {txLabel(t.txn_type)}
                         </span>
                       </td>
                       <td style={{ fontWeight: 580 }}>#{t.instrument_id}</td>
@@ -127,7 +127,7 @@ export default function TransactionsPage() {
         open={!!confirmTx}
         onClose={() => setConfirmTx(null)}
         title="Hapus transaksi?"
-        sub={confirmTx ? `${TX_LABEL[confirmTx.txn_type] ?? confirmTx.txn_type} · ${confirmTx.executed_at.slice(0, 10)}` : ""}
+        sub={confirmTx ? `${txLabel(confirmTx.txn_type)} · ${confirmTx.executed_at.slice(0, 10)}` : ""}
         width={400}
         footer={
           <>
