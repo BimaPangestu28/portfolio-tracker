@@ -280,3 +280,20 @@ export type WhatsappStatus = z.infer<typeof WhatsappStatusSchema>;
 
 export const LoginResponseSchema = z.object({ token: z.string() });
 export type LoginResponse = z.infer<typeof LoginResponseSchema>;
+
+// ── Performance analytics (TWR + risk) ────────────────────────────────────
+
+export const PerformanceSchema = z.object({
+  base: z.string(),
+  points: z.array(
+    z.object({ date: z.string(), cum_return: z.number(), nav: z.number() }),
+  ),
+  metrics: z.object({
+    total_return: z.number(),
+    annualized: z.number(),
+    max_drawdown: z.number(),
+    volatility: z.number(),
+  }),
+  insufficient_data: z.boolean(),
+});
+export type Performance = z.infer<typeof PerformanceSchema>;

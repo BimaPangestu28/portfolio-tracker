@@ -10,6 +10,7 @@ import {
   ConnectorSchema, SyncReportSchema,
   ChatMessageSchema, ChatReplySchema,
   InsightsSchema, GoalSchema,
+  PerformanceSchema,
   WhatsappStatusSchema,
   type Account, type Category, type Instrument, type Transaction, type ReviewItem,
   type CashflowCategory, type Cashflow, type Connector, type Goal,
@@ -20,6 +21,12 @@ export const useSummary = () =>
 
 export const useHistory = () =>
   useQuery({ queryKey: ["history"], queryFn: () => api.get("/portfolio/history", z.array(SnapshotSchema)) });
+
+export const usePerformance = (base: "idr" | "usd", period: string) =>
+  useQuery({
+    queryKey: ["performance", base, period],
+    queryFn: () => api.get(`/portfolio/performance?base=${base}&period=${period}`, PerformanceSchema),
+  });
 
 export const useAccounts = () =>
   useQuery({ queryKey: ["accounts"], queryFn: () => api.get("/accounts", z.array(AccountSchema)) });
