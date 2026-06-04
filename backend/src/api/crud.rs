@@ -29,7 +29,11 @@ pub async fn list_instruments(State(s): State<AppState>) -> Result<Json<Vec<inst
     Ok(Json(instruments::list(&s.db).await.map_err(AppError::Other)?))
 }
 pub async fn create_instrument(State(s): State<AppState>, Json(b): Json<instruments::NewInstrument>) -> Result<Json<instruments::InstrumentRow>, AppError> {
-    Ok(Json(instruments::create(&s.db, &b).await.map_err(AppError::Other)?))
+    // Idempotent on symbol (case-insensitive): the ingest confirm flow may POST the
+    // same symbol from several review rows of one screenshot. Returning the existing
+    // instrument instead of inserting a duplicate keeps a single instrument per symbol,
+    // matching how `ingestion::matching::suggest_instrument` already identifies them.
+    Ok(Json(instruments::find_or_create(&s.db, &b).await.map_err(AppError::Other)?))
 }
 pub async fn delete_instrument(State(s): State<AppState>, Path(id): Path<i64>) -> Result<Json<()>, AppError> {
     instruments::delete(&s.db, id).await.map_err(AppError::Other)?; Ok(Json(()))
