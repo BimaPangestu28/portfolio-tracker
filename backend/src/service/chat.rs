@@ -7,7 +7,7 @@ use std::collections::HashMap;
 /// fraction, trailing zeros stripped (91960083 -> "91.960.083", 0.00052 ->
 /// "0,00052"). Matches the web UI's id-ID Intl formatting so the model sees
 /// and echoes numbers the way the rest of the app shows them.
-fn group_id(d: &Decimal) -> String {
+pub(crate) fn group_id(d: &Decimal) -> String {
     let normalized = d.normalize();
     let digits = normalized.abs().to_string();
     let (int_part, frac_part) = match digits.split_once('.') {

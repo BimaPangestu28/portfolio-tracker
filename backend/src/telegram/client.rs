@@ -18,8 +18,24 @@ pub enum TgError {
 #[derive(Debug, Deserialize)]
 pub struct TgUpdate {
     pub update_id: i64,
-    /// Absent for non-message updates (edits, joins, ...), which we ignore.
+    /// Absent for non-message updates (edits, joins, ...).
     pub message: Option<TgMessage>,
+    /// Inline-button presses.
+    pub callback_query: Option<TgCallbackQuery>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TgCallbackQuery {
+    pub id: String,
+    /// The message the pressed button was attached to.
+    pub message: Option<TgCallbackMessage>,
+    pub data: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TgCallbackMessage {
+    pub message_id: i64,
+    pub chat: TgChat,
 }
 
 #[derive(Debug, Deserialize)]
@@ -68,6 +84,15 @@ pub fn parse_updates(body: &serde_json::Value) -> Result<Vec<TgUpdate>, TgError>
         .cloned()
         .ok_or_else(|| TgError::Shape("no result array".into()))?;
     serde_json::from_value(result).map_err(|e| TgError::Shape(e.to_string()))
+}
+
+/// Build an inline keyboard (one row) for sendMessage's reply_markup.
+pub fn build_inline_keyboard(buttons: &[(&str, &str)]) -> serde_json::Value {
+    let row: Vec<serde_json::Value> = buttons
+        .iter()
+        .map(|(text, data)| serde_json::json!({ "text": text, "callback_data": data }))
+        .collect();
+    serde_json::json!({ "inline_keyboard": [row] })
 }
 
 /// Extract the downloadable path from a getFile response body.
@@ -173,6 +198,64 @@ impl TelegramClient {
         Self::check(resp).await?;
         Ok(())
     }
+
+    /// Send a message with a single row of inline buttons.
+    pub async fn send_message_with_buttons(
+        &self,
+        chat_id: i64,
+        text: &str,
+        buttons: &[(&str, &str)],
+    ) -> Result<(), TgError> {
+        let resp = self
+            .client
+            .post(self.url("sendMessage"))
+            .json(&serde_json::json!({
+                "chat_id": chat_id,
+                "text": text,
+                "reply_markup": build_inline_keyboard(buttons),
+            }))
+            .send()
+            .await
+            .map_err(|e| TgError::Http(e.to_string()))?;
+        Self::check(resp).await?;
+        Ok(())
+    }
+
+    /// Acknowledge a button press so the client stops its loading spinner.
+    pub async fn answer_callback_query(&self, callback_query_id: &str) -> Result<(), TgError> {
+        let resp = self
+            .client
+            .post(self.url("answerCallbackQuery"))
+            .json(&serde_json::json!({ "callback_query_id": callback_query_id }))
+            .send()
+            .await
+            .map_err(|e| TgError::Http(e.to_string()))?;
+        Self::check(resp).await?;
+        Ok(())
+    }
+
+    /// Replace a message's text. Omitting reply_markup also removes the
+    /// inline keyboard — used to retire buttons after confirm/reject.
+    pub async fn edit_message_text(
+        &self,
+        chat_id: i64,
+        message_id: i64,
+        text: &str,
+    ) -> Result<(), TgError> {
+        let resp = self
+            .client
+            .post(self.url("editMessageText"))
+            .json(&serde_json::json!({
+                "chat_id": chat_id,
+                "message_id": message_id,
+                "text": text,
+            }))
+            .send()
+            .await
+            .map_err(|e| TgError::Http(e.to_string()))?;
+        Self::check(resp).await?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -250,6 +333,44 @@ mod tests {
         assert_eq!(doc.file_id, "doc1");
         assert_eq!(doc.file_name.as_deref(), Some("statement.pdf"));
         assert_eq!(doc.mime_type.as_deref(), Some("application/pdf"));
+    }
+
+    #[test]
+    fn parse_updates_extracts_callback_queries() {
+        let body = serde_json::json!({
+            "ok": true,
+            "result": [{
+                "update_id": 46,
+                "callback_query": {
+                    "id": "cbq-1",
+                    "from": { "id": 12345, "is_bot": false, "username": "bima" },
+                    "message": {
+                        "message_id": 77,
+                        "chat": { "id": 12345, "type": "private" },
+                        "text": "🧾 Review #42"
+                    },
+                    "data": "confirm:42"
+                }
+            }]
+        });
+        let updates = parse_updates(&body).unwrap();
+        assert!(updates[0].message.is_none());
+        let cb = updates[0].callback_query.as_ref().unwrap();
+        assert_eq!(cb.id, "cbq-1");
+        assert_eq!(cb.data.as_deref(), Some("confirm:42"));
+        let msg = cb.message.as_ref().unwrap();
+        assert_eq!(msg.message_id, 77);
+        assert_eq!(msg.chat.id, 12345);
+    }
+
+    #[test]
+    fn inline_keyboard_builds_a_single_row_of_buttons() {
+        let kb = build_inline_keyboard(&[("✅ Konfirmasi", "confirm:42"), ("❌ Tolak", "reject:42")]);
+        let row = kb["inline_keyboard"][0].as_array().unwrap();
+        assert_eq!(row.len(), 2);
+        assert_eq!(row[0]["text"], "✅ Konfirmasi");
+        assert_eq!(row[0]["callback_data"], "confirm:42");
+        assert_eq!(row[1]["callback_data"], "reject:42");
     }
 
     #[test]
