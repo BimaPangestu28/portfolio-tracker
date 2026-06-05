@@ -23,6 +23,30 @@ pub struct PortfolioSummary {
     pub allocation: Vec<CategoryAllocation>,
 }
 
+/// Backfill zero `fx_to_idr` on historical txns from the fx_rate table (rate
+/// at-or-before the txn date). Returns true when at least one txn still has no
+/// usable rate — callers must surface this (Position.fx_incomplete), never
+/// silently substitute the current rate.
+#[allow(dead_code)] // wired into build_summary in the next commit
+async fn resolve_fx_gaps(db: &Db, txns: &mut [crate::domain::models::Transaction]) -> anyhow::Result<bool> {
+    let mut incomplete = false;
+    for t in txns.iter_mut() {
+        if !t.fx_to_idr.is_zero() {
+            continue;
+        }
+        if t.currency == "IDR" {
+            t.fx_to_idr = Decimal::ONE;
+            continue;
+        }
+        let date = t.executed_at.format("%Y-%m-%d").to_string();
+        match prices::fx_on(db, &t.currency, "IDR", &date).await? {
+            Some(rate) if !rate.is_zero() => t.fx_to_idr = rate,
+            _ => incomplete = true,
+        }
+    }
+    Ok(incomplete)
+}
+
 pub async fn build_summary(db: &Db) -> anyhow::Result<PortfolioSummary> {
     let usd_idr = prices::latest_fx(db, "USD", "IDR").await?.unwrap_or(Decimal::ONE);
     let all_txns = transactions::list_all(db).await?;
@@ -110,7 +134,44 @@ pub async fn build_summary(db: &Db) -> anyhow::Result<PortfolioSummary> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::models::TxnType;
+    use crate::repo::dec;
     use chrono::Utc;
+
+    #[tokio::test]
+    async fn resolve_fx_gaps_backfills_from_fx_rate_table() {
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        prices::upsert_fx(&db, "USD", "IDR", dec("15500").unwrap(), "2026-01-01").await.unwrap();
+        let mut txns = vec![crate::domain::models::Transaction {
+            id: 1, account_id: 1, instrument_id: 1,
+            txn_type: TxnType::Buy,
+            executed_at: chrono::DateTime::parse_from_rfc3339("2026-02-01T00:00:00Z").unwrap().with_timezone(&Utc),
+            quantity: dec("1").unwrap(), price_native: dec("100").unwrap(),
+            fee_native: dec("0").unwrap(), currency: "USD".into(),
+            fx_to_idr: dec("0").unwrap(), fx_to_usd: dec("1").unwrap(), note: None,
+        }];
+        let incomplete = resolve_fx_gaps(&db, &mut txns).await.unwrap();
+        assert!(!incomplete);
+        assert_eq!(txns[0].fx_to_idr, dec("15500").unwrap());
+    }
+
+    #[tokio::test]
+    async fn resolve_fx_gaps_flags_unresolvable_txn() {
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        // No fx_rate rows at all -> can't backfill, must flag.
+        let mut txns = vec![crate::domain::models::Transaction {
+            id: 1, account_id: 1, instrument_id: 1,
+            txn_type: TxnType::Buy,
+            executed_at: chrono::DateTime::parse_from_rfc3339("2026-02-01T00:00:00Z").unwrap().with_timezone(&Utc),
+            quantity: dec("1").unwrap(), price_native: dec("100").unwrap(),
+            fee_native: dec("0").unwrap(), currency: "USD".into(),
+            fx_to_idr: dec("0").unwrap(), fx_to_usd: dec("1").unwrap(), note: None,
+        }];
+        let incomplete = resolve_fx_gaps(&db, &mut txns).await.unwrap();
+        assert!(incomplete);
+        assert_eq!(txns[0].fx_to_idr, dec("0").unwrap()); // untouched, not guessed
+    }
+
     #[tokio::test]
     async fn summary_consolidates_one_position() {
         let db = crate::db::connect("sqlite::memory:").await.unwrap();

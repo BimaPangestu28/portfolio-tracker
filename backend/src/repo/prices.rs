@@ -40,6 +40,13 @@ pub async fn latest_fx(db: &Db, base: &str, quote: &str) -> anyhow::Result<Optio
     match row { Some((r,)) => Ok(Some(dec(&r)?)), None => Ok(None) }
 }
 
+pub async fn fx_on(db: &Db, base: &str, quote: &str, as_of: &str) -> anyhow::Result<Option<Decimal>> {
+    let row = sqlx::query_as::<_, (String,)>(
+        "SELECT rate FROM fx_rate WHERE base=? AND quote=? AND as_of<=? ORDER BY as_of DESC LIMIT 1")
+        .bind(base).bind(quote).bind(as_of).fetch_optional(db).await?;
+    match row { Some((r,)) => Ok(Some(dec(&r)?)), None => Ok(None) }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -66,5 +73,18 @@ mod tests {
         let db = crate::db::connect("sqlite::memory:").await.unwrap();
         upsert_fx(&db, "USD", "IDR", d!(16250), "2026-05-31").await.unwrap();
         assert_eq!(latest_fx(&db, "USD", "IDR").await.unwrap().unwrap(), d!(16250));
+    }
+
+    #[tokio::test]
+    async fn fx_on_returns_rate_at_or_before_date() {
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        upsert_fx(&db, "USD", "IDR", d!(15000), "2026-01-01").await.unwrap();
+        upsert_fx(&db, "USD", "IDR", d!(16000), "2026-03-01").await.unwrap();
+        // Exact date
+        assert_eq!(fx_on(&db, "USD", "IDR", "2026-03-01").await.unwrap(), Some(d!(16000)));
+        // Between rows -> most recent before
+        assert_eq!(fx_on(&db, "USD", "IDR", "2026-02-15").await.unwrap(), Some(d!(15000)));
+        // Before any row -> None
+        assert_eq!(fx_on(&db, "USD", "IDR", "2025-12-31").await.unwrap(), None);
     }
 }
