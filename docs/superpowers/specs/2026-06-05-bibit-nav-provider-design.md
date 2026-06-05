@@ -42,7 +42,7 @@ fund positions get real units and a daily-moving market value.
 `BibitClient` with `async fn latest(&self, code: &str) -> Result<NavQuote, PriceError>`:
 
 - `GET https://bibit.id/reksadana/{code}/x` with a desktop `User-Agent`
-  (the slug segment is cosmetic; only the RDCODE routes).
+  (any slug works — the server 307-redirects to the canonical slug; reqwest follows redirects by default).
 - Locate the `<script id="__NEXT_DATA__" type="application/json">...</script>`
   payload with plain string search (no HTML parser dependency), parse with
   `serde_json`, and read `props.pageProps.productDetail.nav.value` (number)

@@ -49,8 +49,9 @@ impl BibitNav {
         Self { base: "https://bibit.id/reksadana".into(), client: reqwest::Client::new() }
     }
 
-    /// `code` is the fund's RDCODE, e.g. "RD1436". The slug segment after the
-    /// code is cosmetic — any value routes.
+    /// `code` is the fund's RDCODE, e.g. "RD1436". Any slug after the code
+    /// works: the server 307-redirects to the canonical slug and reqwest
+    /// follows redirects by default.
     pub async fn latest(&self, code: &str) -> Result<NavQuote, PriceError> {
         let url = format!("{}/{}/x", self.base, code);
         let resp = self.client.get(&url)

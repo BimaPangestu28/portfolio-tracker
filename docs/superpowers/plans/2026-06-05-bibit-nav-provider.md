@@ -543,9 +543,10 @@ Expected: 100 tests pass, build clean.
 - [ ] **Step 3: One live smoke check (manual, outside tests)**
 
 ```bash
-curl -s -A "Mozilla/5.0" https://bibit.id/reksadana/RD1436/x | grep -o '"nav":{[^}]*}' | head -1
+curl -sL -A "Mozilla/5.0" https://bibit.id/reksadana/RD1436/x | grep -o '"nav":{[^}]*}' | head -1
 ```
 Expected: a JSON fragment with `"value":<number>` and `"date":"YYYY-MM-DD"`. This confirms the page structure still matches `parse_nav` before shipping. If it doesn't match, STOP and report — the parser needs adjusting to the live structure.
+(-L is required: the /x slug 307-redirects to the canonical slug.)
 
 - [ ] **Step 4: Review the branch**
 
