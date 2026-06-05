@@ -14,6 +14,7 @@ import {
   XAxis,
   YAxis,
   Tooltip,
+  Legend,
   ResponsiveContainer,
   CartesianGrid,
 } from "recharts";
@@ -240,6 +241,7 @@ export default function PerformancePage() {
                   fontSize: 12,
                 }}
               />
+              <Legend formatter={(value: string) => (value === "pricePnl" ? "Harga" : "FX")} wrapperStyle={{ fontSize: 12 }} />
               <Area type="monotone" dataKey="pricePnl" stroke="hsl(var(--chart-1))" strokeWidth={1.5} fill="hsl(var(--chart-1))" fillOpacity={0.15} dot={false} />
               <Area type="monotone" dataKey="fxPnl" stroke="hsl(var(--chart-2))" strokeWidth={1.5} fill="hsl(var(--chart-2))" fillOpacity={0.15} dot={false} />
             </AreaChart>
