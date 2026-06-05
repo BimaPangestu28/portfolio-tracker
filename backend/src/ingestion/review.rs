@@ -25,8 +25,51 @@ pub struct ConfirmPayload {
     pub amount_native: Option<String>,
 }
 
-use crate::repo::{prices, review_items, transactions};
+use crate::repo::{instruments::InstrumentRow, prices, review_items, transactions};
 use rust_decimal::Decimal;
+
+/// Resolve an amount-only trade into (quantity, price). For bibit-sourced
+/// funds with a stored NAV quote, derive real units (amount / NAV, 4 dp —
+/// Bibit's unit precision). Otherwise: quantity = amount at price 1. Never
+/// touches the network; reads only the quote table.
+async fn amount_only_qty_price(
+    db: &Db,
+    ins: &InstrumentRow,
+    amount: &str,
+    note: &mut Option<String>,
+) -> anyhow::Result<(String, String)> {
+    let amount_dec = crate::repo::dec(amount)?;
+    if ins.price_source.starts_with("bibit:") {
+        // Once an instrument has value-based (price = 1) rows, stay on that
+        // convention: mixing NAV-derived units with rupiah-as-units rows would
+        // make the position unreconcilable (a derived sell could never close a
+        // price-1 buy). Edit the legacy rows to real units to unlock derivation.
+        if transactions::has_price_one_txn(db, ins.id).await? {
+            append_note(note, "dicatat nominal di harga 1 agar konsisten dengan transaksi sebelumnya");
+            return Ok((amount_dec.normalize().to_string(), "1".to_string()));
+        }
+        if let Some(lp) = prices::latest(db, ins.id).await? {
+            if lp.source == "bibit" && lp.price > Decimal::ZERO {
+                let qty = (amount_dec / lp.price).round_dp(4);
+                append_note(note, &format!("unit dihitung dari NAV {} per {}", lp.price.normalize(), lp.as_of));
+                return Ok((qty.normalize().to_string(), lp.price.normalize().to_string()));
+            }
+        }
+        append_note(note, "NAV belum tersedia; dicatat nominal di harga 1");
+    }
+    Ok((amount_dec.normalize().to_string(), "1".to_string()))
+}
+
+fn append_note(note: &mut Option<String>, msg: &str) {
+    match note {
+        Some(n) => {
+            n.push_str(" (");
+            n.push_str(msg);
+            n.push(')');
+        }
+        None => *note = Some(format!("({msg})")),
+    }
+}
 
 /// Confirm a review item: build a ledger transaction from the payload and mark the item confirmed.
 /// FX fields default from the latest USD/IDR rate when absent. Returns the new txn id.
@@ -35,7 +78,7 @@ pub async fn confirm(db: &Db, item_id: i64, p: &ConfirmPayload) -> anyhow::Resul
     if item.status != "pending" {
         return Err(anyhow::anyhow!("review item {item_id} is already {}", item.status));
     }
-    crate::repo::instruments::get(db, p.instrument_id).await
+    let ins = crate::repo::instruments::get(db, p.instrument_id).await
         .map_err(|_| anyhow::anyhow!("unknown instrument_id {}", p.instrument_id))?;
     crate::repo::accounts::get(db, p.account_id).await
         .map_err(|_| anyhow::anyhow!("unknown account_id {}", p.account_id))?;
@@ -44,15 +87,16 @@ pub async fn confirm(db: &Db, item_id: i64, p: &ConfirmPayload) -> anyhow::Resul
     let fx_to_usd = p.fx_to_usd.clone().unwrap_or_else(|| "1".to_string());
 
     // Amount-only mutual fund trades (e.g. Bibit "Order" screenshots) carry a
-    // total IDR amount but no units/NAV — and never will (value-based tracking).
-    // Record them as quantity = amount at price 1: cost basis (qty*price + fee)
-    // equals the invested amount and the avg_cost fallback (service/portfolio.rs)
-    // values the position at cost. With avg cost 1, an amount-only sell realizes
-    // zero P&L by construction — per-unit gains are unknowable without NAV.
+    // total IDR amount but no units/NAV. With a stored NAV quote (bibit:* price
+    // source, refreshed daily) we derive real units: quantity = amount / NAV at
+    // price = NAV. Without one we fall back to quantity = amount at price 1,
+    // which values the position at cost via the avg_cost fallback
+    // (service/portfolio.rs).
+    let mut note = p.note.clone();
     let (quantity, price_native) = if p.quantity.trim().is_empty() && p.price_native.trim().is_empty() {
         let amount = p.amount_native.as_deref().map(str::trim).filter(|a| !a.is_empty());
         match (amount, p.entry_type.as_str()) {
-            (Some(a), "buy" | "sell") => (a.to_string(), "1".to_string()),
+            (Some(a), "buy" | "sell") => amount_only_qty_price(db, &ins, a, &mut note).await?,
             _ => return Err(anyhow::anyhow!(
                 "quantity/price or amount_native is required for a {} entry",
                 p.entry_type
@@ -75,7 +119,7 @@ pub async fn confirm(db: &Db, item_id: i64, p: &ConfirmPayload) -> anyhow::Resul
         currency: p.currency.clone(),
         fx_to_idr,
         fx_to_usd,
-        note: p.note.clone(),
+        note,
         source: None,
         external_id: None,
     };
@@ -267,5 +311,132 @@ mod tests {
         };
         assert!(confirm(&db, item.id, &payload).await.is_err());
         assert_eq!(transactions::list_all(&db).await.unwrap().len(), 0);
+    }
+
+    /// A Bibit-sourced mutual fund instrument + goal account.
+    async fn seed_fund(db: &Db) -> (i64, i64) {
+        let a = accounts::create(db, &accounts::NewAccount { name:"Pendidikan Noah".into(), account_type:"manual".into(), institution:None, native_currency:"IDR".into(), note:None }).await.unwrap();
+        let i = instruments::create(db, &instruments::NewInstrument { symbol:"RD1436".into(), name:"Sucorinvest Bond Fund".into(), instrument_type:"mutual_fund".into(), native_currency:"IDR".into(), category_id:None, price_source:"bibit:RD1436".into(), decimals:Some(4), note:None }).await.unwrap();
+        (a.id, i.id)
+    }
+
+    fn amount_only_payload(account_id: i64, instrument_id: i64, entry_type: &str, amount: &str) -> ConfirmPayload {
+        ConfirmPayload {
+            account_id, instrument_id, entry_type: entry_type.into(),
+            executed_at:"2026-06-05T00:00:00Z".into(), quantity:"".into(), price_native:"".into(),
+            fee_native:None, currency:"IDR".into(), fx_to_idr:None, fx_to_usd:None, note:None,
+            amount_native:Some(amount.into()),
+        }
+    }
+
+    #[tokio::test]
+    async fn amount_only_buy_with_stored_nav_derives_units() {
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        let (account_id, instrument_id) = seed_fund(&db).await;
+        crate::repo::prices::upsert_latest(&db, instrument_id, dec!(1697.22), "IDR", "bibit", "2026-06-04").await.unwrap();
+        let item = review_items::create(&db, &review_items::NewReviewItem {
+            batch_id:"b", source_kind:"image", source_filename:"asdc.jpeg", source_path:"p",
+            doc_type:"txn_history", needs_attention:false, payload_json:"{}", raw_llm_json:"{}",
+            suggested_instrument_id:Some(instrument_id), suggested_account_id:Some(account_id),
+        }).await.unwrap();
+        confirm(&db, item.id, &amount_only_payload(account_id, instrument_id, "buy", "13000000")).await.unwrap();
+        let txns = transactions::list_all(&db).await.unwrap();
+        assert_eq!(txns[0].quantity, (dec!(13000000) / dec!(1697.22)).round_dp(4));
+        assert_eq!(txns[0].price_native, dec!(1697.22));
+        let note = txns[0].note.clone().unwrap_or_default();
+        assert!(note.contains("NAV 1697.22"), "note should record the NAV used: {note}");
+        assert!(note.contains("2026-06-04"), "note should record the NAV date: {note}");
+    }
+
+    #[tokio::test]
+    async fn amount_only_buy_without_nav_falls_back_to_price_one() {
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        let (account_id, instrument_id) = seed_fund(&db).await; // no quote stored
+        let item = review_items::create(&db, &review_items::NewReviewItem {
+            batch_id:"b", source_kind:"image", source_filename:"asdc.jpeg", source_path:"p",
+            doc_type:"txn_history", needs_attention:false, payload_json:"{}", raw_llm_json:"{}",
+            suggested_instrument_id:Some(instrument_id), suggested_account_id:Some(account_id),
+        }).await.unwrap();
+        confirm(&db, item.id, &amount_only_payload(account_id, instrument_id, "buy", "13000000")).await.unwrap();
+        let txns = transactions::list_all(&db).await.unwrap();
+        assert_eq!(txns[0].quantity, dec!(13000000));
+        assert_eq!(txns[0].price_native, dec!(1));
+        let note = txns[0].note.clone().unwrap_or_default();
+        assert!(note.contains("NAV belum tersedia"), "fallback should be noted: {note}");
+    }
+
+    #[tokio::test]
+    async fn amount_only_sell_with_nav_derives_units_too() {
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        let (account_id, instrument_id) = seed_fund(&db).await;
+        crate::repo::prices::upsert_latest(&db, instrument_id, dec!(1617.0896), "IDR", "bibit", "2026-06-04").await.unwrap();
+        let item = review_items::create(&db, &review_items::NewReviewItem {
+            batch_id:"b", source_kind:"image", source_filename:"asdc.jpeg", source_path:"p",
+            doc_type:"txn_history", needs_attention:false, payload_json:"{}", raw_llm_json:"{}",
+            suggested_instrument_id:Some(instrument_id), suggested_account_id:Some(account_id),
+        }).await.unwrap();
+        confirm(&db, item.id, &amount_only_payload(account_id, instrument_id, "sell", "5000000")).await.unwrap();
+        let txns = transactions::list_all(&db).await.unwrap();
+        assert_eq!(txns[0].quantity, (dec!(5000000) / dec!(1617.0896)).round_dp(4));
+        assert_eq!(txns[0].price_native, dec!(1617.0896));
+    }
+
+    #[tokio::test]
+    async fn derivation_skipped_when_instrument_has_price_one_history() {
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        let (account_id, instrument_id) = seed_fund(&db).await;
+        // First confirm happened before any NAV existed -> price=1 row.
+        let item1 = review_items::create(&db, &review_items::NewReviewItem {
+            batch_id:"b", source_kind:"image", source_filename:"a.jpeg", source_path:"p",
+            doc_type:"txn_history", needs_attention:false, payload_json:"{}", raw_llm_json:"{}",
+            suggested_instrument_id:Some(instrument_id), suggested_account_id:Some(account_id),
+        }).await.unwrap();
+        confirm(&db, item1.id, &amount_only_payload(account_id, instrument_id, "buy", "13000000")).await.unwrap();
+        // NAV arrives later; a second confirm must NOT switch conventions.
+        crate::repo::prices::upsert_latest(&db, instrument_id, dec!(1697.22), "IDR", "bibit", "2026-06-04").await.unwrap();
+        let item2 = review_items::create(&db, &review_items::NewReviewItem {
+            batch_id:"b", source_kind:"image", source_filename:"b.jpeg", source_path:"p",
+            doc_type:"txn_history", needs_attention:false, payload_json:"{}", raw_llm_json:"{}",
+            suggested_instrument_id:Some(instrument_id), suggested_account_id:Some(account_id),
+        }).await.unwrap();
+        confirm(&db, item2.id, &amount_only_payload(account_id, instrument_id, "sell", "5000000")).await.unwrap();
+        let txns = transactions::list_all(&db).await.unwrap();
+        let sell = txns.iter().find(|t| t.txn_type == crate::domain::models::TxnType::Sell).unwrap();
+        assert_eq!(sell.quantity, dec!(5000000), "must stay value-based");
+        assert_eq!(sell.price_native, dec!(1));
+        assert!(sell.note.clone().unwrap_or_default().contains("konsisten"), "note should explain the gate");
+    }
+
+    #[tokio::test]
+    async fn non_bibit_latest_quote_is_not_used_as_nav() {
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        let (account_id, instrument_id) = seed_fund(&db).await;
+        // A stray manual quote must not be mistaken for NAV.
+        crate::repo::prices::upsert_latest(&db, instrument_id, dec!(999), "IDR", "manual", "2026-06-04").await.unwrap();
+        let item = review_items::create(&db, &review_items::NewReviewItem {
+            batch_id:"b", source_kind:"image", source_filename:"a.jpeg", source_path:"p",
+            doc_type:"txn_history", needs_attention:false, payload_json:"{}", raw_llm_json:"{}",
+            suggested_instrument_id:Some(instrument_id), suggested_account_id:Some(account_id),
+        }).await.unwrap();
+        confirm(&db, item.id, &amount_only_payload(account_id, instrument_id, "buy", "1000000")).await.unwrap();
+        let txns = transactions::list_all(&db).await.unwrap();
+        assert_eq!(txns[0].quantity, dec!(1000000));
+        assert_eq!(txns[0].price_native, dec!(1));
+    }
+
+    #[tokio::test]
+    async fn amount_only_on_non_bibit_instrument_keeps_price_one_without_note() {
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        let (account_id, instrument_id) = seed(&db).await; // crypto, price_source "manual"
+        let item = review_items::create(&db, &review_items::NewReviewItem {
+            batch_id:"b", source_kind:"image", source_filename:"f.png", source_path:"p",
+            doc_type:"txn_history", needs_attention:false, payload_json:"{}", raw_llm_json:"{}",
+            suggested_instrument_id:Some(instrument_id), suggested_account_id:Some(account_id),
+        }).await.unwrap();
+        confirm(&db, item.id, &amount_only_payload(account_id, instrument_id, "buy", "750000")).await.unwrap();
+        let txns = transactions::list_all(&db).await.unwrap();
+        assert_eq!(txns[0].quantity, dec!(750000));
+        assert_eq!(txns[0].price_native, dec!(1));
+        assert_eq!(txns[0].note, None, "non-bibit fallback must not add a note");
     }
 }

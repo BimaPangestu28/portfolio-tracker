@@ -78,7 +78,7 @@ pub async fn build_summary(db: &Db) -> anyhow::Result<PortfolioSummary> {
         let ins = instruments::get(db, instrument_id).await?;
         let latest = prices::latest(db, instrument_id).await?;
         let (price, stale) = match latest {
-            Some(lp) => (lp.price, crate::pricing::service::is_stale(&lp.as_of, chrono::Utc::now(), 24)),
+            Some(lp) => (lp.price, crate::pricing::service::is_stale(&lp.as_of, chrono::Utc::now(), crate::pricing::service::stale_window_hours(&lp.source))),
             None => (cb.avg_cost, true), // fall back to cost, flagged stale — never silently zero
         };
         // FX from instrument native currency to IDR/USD (Phase 1: non-IDR treated as USD-denominated).

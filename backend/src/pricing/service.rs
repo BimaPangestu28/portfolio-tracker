@@ -8,6 +8,18 @@ pub fn is_stale(as_of: &str, now: DateTime<Utc>, max_age_hours: i64) -> bool {
     }
 }
 
+/// Staleness window per quote source, in hours.
+const FUND_STALE_HOURS: i64 = 144; // 6 days
+const DEFAULT_STALE_HOURS: i64 = 24;
+
+/// Fund NAV (bibit) is published T-1 with date-only as_of (midnight UTC) and
+/// pauses over weekends, so a 6-day window keeps long weekends (e.g. a Monday
+/// exchange holiday) from false-flagging. Week-long closures (Lebaran) will
+/// still flag stale — by design, the data really is old. Everything else: 24h.
+pub fn stale_window_hours(source: &str) -> i64 {
+    if source == "bibit" { FUND_STALE_HOURS } else { DEFAULT_STALE_HOURS }
+}
+
 use crate::db::Db;
 use crate::pricing::{coingecko::CoinGecko, fx::FxClient, PriceProvider};
 use crate::repo::{instruments, prices};
@@ -29,6 +41,7 @@ pub async fn refresh_all(db: &Db) -> anyhow::Result<()> {
     let today = Utc::now().format("%Y-%m-%d").to_string();
     let cg = CoinGecko::new();
     let fx = FxClient::new();
+    let bibit = crate::pricing::bibit::BibitNav::new();
 
     // Keep the fresh rate around: the gold-derived source needs it below.
     // On fetch failure, fall back to the last stored rate.
@@ -57,6 +70,15 @@ pub async fn refresh_all(db: &Db) -> anyhow::Result<()> {
             match crate::pricing::yahoo::Yahoo::new().latest(ext).await {
                 Ok(q) => { let _ = prices::upsert_latest(db, ins.id, q.price, &q.currency, "yahoo", &today).await; }
                 Err(e) => tracing::warn!("yahoo price refresh failed for {}: {e}", ins.symbol),
+            }
+        }
+        // Indonesian mutual fund NAV scraped from Bibit's public product page.
+        // Store under the page's NAV date (T-1), not today — keeps staleness honest
+        // and avoids duplicating the same NAV under multiple dates.
+        if let Some(code) = ins.price_source.strip_prefix("bibit:") {
+            match bibit.latest(code).await {
+                Ok(q) => { let _ = prices::upsert_latest(db, ins.id, q.price, "IDR", "bibit", &q.as_of).await; }
+                Err(e) => tracing::warn!("bibit nav refresh failed for {}: {e}", ins.symbol),
             }
         }
         // Derived source: gold futures (USD/oz via Yahoo) × USD/IDR → IDR/gram.
@@ -101,5 +123,28 @@ mod tests {
     fn old_price_is_stale() {
         let now = Utc.with_ymd_and_hms(2026,5,31,12,0,0).unwrap();
         assert!(is_stale("2026-05-29", now, 24));
+    }
+
+    #[test]
+    fn bibit_quotes_get_a_six_day_stale_window() {
+        assert_eq!(stale_window_hours("bibit"), 144);
+        assert_eq!(stale_window_hours("yahoo"), 24);
+        assert_eq!(stale_window_hours("coingecko"), 24);
+        assert_eq!(stale_window_hours("manual"), 24);
+    }
+
+    #[test]
+    fn fund_nav_survives_a_monday_holiday_but_not_a_week() {
+        // Friday NAV, single Monday holiday: next refresh lands Tuesday evening
+        // WIB (~Tue 11:00 UTC) — 4d11h old, must NOT be stale for funds.
+        let tue = Utc.with_ymd_and_hms(2026, 6, 9, 11, 0, 0).unwrap();
+        assert!(!is_stale("2026-06-05", tue, stale_window_hours("bibit")));
+        // Same quote under the default window — stale.
+        assert!(is_stale("2026-06-05", tue, stale_window_hours("yahoo")));
+        // Boundary: exactly 144h is fresh, just past it is stale.
+        let exactly = Utc.with_ymd_and_hms(2026, 6, 11, 0, 0, 0).unwrap();
+        assert!(!is_stale("2026-06-05", exactly, stale_window_hours("bibit")));
+        let past = Utc.with_ymd_and_hms(2026, 6, 11, 0, 0, 1).unwrap();
+        assert!(is_stale("2026-06-05", past, stale_window_hours("bibit")));
     }
 }

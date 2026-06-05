@@ -41,3 +41,49 @@ pub async fn delete(db: &Db, id: i64) -> anyhow::Result<()> {
     sqlx::query("DELETE FROM category WHERE id = ?").bind(id).execute(db).await?;
     Ok(())
 }
+
+/// Partial update; absent fields keep their current values.
+#[derive(Debug, Deserialize)]
+pub struct UpdateCategory {
+    pub name: Option<String>,
+    pub target_pct: Option<String>,
+    pub tolerance_band_pct: Option<String>,
+    pub sort_order: Option<i64>,
+    pub color: Option<String>,
+}
+
+pub async fn update(db: &Db, id: i64, u: &UpdateCategory) -> anyhow::Result<CategoryRow> {
+    let cur = get(db, id).await?;
+    let name = u.name.clone().unwrap_or(cur.name);
+    let target_pct = u.target_pct.clone().unwrap_or(cur.target_pct);
+    let tolerance = u.tolerance_band_pct.clone().or(cur.tolerance_band_pct);
+    let sort_order = u.sort_order.unwrap_or(cur.sort_order);
+    let color = u.color.clone().or(cur.color);
+    sqlx::query("UPDATE category SET name=?, target_pct=?, tolerance_band_pct=?, sort_order=?, color=? WHERE id=?")
+        .bind(&name).bind(&target_pct).bind(&tolerance).bind(sort_order).bind(&color).bind(id)
+        .execute(db).await?;
+    get(db, id).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn update_changes_target_keeping_other_fields() {
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        let cat = create(&db, &NewCategory {
+            name: "ETF US".into(), target_pct: "30".into(),
+            tolerance_band_pct: Some("5".into()), sort_order: None, color: None,
+        }).await.unwrap();
+
+        let updated = update(&db, cat.id, &UpdateCategory {
+            name: None, target_pct: Some("65".into()),
+            tolerance_band_pct: None, sort_order: None, color: None,
+        }).await.unwrap();
+
+        assert_eq!(updated.target_pct, "65");
+        assert_eq!(updated.name, "ETF US");
+        assert_eq!(updated.tolerance_band_pct.as_deref(), Some("5"));
+    }
+}

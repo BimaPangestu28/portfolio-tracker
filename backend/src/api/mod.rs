@@ -49,12 +49,18 @@ pub fn router(state: AppState) -> Router {
             "/categories",
             get(crud::list_categories).post(crud::create_category),
         )
-        .route("/categories/:id", delete(crud::delete_category))
+        .route(
+            "/categories/:id",
+            delete(crud::delete_category).patch(crud::update_category),
+        )
         .route(
             "/instruments",
             get(crud::list_instruments).post(crud::create_instrument),
         )
-        .route("/instruments/:id", delete(crud::delete_instrument))
+        .route(
+            "/instruments/:id",
+            delete(crud::delete_instrument).patch(crud::update_instrument),
+        )
         .route(
             "/transactions",
             get(crud::list_transactions).post(crud::create_transaction),
@@ -67,6 +73,8 @@ pub fn router(state: AppState) -> Router {
         .route("/portfolio/history", get(portfolio::history))
         .route("/portfolio/insights", get(portfolio::insights))
         .route("/portfolio/performance", get(portfolio::performance))
+        .route("/portfolio/movers", get(portfolio::movers))
+        .route("/portfolio/benchmark", get(portfolio::benchmark))
         .route("/goals", get(goals::list_goals).post(goals::create_goal))
         .route("/goals/:id", delete(goals::delete_goal))
         .route(

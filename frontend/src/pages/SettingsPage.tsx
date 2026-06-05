@@ -6,26 +6,131 @@ import {
   useDeleteAccount,
   useInstruments,
   useCreateInstrument,
+  useUpdateInstrument,
   useDeleteInstrument,
+  useCategories,
   useManualPrice,
   useManualFx,
+  type Instrument,
+  type Category,
 } from "../api/hooks";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import WhatsAppPage from "./WhatsAppPage";
+import TelegramPage from "./TelegramPage";
 
 const today = () => new Date().toISOString().slice(0, 10);
 const ACCOUNT_TYPES = ["manual", "exchange", "broker", "bank", "wallet"];
 const INSTRUMENT_TYPES = ["crypto", "stock_id", "stock_us", "etf", "mutual_fund", "cash", "bond", "gold", "other"];
 
+function InstrumentRow({ instrument, categories }: { instrument: Instrument; categories: Category[] }) {
+  const update = useUpdateInstrument();
+  const del = useDeleteInstrument();
+  const [priceSource, setPriceSource] = useState(instrument.price_source);
+
+  const savePriceSource = () => {
+    if (priceSource === instrument.price_source) return;
+    update.mutate(
+      { id: instrument.id, patch: { price_source: priceSource } },
+      {
+        onSuccess: () => toast.success(`Price source ${instrument.symbol} disimpan`),
+        onError: (err) => { toast.error((err as Error).message); setPriceSource(instrument.price_source); },
+      },
+    );
+  };
+
+  const changeCategory = (value: string) => {
+    update.mutate(
+      { id: instrument.id, patch: { category_id: value ? Number(value) : null } },
+      {
+        onSuccess: () => toast.success(`Kategori ${instrument.symbol} disimpan`),
+        onError: (err) => toast.error((err as Error).message),
+      },
+    );
+  };
+
+  return (
+    <li className="flex items-center gap-2 border-b py-1.5">
+      <span className="flex-1">
+        {instrument.symbol} · {instrument.instrument_type}
+      </span>
+      <select
+        className="h-7 rounded-md border border-input bg-transparent px-2 text-xs"
+        aria-label={`Kategori ${instrument.symbol}`}
+        value={instrument.category_id ?? ""}
+        onChange={(e) => changeCategory(e.target.value)}
+      >
+        <option value="">— tanpa kategori —</option>
+        {categories.map((c) => (
+          <option key={c.id} value={c.id}>{c.name}</option>
+        ))}
+      </select>
+      <input
+        className="h-7 w-56 rounded-md border border-input bg-transparent px-2 text-xs"
+        aria-label={`Price source ${instrument.symbol}`}
+        value={priceSource}
+        onChange={(e) => setPriceSource(e.target.value)}
+        onBlur={savePriceSource}
+        onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+      />
+      <button type="button" onClick={() => del.mutate(instrument.id)} className="text-xs text-destructive hover:underline">
+        delete
+      </button>
+    </li>
+  );
+}
+
+/**
+ * SettingsPage — 6-item IA consolidation
+ * Hosts General settings + WhatsApp + Telegram bot connections as tabs.
+ */
 export default function SettingsPage() {
+  const [tab, setTab] = useState<Tab>("general");
+
+  return (
+    <div className="space-y-0">
+      <div className="ptabs">
+        <button
+          type="button"
+          className={`ptab${tab === "general" ? " active" : ""}`}
+          onClick={() => setTab("general")}
+        >
+          Umum
+        </button>
+        <button
+          type="button"
+          className={`ptab${tab === "whatsapp" ? " active" : ""}`}
+          onClick={() => setTab("whatsapp")}
+        >
+          WhatsApp
+        </button>
+        <button
+          type="button"
+          className={`ptab${tab === "telegram" ? " active" : ""}`}
+          onClick={() => setTab("telegram")}
+        >
+          Telegram
+        </button>
+      </div>
+
+      {tab === "general" && <GeneralSettings />}
+      {tab === "whatsapp" && <WhatsAppPage />}
+      {tab === "telegram" && <TelegramPage />}
+    </div>
+  );
+}
+
+type Tab = "general" | "whatsapp" | "telegram";
+
+function GeneralSettings() {
   const accounts = useAccounts();
   const instruments = useInstruments();
+  const categories = useCategories();
   const createAccount = useCreateAccount();
   const delAccount = useDeleteAccount();
   const createInstrument = useCreateInstrument();
-  const delInstrument = useDeleteInstrument();
   const manualPrice = useManualPrice();
   const manualFx = useManualFx();
 
@@ -36,7 +141,7 @@ export default function SettingsPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-xl font-semibold">Settings</h1>
+      <h1 className="text-xl font-semibold">Pengaturan</h1>
 
       <Card>
         <CardHeader>
@@ -129,14 +234,7 @@ export default function SettingsPage() {
           </form>
           <ul className="text-sm">
             {(instruments.data ?? []).map((i) => (
-              <li key={i.id} className="flex justify-between border-b py-1.5">
-                <span>
-                  {i.symbol} · {i.instrument_type} · {i.price_source}
-                </span>
-                <button type="button" onClick={() => delInstrument.mutate(i.id)} className="text-xs text-destructive hover:underline">
-                  delete
-                </button>
-              </li>
+              <InstrumentRow key={i.id} instrument={i} categories={categories.data ?? []} />
             ))}
           </ul>
         </CardContent>

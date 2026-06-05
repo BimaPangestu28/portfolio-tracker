@@ -99,8 +99,8 @@ pub fn build_confirm_payload(item: &ReviewItemRow) -> Result<ConfirmPayload, Str
     let entry: ExtractedEntry = serde_json::from_str(&item.payload_json)
         .map_err(|e| format!("payload tidak terbaca: {e}"))?;
     // Amount-only fund entries (an IDR amount, no units/NAV — e.g. Bibit) are
-    // one-tap confirmable: confirm() maps amount_native to quantity = amount at
-    // price 1 for buy/sell.
+    // one-tap confirmable: confirm() derives NAV units when a stored bibit
+    // quote exists, else records quantity = amount at price 1, for buy/sell.
     let amount_only = entry.quantity.is_none()
         && entry.price_native.is_none()
         && entry.amount_native.is_some()

@@ -12,13 +12,10 @@ import { NavLink, Outlet, useLocation } from "react-router-dom";
 import {
   LayoutDashboard,
   Wallet,
-  LineChart,
   Target,
   Banknote,
   Inbox,
   MessageSquare,
-  MessageCircle,
-  Send,
   Menu,
   X,
   RefreshCw,
@@ -28,6 +25,7 @@ import {
   PanelLeft,
   Sparkles,
   Lock,
+  Settings,
 } from "lucide-react";
 import { useTheme } from "@/components/theme-provider";
 import { useRefreshPrices } from "@/api/hooks";
@@ -47,14 +45,14 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { to: "/",          label: "Dashboard",  icon: LayoutDashboard, end: true },
   { to: "/portfolio", label: "Portofolio", icon: Wallet },
-  { to: "/performance", label: "Performa",   icon: LineChart },
   { to: "/planner",   label: "Rencana",    icon: Target },
   { to: "/budget",    label: "Budget",     icon: Banknote },
   { to: "/data",      label: "Data",       icon: Inbox },
   { to: "/chat",      label: "Chat",       icon: MessageSquare },
-  { to: "/whatsapp", label: "WhatsApp",   icon: MessageCircle },
-  { to: "/telegram",  label: "Telegram",   icon: Send },
 ];
+
+/** Settings lives in the sidebar footer, not the main nav. */
+const SETTINGS_ITEM: NavItem = { to: "/settings", label: "Pengaturan", icon: Settings };
 
 /** Bottom nav shows first 4 + "More" (opens sheet) */
 const BOTTOM_KEYS = ["/", "/portfolio", "/budget", "/chat"];
@@ -130,6 +128,14 @@ function Sidebar({ collapsed, onCollapse }: { collapsed: boolean; onCollapse: ()
 
       {/* Footer */}
       <div className="pt-sidebar-foot">
+        <NavLink
+          to={SETTINGS_ITEM.to}
+          title={collapsed ? SETTINGS_ITEM.label : undefined}
+          className={({ isActive }) => cn("pt-nav-item", isActive && "active")}
+        >
+          <SETTINGS_ITEM.icon size={18} strokeWidth={1.8} />
+          <span className="pt-nav-label">{SETTINGS_ITEM.label}</span>
+        </NavLink>
         <button
           type="button"
           className="pt-nav-item"
@@ -185,6 +191,14 @@ function MobileSheet({ open, onClose }: { open: boolean; onClose: () => void }) 
         </div>
         <NavList onNavigate={onClose} />
         <div className="pt-sidebar-foot">
+          <NavLink
+            to={SETTINGS_ITEM.to}
+            className={({ isActive }) => cn("pt-nav-item", isActive && "active")}
+            onClick={onClose}
+          >
+            <SETTINGS_ITEM.icon size={18} strokeWidth={1.8} />
+            <span>{SETTINGS_ITEM.label}</span>
+          </NavLink>
           <button
             type="button"
             className="pt-nav-item"
@@ -246,7 +260,7 @@ function BottomNav({ onMore }: { onMore: () => void }) {
 
 function usePageTitle() {
   const location = useLocation();
-  const item = NAV_ITEMS.find((n) => {
+  const item = [...NAV_ITEMS, SETTINGS_ITEM].find((n) => {
     if (n.end) return location.pathname === n.to;
     return location.pathname.startsWith(n.to);
   });

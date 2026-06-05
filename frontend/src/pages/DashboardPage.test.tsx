@@ -185,14 +185,110 @@ test("dashboard shows empty goals state when no goals", async () => {
   );
 });
 
-// ── Movers (empty placeholder) ────────────────────────────────────────────────
+// ── Movers ────────────────────────────────────────────────────────────────────
 
-test("dashboard shows Pergerakan Hari Ini empty placeholder (not fabricated data)", async () => {
+test("dashboard shows movers empty state when no price history", async () => {
+  // Default MSW handler returns [] for /api/portfolio/movers
   renderPage();
   await waitFor(() =>
-    expect(screen.getByText("Pergerakan Hari Ini")).toBeInTheDocument(),
+    expect(screen.getByText(/Belum cukup data harga/)).toBeInTheDocument(),
   );
-  expect(screen.getByText(/Pergerakan per-aset menyusul/)).toBeInTheDocument();
+});
+
+test("dashboard lists movers with formatted IDR deltas", async () => {
+  server.use(
+    http.get("/api/portfolio/movers", () =>
+      HttpResponse.json([
+        { instrument_id: 5, symbol: "TLKM", name: "Telkom Indonesia Tbk", delta_idr: "21000", delta_pct: 1.05, value_idr: "2030000" },
+        { instrument_id: 18, symbol: "BTC", name: "Bitcoin", delta_idr: "-150000", delta_pct: -2.4, value_idr: "5000000" },
+      ]),
+    ),
+  );
+  renderPage();
+  await waitFor(() => expect(screen.getByText("TLKM")).toBeInTheDocument());
+  expect(screen.getByText(/\+\s*Rp\s*21\.000/)).toBeInTheDocument();
+  expect(screen.getByText(/−\s*Rp\s*150\.000/)).toBeInTheDocument();
+});
+
+// ── Pending review banner ─────────────────────────────────────────────────────
+
+test("dashboard shows a banner when review items are pending", async () => {
+  server.use(
+    http.get("/api/ingest/review", () =>
+      HttpResponse.json([
+        {
+          id: 75, batch_id: "tg-1", source_kind: "image", source_filename: "f.jpg",
+          source_path: "p", doc_type: "holdings_snapshot", status: "pending",
+          needs_attention: 1, payload_json: "{}", raw_llm_json: "{}",
+          created_at: "2026-06-05T00:00:00Z",
+        },
+      ]),
+    ),
+  );
+  renderPage();
+  await waitFor(() =>
+    expect(screen.getByText(/1 transaksi menunggu konfirmasi/)).toBeInTheDocument(),
+  );
+});
+
+test("dashboard hides the review banner when nothing is pending", async () => {
+  renderPage();
+  await waitFor(() => expect(screen.getByText("Pergerakan Hari Ini")).toBeInTheDocument());
+  expect(screen.queryByText(/menunggu konfirmasi/)).not.toBeInTheDocument();
+});
+
+// ── Stale price badge ─────────────────────────────────────────────────────────
+
+test("hero badge warns when held positions have stale prices", async () => {
+  server.use(
+    http.get("/api/portfolio/summary", () =>
+      HttpResponse.json({
+        net_worth_idr: "1000000", net_worth_usd: "61",
+        total_unrealized_pnl_idr: "0", total_realized_pnl_idr: "0", xirr: null,
+        positions: [{
+          instrument_id: 10, quantity: "3.23", avg_cost: "2600000",
+          cost_basis_total: "8398000", latest_price: "2600000", price_stale: true,
+          market_value_native: "8398000", market_value_idr: "8398000",
+          market_value_usd: "515", unrealized_pnl: "0", realized_pnl: "0", income: "0",
+        }],
+        allocation: [],
+      }),
+    ),
+  );
+  renderPage();
+  await waitFor(() => expect(screen.getByText(/1 harga basi/)).toBeInTheDocument());
+  expect(screen.queryByText("Live")).not.toBeInTheDocument();
+});
+
+// ── Benchmark ─────────────────────────────────────────────────────────────────
+
+test("dashboard shows benchmark returns when available", async () => {
+  server.use(
+    http.get("/api/portfolio/benchmark", () =>
+      HttpResponse.json([
+        { label: "Portofolio", return_ratio: 0.083 },
+        { label: "IHSG", return_ratio: 0.051 },
+      ]),
+    ),
+  );
+  renderPage();
+  await waitFor(() => expect(screen.getByText("IHSG")).toBeInTheDocument());
+  expect(screen.getByText("+8,3%")).toBeInTheDocument();
+  expect(screen.getByText("+5,1%")).toBeInTheDocument();
+});
+
+test("dashboard hides the benchmark card when no data", async () => {
+  renderPage();
+  await waitFor(() => expect(screen.getByText("Pergerakan Hari Ini")).toBeInTheDocument());
+  expect(screen.queryByText("vs Benchmark")).not.toBeInTheDocument();
+});
+
+// ── Posisi Terbesar + Aktivitas ───────────────────────────────────────────────
+
+test("dashboard shows top holdings and recent activity sections", async () => {
+  renderPage();
+  await waitFor(() => expect(screen.getByText("Posisi Terbesar")).toBeInTheDocument());
+  expect(screen.getByText("Aktivitas Terakhir")).toBeInTheDocument();
 });
 
 // ── Refresh button ────────────────────────────────────────────────────────────

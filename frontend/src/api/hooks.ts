@@ -13,6 +13,7 @@ import {
   PerformanceSchema,
   WhatsappStatusSchema,
   TelegramStatusSchema, TelegramLinkCodeSchema,
+  MoverSchema, BenchmarkRowSchema,
   type Account, type Category, type Instrument, type Transaction, type ReviewItem,
   type CashflowCategory, type Cashflow, type Connector, type Goal,
 } from "./schemas";
@@ -53,8 +54,20 @@ export const useCreateAccount = () =>
   useInvalidatingMutation((b: Omit<Account, "id" | "created_at">) => api.post("/accounts", AccountSchema, b), ["accounts"]);
 export const useCreateCategory = () =>
   useInvalidatingMutation((b: Omit<Category, "id" | "sort_order">) => api.post("/categories", CategorySchema, b), ["categories", "summary"]);
+export const useUpdateCategory = () =>
+  useInvalidatingMutation(
+    (args: { id: number; patch: Partial<Pick<Category, "name" | "target_pct" | "tolerance_band_pct" | "sort_order" | "color">> }) =>
+      api.patch(`/categories/${args.id}`, CategorySchema, args.patch),
+    ["categories", "summary"],
+  );
 export const useCreateInstrument = () =>
   useInvalidatingMutation((b: Omit<Instrument, "id">) => api.post("/instruments", InstrumentSchema, b), ["instruments", "summary"]);
+export const useUpdateInstrument = () =>
+  useInvalidatingMutation(
+    (args: { id: number; patch: Partial<Pick<Instrument, "name" | "instrument_type" | "price_source" | "decimals" | "category_id">> }) =>
+      api.patch(`/instruments/${args.id}`, InstrumentSchema, args.patch),
+    ["instruments", "summary"],
+  );
 export const useCreateTransaction = () =>
   useInvalidatingMutation((b: Record<string, unknown>) => api.post("/transactions", TransactionSchema, b), ["transactions", "summary"]);
 export const useManualPrice = () =>
@@ -210,6 +223,14 @@ export const useDisconnectWhatsapp = () => {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["whatsapp-status"] }); },
   });
 };
+
+// ── Dashboard: movers + benchmark hooks ─────────────────────────────────────
+
+export const useMovers = () =>
+  useQuery({ queryKey: ["movers"], queryFn: () => api.get("/portfolio/movers", z.array(MoverSchema)) });
+
+export const useBenchmark = () =>
+  useQuery({ queryKey: ["benchmark"], queryFn: () => api.get("/portfolio/benchmark", z.array(BenchmarkRowSchema)) });
 
 // ── Telegram connection hooks ────────────────────────────────────────────────
 

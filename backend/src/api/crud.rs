@@ -35,6 +35,19 @@ pub async fn create_instrument(State(s): State<AppState>, Json(b): Json<instrume
     // matching how `ingestion::matching::suggest_instrument` already identifies them.
     Ok(Json(instruments::find_or_create(&s.db, &b).await.map_err(AppError::Other)?))
 }
+pub async fn update_category(State(s): State<AppState>, Path(id): Path<i64>, Json(b): Json<categories::UpdateCategory>) -> Result<Json<categories::CategoryRow>, AppError> {
+    categories::get(&s.db, id).await.map_err(|_| AppError::NotFound)?;
+    Ok(Json(categories::update(&s.db, id, &b).await.map_err(AppError::Other)?))
+}
+pub async fn update_instrument(State(s): State<AppState>, Path(id): Path<i64>, Json(b): Json<instruments::UpdateInstrument>) -> Result<Json<instruments::InstrumentRow>, AppError> {
+    // Validate the target category up-front so a bad id is a clear 400, not an FK 500.
+    if let Some(Some(cid)) = b.category_id {
+        categories::get(&s.db, cid).await
+            .map_err(|_| AppError::BadRequest(format!("unknown category_id {cid}")))?;
+    }
+    instruments::get(&s.db, id).await.map_err(|_| AppError::NotFound)?;
+    Ok(Json(instruments::update(&s.db, id, &b).await.map_err(AppError::Other)?))
+}
 pub async fn delete_instrument(State(s): State<AppState>, Path(id): Path<i64>) -> Result<Json<()>, AppError> {
     let n = instruments::txn_count(&s.db, id).await.map_err(AppError::Other)?;
     if n > 0 {
