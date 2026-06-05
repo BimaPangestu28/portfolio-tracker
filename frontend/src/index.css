@@ -476,7 +476,10 @@
 
 /* ============================================================
    Skeleton shimmer (supplement shadcn skeleton)
+   `.skeleton` is the design-system spelling used by page cards
+   (Dashboard, QueryState); both share one shimmer.
    ============================================================ */
+.skeleton,
 .pt-skeleton {
   background: linear-gradient(
     90deg,
