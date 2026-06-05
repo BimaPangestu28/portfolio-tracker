@@ -54,9 +54,11 @@ function ReviewCard({
   const createAccount = useCreateAccount();
   const [actionError, setActionError] = useState<string | null>(null);
 
+  // Pre-select inline-create when something identifiable was extracted but no
+  // instrument matched: a symbol (stocks) or a bare name (mutual funds).
   const defaultInstrumentId = item.suggested_instrument_id
     ? String(item.suggested_instrument_id)
-    : p.symbol
+    : p.symbol || p.instrument_name
     ? CREATE_NEW
     : "";
 
@@ -69,7 +71,8 @@ function ReviewCard({
     fee_native: p.fee_native ?? "0",
     currency: p.currency ?? "USD",
     executed_at: (p.executed_at ?? new Date().toISOString()).slice(0, 16),
-    new_symbol: p.symbol ?? "",
+    amount_native: p.amount_native ?? "",
+    new_symbol: p.symbol ?? p.instrument_name ?? "",
     new_account_name: p.account_hint ?? "",
   });
 
@@ -77,6 +80,9 @@ function ReviewCard({
     setForm({ ...form, [k]: e.target.value });
 
   const needs = item.needs_attention === 1;
+  // Bibit-style mutual fund entries: an IDR amount, no units/NAV. The backend
+  // records these as quantity = amount at price 1 (value-based tracking).
+  const isAmountOnly = !form.quantity && !form.price_native && !!form.amount_native;
 
   const onConfirm = async () => {
     setActionError(null);
@@ -131,6 +137,7 @@ function ReviewCard({
           price_native: form.price_native,
           fee_native: form.fee_native,
           currency: form.currency,
+          amount_native: form.amount_native,
         },
       });
       toast.success("Transaksi dikonfirmasi");
@@ -208,11 +215,18 @@ function ReviewCard({
         </label>
         <label className="field">
           <span className="field-label">Jumlah</span>
-          <input className="input" value={form.quantity} onChange={set("quantity")} aria-label="Quantity" />
+          <input className="input" value={form.quantity} onChange={set("quantity")} aria-label="Quantity" placeholder={isAmountOnly ? "amount-only" : undefined} />
         </label>
         <label className="field">
           <span className="field-label">Harga</span>
-          <input className="input" value={form.price_native} onChange={set("price_native")} aria-label="Price" />
+          <input className="input" value={form.price_native} onChange={set("price_native")} aria-label="Price" placeholder={isAmountOnly ? "amount-only" : undefined} />
+        </label>
+        <label className="field">
+          <span className="field-label">Nominal</span>
+          <input className="input" value={form.amount_native} onChange={set("amount_native")} aria-label="Amount" />
+          {isAmountOnly && (
+            <span className="t-xs t-muted">amount-only — dicatat sebagai nominal di harga 1</span>
+          )}
         </label>
         <label className="field">
           <span className="field-label">Akun</span>

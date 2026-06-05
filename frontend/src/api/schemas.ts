@@ -109,6 +109,7 @@ export const ExtractedEntrySchema = z.object({
   executed_at: z.string().nullable().optional(),
   account_hint: z.string().nullable().optional(),
   note: z.string().nullable().optional(),
+  amount_native: z.string().nullable().optional(),
   confidence: z.number().default(1),
 });
 export type ExtractedEntry = z.infer<typeof ExtractedEntrySchema>;
