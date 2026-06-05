@@ -17,14 +17,17 @@ pub struct PerfPoint {
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct PerfMetrics {
     pub total_return: f64,
-    pub annualized: f64,
+    /// None when annualizing is meaningless/unstable (non-finite result, e.g.
+    /// extreme returns over a very short span). serde then emits an explicit
+    /// null instead of the accidental null serde_json produces for inf/NaN.
+    pub annualized: Option<f64>,
     pub max_drawdown: f64,
     pub volatility: f64,
 }
 
 const EMPTY_METRICS: PerfMetrics = PerfMetrics {
     total_return: 0.0,
-    annualized: 0.0,
+    annualized: None,
     max_drawdown: 0.0,
     volatility: 0.0,
 };
@@ -114,9 +117,10 @@ pub fn compute(
     let total_return = wealth - 1.0;
     let span_days = (series.last().unwrap().0 - series[0].0).num_days().max(1) as f64;
     let annualized = if wealth > 0.0 {
-        wealth.powf(365.0 / span_days) - 1.0
+        let a = wealth.powf(365.0 / span_days) - 1.0;
+        a.is_finite().then_some(a)
     } else {
-        -1.0
+        Some(-1.0)
     };
     let avg_interval = span_days / returns.len() as f64;
     let periods_per_year = if avg_interval > 0.0 {
@@ -191,7 +195,20 @@ mod tests {
         // 100 -> 110 over ~365 days, no flows: annualized should equal the period return.
         let navs = vec![(d("2025-01-01"), 100.0), (d("2026-01-01"), 110.0)];
         let (_p, m) = compute(&navs, &[]);
-        assert!((m.annualized - 0.10).abs() < 1e-3);
+        assert!((m.annualized.expect("finite annualized") - 0.10).abs() < 1e-3);
+    }
+
+    #[test]
+    fn absurd_short_span_gain_yields_no_annualized_not_infinity() {
+        // Production repro: NAV 18_320 -> 5_277_000 in one day (a data artifact).
+        // wealth^365 overflows f64; serde would serialize inf as null and break
+        // the frontend schema. Must be an explicit None instead.
+        let navs = vec![(d("2026-06-03"), 18_320.0), (d("2026-06-04"), 5_277_000.0)];
+        let (_p, m) = compute(&navs, &[]);
+        assert!(m.annualized.is_none());
+        assert!(m.total_return.is_finite());
+        assert!(m.volatility.is_finite());
+        assert!(m.max_drawdown.is_finite());
     }
 
     #[test]

@@ -34,6 +34,27 @@ test("renders metric cards from the API", async () => {
   expect(screen.getByText(/Max drawdown/i)).toBeInTheDocument();
 });
 
+test("renders a dash when annualized is null instead of failing the schema", async () => {
+  // Backend sends annualized: null when annualizing is meaningless
+  // (e.g. extreme return over a very short span).
+  server.use(
+    http.get("/api/portfolio/performance", () =>
+      HttpResponse.json({
+        base: "idr",
+        points: [
+          { date: "2026-06-03", cum_return: 0, nav: 18320 },
+          { date: "2026-06-04", cum_return: 332.57, nav: 5277000 },
+        ],
+        metrics: { total_return: 332.57, annualized: null, max_drawdown: 0, volatility: 0 },
+        insufficient_data: false,
+      }),
+    ),
+  );
+  wrap();
+  await waitFor(() => expect(screen.getByText(/Annualized/i)).toBeInTheDocument());
+  expect(screen.getByText("—")).toBeInTheDocument();
+});
+
 test("shows empty state when insufficient data", async () => {
   server.use(
     http.get("/api/portfolio/performance", () =>

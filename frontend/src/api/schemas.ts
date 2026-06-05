@@ -305,7 +305,8 @@ export const PerformanceSchema = z.object({
   ),
   metrics: z.object({
     total_return: z.number(),
-    annualized: z.number(),
+    // null when annualizing is meaningless (backend: non-finite result)
+    annualized: z.number().nullable(),
     max_drawdown: z.number(),
     volatility: z.number(),
   }),
