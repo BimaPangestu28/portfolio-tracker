@@ -97,7 +97,10 @@ the extracted `instrument_name` when the symbol lookup misses. Exact,
 case-insensitive only — no fuzzy/substring matching. Account matching by
 name already works via `account_hint` and is unchanged.
 
-### 5. Review UI (`frontend/src/components/ReviewRow.tsx`)
+### 5. Review UI (`ReviewCard` in `frontend/src/pages/ImportPage.tsx`)
+
+(Note: `frontend/src/components/ReviewRow.tsx` is a legacy component used only
+by its own test; the live review UI is `ReviewCard`.)
 
 - Show an editable **Amount** field bound to `amount_native`.
 - When quantity/price are empty but amount is present, render an
