@@ -203,3 +203,43 @@ test("dashboard renders Refresh harga button", async () => {
     expect(screen.getByRole("button", { name: /Refresh harga/i })).toBeInTheDocument(),
   );
 });
+
+// ── FX breakdown on Unrealized P&L card ──────────────────────────────────────
+
+test("unrealized P&L card shows the price vs FX breakdown", async () => {
+  server.use(
+    http.get("/api/portfolio/summary", () =>
+      HttpResponse.json({
+        net_worth_idr: "2550000", net_worth_usd: "150",
+        total_unrealized_pnl_idr: "950000", total_realized_pnl_idr: "0", xirr: null,
+        total_unrealized_price_pnl_idr: "850000", total_unrealized_fx_pnl_idr: "100000",
+        total_realized_price_pnl_idr: "0", total_realized_fx_pnl_idr: "0",
+        fx_incomplete: false,
+        positions: [], allocation: [],
+      }),
+    ),
+  );
+  renderPage();
+  await waitFor(() =>
+    expect(screen.getByText(/Harga\s*Rp\s*850\.000/)).toBeInTheDocument(),
+  );
+  expect(screen.getByText(/FX\s*Rp\s*100\.000/)).toBeInTheDocument();
+  expect(screen.queryByText("FX?")).not.toBeInTheDocument();
+});
+
+test("unrealized P&L card warns when FX data is incomplete", async () => {
+  server.use(
+    http.get("/api/portfolio/summary", () =>
+      HttpResponse.json({
+        net_worth_idr: "2550000", net_worth_usd: "150",
+        total_unrealized_pnl_idr: "950000", total_realized_pnl_idr: "0", xirr: null,
+        total_unrealized_price_pnl_idr: "850000", total_unrealized_fx_pnl_idr: "100000",
+        total_realized_price_pnl_idr: "0", total_realized_fx_pnl_idr: "0",
+        fx_incomplete: true,
+        positions: [], allocation: [],
+      }),
+    ),
+  );
+  renderPage();
+  await waitFor(() => expect(screen.getByText("FX?")).toBeInTheDocument());
+});

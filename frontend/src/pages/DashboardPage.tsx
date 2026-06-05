@@ -106,6 +106,9 @@ interface HeroProps {
   dayDeltaIdr: string;
   dayDeltaPct: string;
   unrealizedPnl: string;
+  unrealizedPricePnl: string;
+  unrealizedFxPnl: string;
+  fxIncomplete: boolean;
   xirr: number | null;
   yieldPct: string;
   dividendTtmIdr: string;
@@ -119,6 +122,9 @@ function HeroSection({
   dayDeltaIdr,
   dayDeltaPct,
   unrealizedPnl,
+  unrealizedPricePnl,
+  unrealizedFxPnl,
+  fxIncomplete,
   xirr,
   yieldPct,
   dividendTtmIdr,
@@ -203,9 +209,19 @@ function HeroSection({
           value={formatIDR(unrealizedPnl)}
           tone={pnlPos ? "gain" : "loss"}
           sub={
-            <span className={cn("stat-delta num", pnlPos ? "gain" : "loss")}>
-              {pnlPos ? "▲" : "▼"} {formatPct(pnlPct)}
-            </span>
+            <div className="flex col" style={{ gap: 2 }}>
+              <span className={cn("stat-delta num", pnlPos ? "gain" : "loss")}>
+                {pnlPos ? "▲" : "▼"} {formatPct(pnlPct)}
+                {fxIncomplete && (
+                  <span className="badge badge-warn" style={{ marginLeft: 6 }} title="Sebagian transaksi tidak punya kurs historis — dekomposisi FX tidak lengkap">
+                    FX?
+                  </span>
+                )}
+              </span>
+              <span className="t-xs t-muted num">
+                Harga {formatIDR(unrealizedPricePnl)} · FX {formatIDR(unrealizedFxPnl)}
+              </span>
+            </div>
           }
         />
         <StatCard
@@ -893,6 +909,9 @@ export default function DashboardPage() {
           dayDeltaIdr={insights.data.day_delta_idr}
           dayDeltaPct={insights.data.day_delta_pct}
           unrealizedPnl={summary.data.total_unrealized_pnl_idr}
+          unrealizedPricePnl={summary.data.total_unrealized_price_pnl_idr}
+          unrealizedFxPnl={summary.data.total_unrealized_fx_pnl_idr}
+          fxIncomplete={summary.data.fx_incomplete}
           xirr={summary.data.xirr}
           yieldPct={insights.data.yield_pct}
           dividendTtmIdr={insights.data.dividend_ttm_idr}
