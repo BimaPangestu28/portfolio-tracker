@@ -116,8 +116,8 @@ export default function PerformancePage() {
               />
               <StatCard
                 label="Annualized"
-                value={formatPercent(performance?.metrics.annualized ?? 0)}
-                tone={returnTone(performance?.metrics.annualized ?? 0)}
+                value={performance?.metrics.annualized != null ? formatPercent(performance.metrics.annualized) : "—"}
+                tone={performance?.metrics.annualized != null ? returnTone(performance.metrics.annualized) : "neutral"}
               />
               <StatCard
                 label="Max drawdown"
