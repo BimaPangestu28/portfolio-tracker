@@ -225,7 +225,7 @@ function ReviewCard({
           <span className="field-label">Nominal</span>
           <input className="input" value={form.amount_native} onChange={set("amount_native")} aria-label="Amount" />
           {isAmountOnly && (
-            <span className="t-xs t-muted">amount-only — dicatat sebagai nominal di harga 1</span>
+            <span className="t-xs t-muted">amount-only — unit dihitung otomatis dari NAV (tanpa NAV: nominal di harga 1)</span>
           )}
         </label>
         <label className="field">
