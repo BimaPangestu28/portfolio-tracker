@@ -49,7 +49,7 @@ pub async fn build_summary(db: &Db) -> anyhow::Result<PortfolioSummary> {
             (usd_idr, Decimal::ONE)
         };
         let ctx = PriceContext { instrument_id: *instrument_id, latest_price_native: price, price_stale: stale, fx_native_to_idr: to_idr, fx_native_to_usd: to_usd };
-        let p = build_position(*instrument_id, &cb, &ctx);
+        let p = build_position(*instrument_id, &cb, &ctx, false);
         net_idr += p.market_value_idr;
         net_usd += p.market_value_usd;
         unreal_idr += p.unrealized_pnl * to_idr;

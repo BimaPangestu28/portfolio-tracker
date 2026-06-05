@@ -40,8 +40,7 @@ pub struct Position {
     pub realized_price_pnl_idr: Decimal,
     #[serde(with = "rust_decimal::serde::str")]
     pub realized_fx_pnl_idr: Decimal,
-    /// True when some txns had no usable purchase-time FX rate (see service::portfolio),
-    /// making the IDR decomposition for this position incomplete.
+    /// True when some txns had no usable purchase-time FX rate (see service::portfolio's resolve_fx_gaps), making the IDR decomposition for this position incomplete.
     pub fx_incomplete: bool,
 }
 
@@ -56,7 +55,7 @@ pub struct PriceContext {
     pub fx_native_to_usd: Decimal,
 }
 
-pub fn build_position(instrument_id: i64, cb: &CostBasis, ctx: &PriceContext) -> Position {
+pub fn build_position(instrument_id: i64, cb: &CostBasis, ctx: &PriceContext, fx_incomplete: bool) -> Position {
     let mv_native = cb.quantity * ctx.latest_price_native;
     let mv_idr = mv_native * ctx.fx_native_to_idr;
     // FX-aware unrealized P&L: current value at today's rate minus the purchase-rate
@@ -84,7 +83,7 @@ pub fn build_position(instrument_id: i64, cb: &CostBasis, ctx: &PriceContext) ->
         realized_pnl_idr: cb.realized_pnl_idr,
         realized_price_pnl_idr: cb.realized_price_pnl_idr,
         realized_fx_pnl_idr: cb.realized_fx_pnl_idr,
-        fx_incomplete: false, // overridden by service::portfolio after FX-gap resolution
+        fx_incomplete,
     }
 }
 
@@ -139,7 +138,7 @@ mod tests {
             fx_native_to_idr: dec!(17000),
             fx_native_to_usd: dec!(1),
         };
-        let p = build_position(7, &cb, &ctx);
+        let p = build_position(7, &cb, &ctx, false);
         assert_eq!(p.cost_basis_idr_total, dec!(3200000));
         assert_eq!(p.unrealized_pnl_idr, dec!(1900000));
         assert_eq!(p.unrealized_price_pnl_idr, dec!(1700000));
@@ -158,7 +157,7 @@ mod tests {
             fx_native_to_idr: dec!(16000),
             fx_native_to_usd: dec!(1),
         };
-        let p = build_position(7, &cb, &ctx);
+        let p = build_position(7, &cb, &ctx, false);
         assert_eq!(p.market_value_native, dec!(300));
         assert_eq!(p.market_value_usd, dec!(300));
         assert_eq!(p.market_value_idr, dec!(4800000));
