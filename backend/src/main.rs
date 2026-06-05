@@ -10,6 +10,7 @@ mod pricing;
 mod repo;
 mod scheduler;
 mod service;
+mod telegram;
 mod wa_state;
 
 use db::Db;
