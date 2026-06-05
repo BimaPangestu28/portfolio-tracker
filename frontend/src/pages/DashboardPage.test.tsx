@@ -245,11 +245,18 @@ test("hero badge warns when held positions have stale prices", async () => {
       HttpResponse.json({
         net_worth_idr: "1000000", net_worth_usd: "61",
         total_unrealized_pnl_idr: "0", total_realized_pnl_idr: "0", xirr: null,
+        total_unrealized_price_pnl_idr: "0", total_unrealized_fx_pnl_idr: "0",
+        total_realized_price_pnl_idr: "0", total_realized_fx_pnl_idr: "0",
+        fx_incomplete: false,
         positions: [{
           instrument_id: 10, quantity: "3.23", avg_cost: "2600000",
           cost_basis_total: "8398000", latest_price: "2600000", price_stale: true,
           market_value_native: "8398000", market_value_idr: "8398000",
           market_value_usd: "515", unrealized_pnl: "0", realized_pnl: "0", income: "0",
+          cost_basis_idr_total: "8398000", unrealized_pnl_idr: "0",
+          unrealized_price_pnl_idr: "0", unrealized_fx_pnl_idr: "0",
+          realized_pnl_idr: "0", realized_price_pnl_idr: "0", realized_fx_pnl_idr: "0",
+          fx_incomplete: false,
         }],
         allocation: [],
       }),
