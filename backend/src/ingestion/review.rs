@@ -45,9 +45,10 @@ pub async fn confirm(db: &Db, item_id: i64, p: &ConfirmPayload) -> anyhow::Resul
 
     // Amount-only mutual fund trades (e.g. Bibit "Order" screenshots) carry a
     // total IDR amount but no units/NAV — and never will (value-based tracking).
-    // Record them with the same convention as connector deposits (service/sync.rs):
-    // quantity = amount, price = 1, so cost basis equals the invested amount and
-    // the position is valued at cost via the avg_cost fallback.
+    // Record them as quantity = amount at price 1: cost basis (qty*price + fee)
+    // equals the invested amount and the avg_cost fallback (service/portfolio.rs)
+    // values the position at cost. With avg cost 1, an amount-only sell realizes
+    // zero P&L by construction — per-unit gains are unknowable without NAV.
     let (quantity, price_native) = if p.quantity.trim().is_empty() && p.price_native.trim().is_empty() {
         let amount = p.amount_native.as_deref().map(str::trim).filter(|a| !a.is_empty());
         match (amount, p.entry_type.as_str()) {
