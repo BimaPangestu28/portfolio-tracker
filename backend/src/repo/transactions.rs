@@ -52,13 +52,27 @@ pub async fn create(db: &Db, t: &NewTransaction) -> anyhow::Result<Transaction> 
     if let Some(f) = t.fee_native.as_deref() { crate::repo::dec(f)?; }
     crate::repo::dec(&t.fx_to_idr)?;
     crate::repo::dec(&t.fx_to_usd)?;
+    // fx_to_idr converts native -> IDR, so for an IDR transaction it is 1 by
+    // identity — normalize here so no caller (manual dialog, ingest confirm,
+    // sync) can persist a bogus rate that inflates IDR aggregations. fx_to_usd
+    // is derived from the latest USD/IDR rate when one is known.
+    let (fx_to_idr, fx_to_usd) = if t.currency == "IDR" {
+        let usd_idr = crate::repo::prices::latest_fx(db, "USD", "IDR").await?;
+        let to_usd = match usd_idr {
+            Some(rate) if !rate.is_zero() => (rust_decimal::Decimal::ONE / rate).to_string(),
+            _ => t.fx_to_usd.clone(),
+        };
+        ("1".to_string(), to_usd)
+    } else {
+        (t.fx_to_idr.clone(), t.fx_to_usd.clone())
+    };
     let now = Utc::now().to_rfc3339();
     let id = sqlx::query(
         "INSERT INTO txn (account_id, instrument_id, txn_type, executed_at, quantity, price_native, fee_native, currency, fx_to_idr, fx_to_usd, note, created_at, source, external_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
         .bind(t.account_id).bind(t.instrument_id).bind(&t.txn_type)
         .bind(t.executed_at.to_rfc3339()).bind(&t.quantity).bind(&t.price_native)
         .bind(t.fee_native.clone().unwrap_or_else(|| "0".into()))
-        .bind(&t.currency).bind(&t.fx_to_idr).bind(&t.fx_to_usd).bind(&t.note).bind(&now)
+        .bind(&t.currency).bind(&fx_to_idr).bind(&fx_to_usd).bind(&t.note).bind(&now)
         .bind(&t.source).bind(&t.external_id)
         .execute(db).await?.last_insert_rowid();
     get(db, id).await
@@ -106,6 +120,42 @@ mod tests {
     use super::*;
     use crate::repo::{accounts, instruments};
     use rust_decimal_macros::dec as d;
+
+    #[tokio::test]
+    async fn idr_transaction_always_stores_fx_to_idr_of_one() {
+        // fx_to_idr converts native -> IDR; for an IDR txn it is 1 by identity.
+        // The ingest-confirm flow used to default it to the USD/IDR rate, which
+        // inflated dividend TTM ~18,000x in insights.
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        let acc = accounts::create(&db, &accounts::NewAccount { name:"A".into(), account_type:"manual".into(), institution:None, native_currency:"IDR".into(), note:None }).await.unwrap();
+        let ins = instruments::create(&db, &instruments::NewInstrument { symbol:"BBRI".into(), name:"BRI".into(), instrument_type:"stock_id".into(), native_currency:"IDR".into(), category_id:None, price_source:"manual".into(), decimals:Some(0), note:None }).await.unwrap();
+        crate::repo::prices::upsert_fx(&db, "USD", "IDR", d!(18026), "2026-06-04").await.unwrap();
+
+        let nt = NewTransaction { account_id: acc.id, instrument_id: ins.id, txn_type:"dividend".into(),
+            executed_at: Utc::now(), quantity:"1700".into(), price_native:"137".into(),
+            fee_native: None, currency:"IDR".into(),
+            fx_to_idr:"18026".into(), fx_to_usd:"1".into(), // bogus values must be normalized
+            note:None, source: None, external_id: None };
+        let txn = create(&db, &nt).await.unwrap();
+
+        assert_eq!(txn.fx_to_idr, d!(1));
+        assert_eq!(txn.fx_to_usd, d!(1) / d!(18026)); // derived from latest USD/IDR
+    }
+
+    #[tokio::test]
+    async fn non_idr_transaction_keeps_provided_fx() {
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        let acc = accounts::create(&db, &accounts::NewAccount { name:"A".into(), account_type:"manual".into(), institution:None, native_currency:"USD".into(), note:None }).await.unwrap();
+        let ins = instruments::create(&db, &instruments::NewInstrument { symbol:"VOO".into(), name:"VOO".into(), instrument_type:"etf".into(), native_currency:"USD".into(), category_id:None, price_source:"manual".into(), decimals:Some(8), note:None }).await.unwrap();
+        let nt = NewTransaction { account_id: acc.id, instrument_id: ins.id, txn_type:"buy".into(),
+            executed_at: Utc::now(), quantity:"1".into(), price_native:"696".into(),
+            fee_native: None, currency:"USD".into(),
+            fx_to_idr:"17549".into(), fx_to_usd:"1".into(),
+            note:None, source: None, external_id: None };
+        let txn = create(&db, &nt).await.unwrap();
+        assert_eq!(txn.fx_to_idr, d!(17549)); // historical rate is intentional, keep it
+        assert_eq!(txn.fx_to_usd, d!(1));
+    }
 
     #[tokio::test]
     async fn delete_clears_review_item_reference() {
