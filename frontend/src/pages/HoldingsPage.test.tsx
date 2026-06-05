@@ -27,7 +27,7 @@ test("formats native-currency fields (avg cost, latest price, P&L) in IDR for an
       HttpResponse.json({
         net_worth_idr: "39600000",
         net_worth_usd: "2475",
-        total_unrealized_pnl_idr: "0",
+        total_unrealized_pnl_idr: "2400000",
         total_realized_pnl_idr: "0",
         xirr: null,
         total_unrealized_price_pnl_idr: "2400000",
@@ -98,7 +98,7 @@ test("formats native-currency fields in USD for a USD-denominated instrument", a
       HttpResponse.json({
         net_worth_idr: "16000000",
         net_worth_usd: "1000",
-        total_unrealized_pnl_idr: "0",
+        total_unrealized_pnl_idr: "4000000",
         total_realized_pnl_idr: "0",
         xirr: null,
         total_unrealized_price_pnl_idr: "4000000",
