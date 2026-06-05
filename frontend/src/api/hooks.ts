@@ -53,6 +53,12 @@ export const useCreateAccount = () =>
   useInvalidatingMutation((b: Omit<Account, "id" | "created_at">) => api.post("/accounts", AccountSchema, b), ["accounts"]);
 export const useCreateCategory = () =>
   useInvalidatingMutation((b: Omit<Category, "id" | "sort_order">) => api.post("/categories", CategorySchema, b), ["categories", "summary"]);
+export const useUpdateCategory = () =>
+  useInvalidatingMutation(
+    (args: { id: number; patch: Partial<Pick<Category, "name" | "target_pct" | "tolerance_band_pct" | "sort_order" | "color">> }) =>
+      api.patch(`/categories/${args.id}`, CategorySchema, args.patch),
+    ["categories", "summary"],
+  );
 export const useCreateInstrument = () =>
   useInvalidatingMutation((b: Omit<Instrument, "id">) => api.post("/instruments", InstrumentSchema, b), ["instruments", "summary"]);
 export const useUpdateInstrument = () =>
