@@ -56,6 +56,9 @@ pub fn spawn(db: Db, tg: SharedTgState) {
 /// (bad token) flags the state for the UI and waits longer between retries.
 async fn poll_loop(client: TelegramClient, db: Db, tg: SharedTgState) {
     tracing::info!("telegram poller started");
+    // Starting at 0 deliberately replays Telegram's buffered backlog (up to
+    // 24h) after a restart, so messages sent while the backend was down still
+    // get answered.
     let mut offset = 0i64;
     loop {
         match client.get_updates(offset).await {
@@ -135,7 +138,7 @@ async fn answer(db: &Db, text: &str) -> anyhow::Result<String> {
 
 async fn send_or_log(client: &TelegramClient, chat_id: i64, text: &str) {
     if let Err(e) = client.send_message(chat_id, text).await {
-        tracing::error!("telegram: sendMessage to {chat_id} failed: {e}");
+        tracing::error!("telegram: sendMessage to {chat_id} failed: {e:#}");
     }
 }
 

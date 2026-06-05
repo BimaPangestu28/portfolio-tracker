@@ -52,6 +52,7 @@ impl TgState {
         self.auth_failed = true;
     }
 
+    /// Whether the bot token was rejected by Telegram.
     pub fn auth_failed(&self) -> bool {
         self.auth_failed
     }
