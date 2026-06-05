@@ -55,6 +55,12 @@ export const useCreateCategory = () =>
   useInvalidatingMutation((b: Omit<Category, "id" | "sort_order">) => api.post("/categories", CategorySchema, b), ["categories", "summary"]);
 export const useCreateInstrument = () =>
   useInvalidatingMutation((b: Omit<Instrument, "id">) => api.post("/instruments", InstrumentSchema, b), ["instruments", "summary"]);
+export const useUpdateInstrument = () =>
+  useInvalidatingMutation(
+    (args: { id: number; patch: Partial<Pick<Instrument, "name" | "instrument_type" | "price_source" | "decimals" | "category_id">> }) =>
+      api.patch(`/instruments/${args.id}`, InstrumentSchema, args.patch),
+    ["instruments", "summary"],
+  );
 export const useCreateTransaction = () =>
   useInvalidatingMutation((b: Record<string, unknown>) => api.post("/transactions", TransactionSchema, b), ["transactions", "summary"]);
 export const useManualPrice = () =>

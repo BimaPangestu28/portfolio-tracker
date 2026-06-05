@@ -54,7 +54,10 @@ pub fn router(state: AppState) -> Router {
             "/instruments",
             get(crud::list_instruments).post(crud::create_instrument),
         )
-        .route("/instruments/:id", delete(crud::delete_instrument))
+        .route(
+            "/instruments/:id",
+            delete(crud::delete_instrument).patch(crud::update_instrument),
+        )
         .route(
             "/transactions",
             get(crud::list_transactions).post(crud::create_transaction),

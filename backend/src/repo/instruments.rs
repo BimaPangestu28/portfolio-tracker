@@ -63,6 +63,48 @@ pub async fn list(db: &Db) -> anyhow::Result<Vec<InstrumentRow>> {
     Ok(sqlx::query_as::<_, InstrumentRow>("SELECT * FROM instrument ORDER BY id").fetch_all(db).await?)
 }
 
+/// Partial update for an instrument. `symbol` and `native_currency` are
+/// deliberately not editable: symbol is the instrument's identity (dedup key)
+/// and changing the native currency would silently break cost-basis math.
+///
+/// `category_id` is a double Option: absent = leave unchanged, explicit null =
+/// clear the category, value = assign it.
+#[derive(Debug, Deserialize)]
+pub struct UpdateInstrument {
+    pub name: Option<String>,
+    pub instrument_type: Option<String>,
+    pub price_source: Option<String>,
+    pub decimals: Option<i64>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub category_id: Option<Option<i64>>,
+}
+
+/// Distinguish "field absent" (outer None, via serde default) from "field
+/// explicitly null" (Some(None)): when the field IS present, wrap whatever was
+/// deserialized — null or value — in the outer Some.
+fn double_option<'de, D>(de: D) -> Result<Option<Option<i64>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    serde::Deserialize::deserialize(de).map(Some)
+}
+
+pub async fn update(db: &Db, id: i64, u: &UpdateInstrument) -> anyhow::Result<InstrumentRow> {
+    let cur = get(db, id).await?;
+    let name = u.name.clone().unwrap_or(cur.name);
+    let instrument_type = u.instrument_type.clone().unwrap_or(cur.instrument_type);
+    let price_source = u.price_source.clone().unwrap_or(cur.price_source);
+    let decimals = u.decimals.unwrap_or(cur.decimals);
+    let category_id = match u.category_id {
+        Some(v) => v,
+        None => cur.category_id,
+    };
+    sqlx::query("UPDATE instrument SET name=?, instrument_type=?, price_source=?, decimals=?, category_id=? WHERE id=?")
+        .bind(&name).bind(&instrument_type).bind(&price_source).bind(decimals).bind(category_id).bind(id)
+        .execute(db).await?;
+    get(db, id).await
+}
+
 pub async fn delete(db: &Db, id: i64) -> anyhow::Result<()> {
     // Instruments from ingest are referenced by review_item.suggested_instrument_id;
     // clear the suggestion first or the FK constraint rejects the delete.
@@ -100,6 +142,56 @@ mod tests {
             decimals: Some(2),
             note: None,
         }
+    }
+
+    #[tokio::test]
+    async fn update_sets_category_and_price_source_keeping_other_fields() {
+        let db = mem_db().await;
+        let cat = crate::repo::categories::create(&db, &crate::repo::categories::NewCategory {
+            name: "Saham IDX".into(), target_pct: "40".into(), tolerance_band_pct: None, sort_order: None, color: None,
+        }).await.unwrap();
+        let ins = create(&db, &new_asii()).await.unwrap();
+
+        let updated = update(&db, ins.id, &UpdateInstrument {
+            name: None,
+            instrument_type: Some("stock_id".into()),
+            price_source: Some("yahoo:ASII.JK".into()),
+            decimals: None,
+            category_id: Some(Some(cat.id)),
+        }).await.unwrap();
+
+        assert_eq!(updated.category_id, Some(cat.id));
+        assert_eq!(updated.price_source, "yahoo:ASII.JK");
+        assert_eq!(updated.instrument_type, "stock_id");
+        // untouched fields keep their values
+        assert_eq!(updated.symbol, "ASII");
+        assert_eq!(updated.name, "Astra International");
+        assert_eq!(updated.decimals, 2);
+    }
+
+    #[tokio::test]
+    async fn update_can_clear_category() {
+        let db = mem_db().await;
+        let cat = crate::repo::categories::create(&db, &crate::repo::categories::NewCategory {
+            name: "Saham".into(), target_pct: "40".into(), tolerance_band_pct: None, sort_order: None, color: None,
+        }).await.unwrap();
+        let mut n = new_asii();
+        n.category_id = Some(cat.id);
+        let ins = create(&db, &n).await.unwrap();
+
+        let updated = update(&db, ins.id, &UpdateInstrument {
+            name: None, instrument_type: None, price_source: None, decimals: None,
+            category_id: Some(None), // explicit null clears it
+        }).await.unwrap();
+        assert_eq!(updated.category_id, None);
+
+        // absent field leaves category untouched
+        let again = update(&db, ins.id, &UpdateInstrument {
+            name: Some("Astra".into()), instrument_type: None, price_source: None,
+            decimals: None, category_id: None,
+        }).await.unwrap();
+        assert_eq!(again.name, "Astra");
+        assert_eq!(again.category_id, None);
     }
 
     #[tokio::test]
