@@ -11,6 +11,17 @@ pub fn is_stale(as_of: &str, now: DateTime<Utc>, max_age_hours: i64) -> bool {
 use crate::db::Db;
 use crate::pricing::{coingecko::CoinGecko, fx::FxClient, PriceProvider};
 use crate::repo::{instruments, prices};
+use rust_decimal::Decimal;
+use rust_decimal_macros::dec;
+
+/// Grams per troy ounce — gold futures (GC=F) quote in USD per troy oz,
+/// while Indonesian gold (Antam/Pluang) is held in grams.
+const GRAMS_PER_TROY_OUNCE: Decimal = dec!(31.1034768);
+
+/// Convert a USD-per-troy-ounce gold quote into IDR per gram.
+pub fn gold_idr_per_gram(usd_per_oz: Decimal, usd_idr: Decimal) -> Decimal {
+    usd_per_oz / GRAMS_PER_TROY_OUNCE * usd_idr
+}
 
 /// Refresh latest prices for all instruments whose price_source is "coingecko:<id>".
 /// Also refreshes USD/IDR FX. Failures are logged, not fatal.
@@ -19,10 +30,18 @@ pub async fn refresh_all(db: &Db) -> anyhow::Result<()> {
     let cg = CoinGecko::new();
     let fx = FxClient::new();
 
-    match fx.usd_to_idr().await {
-        Ok(rate) => { let _ = prices::upsert_fx(db, "USD", "IDR", rate, &today).await; }
-        Err(e) => tracing::warn!("fx refresh failed: {e}"),
-    }
+    // Keep the fresh rate around: the gold-derived source needs it below.
+    // On fetch failure, fall back to the last stored rate.
+    let usd_idr = match fx.usd_to_idr().await {
+        Ok(rate) => {
+            let _ = prices::upsert_fx(db, "USD", "IDR", rate, &today).await;
+            Some(rate)
+        }
+        Err(e) => {
+            tracing::warn!("fx refresh failed: {e}");
+            prices::latest_fx(db, "USD", "IDR").await.ok().flatten()
+        }
+    };
 
     for ins in instruments::list(db).await? {
         if let Some(ext) = ins.price_source.strip_prefix("coingecko:") {
@@ -40,6 +59,17 @@ pub async fn refresh_all(db: &Db) -> anyhow::Result<()> {
                 Err(e) => tracing::warn!("yahoo price refresh failed for {}: {e}", ins.symbol),
             }
         }
+        // Derived source: gold futures (USD/oz via Yahoo) × USD/IDR → IDR/gram.
+        if ins.price_source == "gold:idr_gram" {
+            match (crate::pricing::yahoo::Yahoo::new().latest("GC=F").await, usd_idr) {
+                (Ok(q), Some(rate)) => {
+                    let price = gold_idr_per_gram(q.price, rate);
+                    let _ = prices::upsert_latest(db, ins.id, price, "IDR", "gold-derived", &today).await;
+                }
+                (Err(e), _) => tracing::warn!("gold price refresh failed for {}: {e}", ins.symbol),
+                (_, None) => tracing::warn!("gold price refresh for {} skipped: no USD/IDR rate", ins.symbol),
+            }
+        }
     }
     Ok(())
 }
@@ -48,6 +78,20 @@ pub async fn refresh_all(db: &Db) -> anyhow::Result<()> {
 mod tests {
     use super::*;
     use chrono::TimeZone;
+    use rust_decimal_macros::dec;
+
+    #[test]
+    fn gold_conversion_derives_idr_per_gram() {
+        // 3380 USD/oz at 16300 IDR/USD → 3380 / 31.1034768 × 16300 ≈ Rp 1.771.313/gram
+        let price = gold_idr_per_gram(dec!(3380), dec!(16300));
+        assert_eq!(price.round_dp(0), dec!(1771313));
+    }
+
+    #[test]
+    fn gold_conversion_zero_rate_gives_zero() {
+        assert_eq!(gold_idr_per_gram(dec!(3380), dec!(0)), dec!(0));
+    }
+
     #[test]
     fn fresh_price_not_stale() {
         let now = Utc.with_ymd_and_hms(2026,5,31,12,0,0).unwrap();
