@@ -69,6 +69,26 @@ test("shows empty state when insufficient data", async () => {
   await waitFor(() => expect(screen.getByText(/belum cukup data/i)).toBeInTheDocument());
 });
 
+test("renders the current P&L decomposition cards from the summary", async () => {
+  server.use(
+    http.get("/api/portfolio/performance", () =>
+      HttpResponse.json({
+        base: "idr",
+        points: [],
+        metrics: { total_return: 0, annualized: null, max_drawdown: 0, volatility: 0 },
+        insufficient_data: true,
+      }),
+    ),
+  );
+  wrap();
+  expect(await screen.findByText("P&L Harga")).toBeInTheDocument();
+  expect(screen.getByText("P&L Kurs (FX)")).toBeInTheDocument();
+  expect(screen.getByText(/Rp\s*80/)).toBeInTheDocument();
+  expect(screen.getByText(/Rp\s*20/)).toBeInTheDocument();
+  // History is empty -> the historical split chart is replaced by the explainer.
+  expect(screen.getByText(/Dekomposisi historis terkumpul/)).toBeInTheDocument();
+});
+
 test("toggling period refetches with the new period param", async () => {
   const seenPeriods: string[] = [];
   server.use(

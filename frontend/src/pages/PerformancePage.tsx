@@ -17,7 +17,8 @@ import {
   ResponsiveContainer,
   CartesianGrid,
 } from "recharts";
-import { usePerformance } from "../api/hooks";
+import { usePerformance, useSummary, useHistory } from "../api/hooks";
+import { formatIDR, parseNum } from "../lib/format";
 import { QueryState } from "../components/QueryState";
 import { StatCard } from "../components/StatCard";
 
@@ -80,6 +81,19 @@ export default function PerformancePage() {
   const [period, setPeriod] = useState("1y");
   const performanceQuery = usePerformance(base, period);
   const performance = performanceQuery.data;
+
+  const summary = useSummary();
+  const history = useHistory();
+
+  // Historical decomposition exists only for snapshots written after the FX-aware
+  // P&L feature (older rows are null) — chart the rows that have it.
+  const decompData = (history.data ?? [])
+    .filter((s) => s.price_pnl_idr != null && s.fx_pnl_idr != null)
+    .map((s) => ({
+      date: s.as_of,
+      pricePnl: parseNum(s.price_pnl_idr ?? "0"),
+      fxPnl: parseNum(s.fx_pnl_idr ?? "0"),
+    }));
 
   const chartData = (performance?.points ?? []).map((point) => ({
     date: point.date,
@@ -176,6 +190,68 @@ export default function PerformancePage() {
           </>
         )}
       </QueryState>
+
+      <div>
+        <h2 className="text-base font-semibold tracking-tight">Dekomposisi P&L</h2>
+        <p className="text-sm text-muted-foreground">
+          kontribusi pergerakan harga vs kurs IDR (unrealized, saat ini)
+        </p>
+      </div>
+
+      <QueryState isLoading={summary.isLoading} error={summary.error}>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <StatCard
+            label="P&L Harga"
+            value={formatIDR(summary.data?.total_unrealized_price_pnl_idr ?? "0")}
+            tone={returnTone(parseNum(summary.data?.total_unrealized_price_pnl_idr ?? "0"))}
+          />
+          <StatCard
+            label="P&L Kurs (FX)"
+            value={formatIDR(summary.data?.total_unrealized_fx_pnl_idr ?? "0")}
+            tone={returnTone(parseNum(summary.data?.total_unrealized_fx_pnl_idr ?? "0"))}
+          />
+          <StatCard
+            label="Realized Harga"
+            value={formatIDR(summary.data?.total_realized_price_pnl_idr ?? "0")}
+            tone={returnTone(parseNum(summary.data?.total_realized_price_pnl_idr ?? "0"))}
+          />
+          <StatCard
+            label="Realized Kurs (FX)"
+            value={formatIDR(summary.data?.total_realized_fx_pnl_idr ?? "0")}
+            tone={returnTone(parseNum(summary.data?.total_realized_fx_pnl_idr ?? "0"))}
+          />
+        </div>
+      </QueryState>
+
+      {decompData.length >= 2 ? (
+        <div className="h-64 w-full rounded-lg border bg-card p-4">
+          <ResponsiveContainer width="100%" height="100%">
+            <AreaChart data={decompData} margin={{ top: 10, right: 20, bottom: 0, left: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
+              <XAxis dataKey="date" fontSize={11} minTickGap={32} stroke="hsl(var(--muted-foreground))" tickLine={false} axisLine={false} />
+              <YAxis tickFormatter={(value: number) => formatIDR(value)} width={86} fontSize={11} stroke="hsl(var(--muted-foreground))" tickLine={false} axisLine={false} />
+              <Tooltip
+                formatter={(value: number, name: string) => [formatIDR(value), name === "pricePnl" ? "Harga" : "FX"]}
+                contentStyle={{
+                  background: "hsl(var(--popover))",
+                  border: "1px solid hsl(var(--border))",
+                  borderRadius: "var(--radius)",
+                  color: "hsl(var(--popover-foreground))",
+                  fontSize: 12,
+                }}
+              />
+              <Area type="monotone" dataKey="pricePnl" stroke="hsl(var(--chart-1))" strokeWidth={1.5} fill="hsl(var(--chart-1))" fillOpacity={0.15} dot={false} />
+              <Area type="monotone" dataKey="fxPnl" stroke="hsl(var(--chart-2))" strokeWidth={1.5} fill="hsl(var(--chart-2))" fillOpacity={0.15} dot={false} />
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+      ) : (
+        <div className="rounded-lg border bg-card p-6 text-center">
+          <p className="text-sm text-muted-foreground">
+            Dekomposisi historis terkumpul seiring snapshot harian baru — grafik muncul setelah ≥2 hari data.
+          </p>
+        </div>
+      )}
     </div>
   );
 }
