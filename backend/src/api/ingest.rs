@@ -1,7 +1,7 @@
 use crate::error::AppError;
 use crate::ingestion::csv::{parse_csv_rows, ColumnMapping};
 use crate::ingestion::ingest::{ingest_batch, needs_attention, UploadFile};
-use crate::ingestion::matching::{suggest_account, suggest_instrument};
+use crate::ingestion::matching::{suggest_account, suggest_instrument_for_entry};
 use crate::ingestion::review::{confirm, reject, ConfirmPayload};
 use crate::llm::claude::ClaudeClient;
 use crate::repo::review_items::{self, NewReviewItem};
@@ -79,7 +79,7 @@ pub async fn ingest_csv(State(s): State<AppState>, Json(b): Json<CsvIngestIn>) -
     let mut items = Vec::new();
     for entry in &entries {
         let payload = serde_json::to_string(entry).map_err(|e| AppError::Other(e.into()))?;
-        let sug_ins = match &entry.symbol { Some(x) => suggest_instrument(&s.db, x).await.map_err(AppError::Other)?, None => None };
+        let sug_ins = suggest_instrument_for_entry(&s.db, entry.symbol.as_deref(), entry.instrument_name.as_deref()).await.map_err(AppError::Other)?;
         let sug_acc = match &entry.account_hint { Some(x) => suggest_account(&s.db, x).await.map_err(AppError::Other)?, None => None };
         let row = review_items::create(&s.db, &NewReviewItem {
             batch_id: &batch_id, source_kind: "csv", source_filename: &b.filename, source_path: "(csv)",

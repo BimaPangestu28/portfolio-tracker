@@ -1,6 +1,6 @@
 use crate::db::Db;
 use crate::ingestion::extract::{parse_extraction, ExtractedEntry};
-use crate::ingestion::matching::{suggest_account, suggest_instrument};
+use crate::ingestion::matching::{suggest_account, suggest_instrument_for_entry};
 use crate::llm::claude::{ClaudeClient, Part};
 use crate::repo::review_items::{self, NewReviewItem};
 use base64::Engine;
@@ -10,7 +10,8 @@ Classify the document as one of: holdings_snapshot, txn_history, bank_statement,
 Return ONLY a JSON object, no prose, no markdown fences, no explanations of your arithmetic — do all calculations silently. Your entire response must start with "{" and end with "}". Shaped exactly:
 {"doc_type": "<one of the four>", "entries": [ { "entry_type": "buy|sell|dividend|interest|fee|deposit|withdrawal|opening_balance", "symbol": "...", "instrument_name": "...", "quantity": "...", "price_native": "...", "fee_native": "...", "amount_native": "...", "currency": "...", "executed_at": "YYYY-MM-DDTHH:MM:SSZ", "account_hint": "...", "note": "...", "confidence": 0.0 } ] }
 Rules: holdings_snapshot rows -> entry_type "opening_balance" with quantity and average cost as price_native. txn_history/trade_confirmation -> buy/sell/dividend/fee. bank_statement -> deposit/withdrawal/dividend/interest. Numbers as strings, no thousands separators. Omit unknown fields. Set confidence in [0,1]. If a value is uncertain, still include the entry with a lower confidence.
-IMPORTANT for Indonesian (IDX) brokers such as Stockbit, Ajaib, IPOT, BIONS: a column labeled "AMOUNT" (or "Total"/"Nilai") is the TOTAL transaction value in IDR INCLUDING fees, i.e. amount = quantity*price + fee. It is NOT the share quantity. Put that total in "amount_native" verbatim and do NOT use it as "quantity". IDX shares trade in lots of 100, so quantity is always a positive multiple of 100 (100, 200, 700, ...). Derive quantity by taking amount/price and rounding DOWN to the nearest multiple of 100, then set fee_native = amount - quantity*price. Example: BUY TLKM with AMOUNT 2.012.014 and PRICE 2.870 -> amount/price = 701.05, round down to lot -> quantity "700", fee_native = 2012014 - 700*2870 = "3014", amount_native "2012014", price_native "2870". Never emit quantity 701 here. These IDX lot/fee rules apply only to IDR-denominated stock rows; do NOT apply lot rounding to crypto, US stocks, or fractional shares."#;
+IMPORTANT for Indonesian (IDX) brokers such as Stockbit, Ajaib, IPOT, BIONS: a column labeled "AMOUNT" (or "Total"/"Nilai") is the TOTAL transaction value in IDR INCLUDING fees, i.e. amount = quantity*price + fee. It is NOT the share quantity. Put that total in "amount_native" verbatim and do NOT use it as "quantity". IDX shares trade in lots of 100, so quantity is always a positive multiple of 100 (100, 200, 700, ...). Derive quantity by taking amount/price and rounding DOWN to the nearest multiple of 100, then set fee_native = amount - quantity*price. Example: BUY TLKM with AMOUNT 2.012.014 and PRICE 2.870 -> amount/price = 701.05, round down to lot -> quantity "700", fee_native = 2012014 - 700*2870 = "3014", amount_native "2012014", price_native "2870". Never emit quantity 701 here. These IDX lot/fee rules apply only to IDR-denominated stock rows; do NOT apply lot rounding to crypto, US stocks, or fractional shares.
+IMPORTANT for Indonesian mutual fund apps such as Bibit: the goal/portfolio name (e.g. "Dana Darurat", "Pendidikan Noah", "Mobil") is NOT the instrument — put it in "account_hint" only. Put the clean fund name (e.g. "Sucorinvest Bond Fund", "Majoris Pasar Uang Indonesia") in "instrument_name". Mutual fund purchases are usually shown as an IDR amount with no units and no NAV: put that amount in "amount_native" and omit "quantity" and "price_native" entirely — NEVER invent units or NAV. Skip failed or cancelled orders. Put the order status (e.g. "Pembelian Berhasil") in "note"."#;
 
 /// Decide if an entry needs human attention (low confidence or missing core fields).
 pub fn needs_attention(e: &ExtractedEntry) -> bool {
@@ -18,7 +19,13 @@ pub fn needs_attention(e: &ExtractedEntry) -> bool {
     if e.confidence < 0.6 { return true; }
     match e.entry_type.as_str() {
         "deposit" | "withdrawal" | "dividend" | "interest" => e.quantity.is_none() && e.price_native.is_none(),
-        _ => e.symbol.is_none() || e.quantity.is_none(),
+        // Trades are complete with either a symbol or a name (mutual funds have no
+        // ticker) and either units or a total amount (amount-only fund buys).
+        _ => {
+            let has_name = e.symbol.is_some() || e.instrument_name.is_some();
+            let has_size = e.quantity.is_some() || e.amount_native.is_some();
+            !has_name || !has_size
+        }
     }
 }
 
@@ -95,7 +102,7 @@ pub async fn ingest_batch(db: &Db, client: &ClaudeClient, batch_id: &str, files:
         }
         for entry in &extraction.entries {
             let payload = serde_json::to_string(entry)?;
-            let sug_ins = match &entry.symbol { Some(s) => suggest_instrument(db, s).await?, None => None };
+            let sug_ins = suggest_instrument_for_entry(db, entry.symbol.as_deref(), entry.instrument_name.as_deref()).await?;
             let sug_acc = match &entry.account_hint { Some(a) => suggest_account(db, a).await?, None => None };
             let row = review_items::create(db, &NewReviewItem {
                 batch_id,
@@ -137,6 +144,32 @@ mod tests {
     #[test]
     fn complete_high_confidence_ok() {
         assert!(!needs_attention(&entry(0.9, Some("BTC"), Some("1"))));
+    }
+
+    /// Bibit-style mutual fund buy: name + IDR amount, no symbol/units/NAV.
+    fn fund_entry() -> ExtractedEntry {
+        ExtractedEntry { entry_type:"buy".into(), symbol:None,
+            instrument_name:Some("Sucorinvest Bond Fund".into()),
+            quantity:None, price_native:None, fee_native:None, currency:Some("IDR".into()),
+            executed_at:None, account_hint:Some("Pendidikan Noah".into()), note:None,
+            confidence:0.72, amount_native:Some("13000000".into()), force_attention:false }
+    }
+
+    #[test]
+    fn amount_only_fund_buy_with_name_is_complete() {
+        assert!(!needs_attention(&fund_entry()));
+    }
+    #[test]
+    fn amount_only_without_any_name_needs_attention() {
+        let mut e = fund_entry();
+        e.instrument_name = None;
+        assert!(needs_attention(&e));
+    }
+    #[test]
+    fn name_without_quantity_or_amount_needs_attention() {
+        let mut e = fund_entry();
+        e.amount_native = None;
+        assert!(needs_attention(&e));
     }
 
     #[test]
