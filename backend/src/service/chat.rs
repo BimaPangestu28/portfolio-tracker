@@ -112,6 +112,7 @@ mod tests {
             total_unrealized_pnl_idr: dec!(100), total_realized_pnl_idr: dec!(0),
             total_unrealized_price_pnl_idr: dec!(0), total_unrealized_fx_pnl_idr: dec!(0),
             total_realized_price_pnl_idr: dec!(0), total_realized_fx_pnl_idr: dec!(0),
+            fx_incomplete: false,
             xirr: Some(0.168), positions: vec![], allocation: vec![],
         }
     }
