@@ -29,7 +29,10 @@ pub fn plan_action(linked_chat_id: Option<i64>, from_chat_id: i64) -> Action {
 }
 
 use crate::db::Db;
-use client::{TelegramClient, TgError, TgMessage, TgUpdate};
+use crate::ingestion::extract::ExtractedEntry;
+use crate::ingestion::review::ConfirmPayload;
+use crate::repo::review_items::ReviewItemRow;
+use client::{TelegramClient, TgCallbackQuery, TgError, TgMessage, TgUpdate};
 use state::SharedTgState;
 use std::time::Instant;
 
@@ -50,6 +53,118 @@ pub enum AttachmentPick {
     Unsupported,
     /// No attachment — treat as a text message.
     None,
+}
+
+/// A parsed inline-button press.
+#[derive(Debug, PartialEq, Eq)]
+pub enum CallbackAction {
+    Confirm(i64),
+    Reject(i64),
+}
+
+/// Parse callback_data ("confirm:<review_id>" / "reject:<review_id>").
+pub fn parse_callback(data: &str) -> Option<CallbackAction> {
+    let (action, id) = data.split_once(':')?;
+    let id: i64 = id.parse().ok()?;
+    match action {
+        "confirm" => Some(CallbackAction::Confirm(id)),
+        "reject" => Some(CallbackAction::Reject(id)),
+        _ => None,
+    }
+}
+
+/// Coerce a payload date into RFC3339: full RFC3339 passes through,
+/// "YYYY-MM-DDTHH:MM" and date-only values are assumed UTC.
+fn to_rfc3339(s: &str) -> Option<String> {
+    if chrono::DateTime::parse_from_rfc3339(s).is_ok() {
+        return Some(s.to_string());
+    }
+    if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M") {
+        return Some(format!("{}Z", dt.format("%Y-%m-%dT%H:%M:%S")));
+    }
+    if let Ok(d) = chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d") {
+        return Some(format!("{d}T00:00:00Z"));
+    }
+    None
+}
+
+/// Build the ConfirmPayload for one-tap confirmation, or explain (in user
+/// language) why the item must be completed in the web UI instead.
+pub fn build_confirm_payload(item: &ReviewItemRow) -> Result<ConfirmPayload, String> {
+    if item.needs_attention != 0 {
+        return Err("item ini perlu dicek manual".into());
+    }
+    let account_id = item.suggested_account_id.ok_or("akun belum dikenali")?;
+    let instrument_id = item.suggested_instrument_id.ok_or("instrumen belum dikenali")?;
+    let entry: ExtractedEntry = serde_json::from_str(&item.payload_json)
+        .map_err(|e| format!("payload tidak terbaca: {e}"))?;
+    let quantity = entry.quantity.ok_or("jumlah tidak ada")?;
+    let price_native = entry.price_native.ok_or("harga tidak ada")?;
+    let currency = entry.currency.ok_or("mata uang tidak ada")?;
+    let executed_at = match &entry.executed_at {
+        Some(raw) => to_rfc3339(raw).ok_or_else(|| format!("tanggal tidak terbaca: {raw}"))?,
+        // Mirrors the web UI, which defaults the executed-at field to now.
+        None => chrono::Utc::now().to_rfc3339(),
+    };
+    Ok(ConfirmPayload {
+        account_id,
+        instrument_id,
+        entry_type: entry.entry_type,
+        executed_at,
+        quantity,
+        price_native,
+        fee_native: entry.fee_native,
+        currency,
+        fx_to_idr: None,
+        fx_to_usd: None,
+        note: entry.note,
+    })
+}
+
+/// Format a payload number with Indonesian separators, falling back to the
+/// raw string when it isn't a clean decimal.
+fn fmt_payload_num(raw: &str) -> String {
+    use std::str::FromStr;
+    rust_decimal::Decimal::from_str(raw)
+        .map(|d| crate::service::chat::group_id(&d))
+        .unwrap_or_else(|_| raw.to_string())
+}
+
+/// One-message summary of a staged review item for the confirmation prompt.
+fn item_summary(
+    item: &ReviewItemRow,
+    entry: Option<&ExtractedEntry>,
+    account: Option<&str>,
+    instrument: Option<&str>,
+) -> String {
+    let mut out = format!("🧾 Review #{}", item.id);
+    if let Some(e) = entry {
+        out.push_str(&format!(" — {}", e.entry_type));
+        if let Some(symbol) = &e.symbol {
+            out.push_str(&format!(" {symbol}"));
+        }
+        out.push('\n');
+        if let Some(qty) = &e.quantity {
+            out.push_str(&format!("Qty: {}\n", fmt_payload_num(qty)));
+        }
+        if let Some(price) = &e.price_native {
+            let currency = e.currency.as_deref().unwrap_or("");
+            out.push_str(&format!("Harga: {currency} {}\n", fmt_payload_num(price)));
+        }
+        out.push_str(&format!(
+            "Tanggal: {}\n",
+            e.executed_at.as_deref().unwrap_or("hari ini")
+        ));
+    } else {
+        out.push('\n');
+    }
+    if let Some(name) = account {
+        out.push_str(&format!("Akun: {name}\n"));
+    }
+    if let Some(label) = instrument {
+        out.push_str(&format!("Instrumen: {label}\n"));
+    }
+    out.trim_end().to_string()
 }
 
 /// Pick the ingestable attachment from a message, if any. Photos use the
@@ -136,7 +251,11 @@ async fn poll_loop(client: TelegramClient, db: Db, tg: SharedTgState) {
 /// Process one update end-to-end. All failures are logged, never propagated —
 /// one bad message must not kill the poller.
 async fn handle_update(client: &TelegramClient, db: &Db, tg: &SharedTgState, update: TgUpdate) {
-    // Ignore non-message updates.
+    if let Some(callback) = update.callback_query {
+        handle_callback(client, db, callback).await;
+        return;
+    }
+    // Ignore other non-message updates.
     let Some(message) = update.message else { return };
     let chat_id = message.chat.id;
 
@@ -151,16 +270,13 @@ async fn handle_update(client: &TelegramClient, db: &Db, tg: &SharedTgState, upd
     match plan_action(linked, chat_id) {
         Action::Answer => match pick_attachment(&message) {
             AttachmentPick::Some(attachment) => {
-                let reply = match ingest_attachment(client, db, &attachment).await {
-                    Ok(count) => format!(
-                        "📥 {count} item masuk antrian review. Buka web UI → Data untuk konfirmasi."
-                    ),
+                match ingest_attachment(client, db, &attachment).await {
+                    Ok(items) => send_review_prompts(client, db, chat_id, &items).await,
                     Err(e) => {
                         tracing::error!("telegram: ingest failed: {e:#}");
-                        INGEST_FAILED_REPLY.to_string()
+                        send_or_log(client, chat_id, INGEST_FAILED_REPLY).await;
                     }
-                };
-                send_or_log(client, chat_id, &reply).await;
+                }
             }
             AttachmentPick::Unsupported => {
                 send_or_log(client, chat_id, UNSUPPORTED_FILE_REPLY).await;
@@ -210,12 +326,12 @@ async fn answer(db: &Db, text: &str) -> anyhow::Result<String> {
 }
 
 /// Download an attachment and run it through the shared ingestion pipeline
-/// (same path as a web upload). Returns the number of staged review items.
+/// (same path as a web upload). Returns the staged review items.
 async fn ingest_attachment(
     client: &TelegramClient,
     db: &Db,
     attachment: &Attachment,
-) -> anyhow::Result<usize> {
+) -> anyhow::Result<Vec<ReviewItemRow>> {
     use base64::Engine;
     let file_path = client.get_file_path(&attachment.file_id).await?;
     let bytes = client.download_file(&file_path).await?;
@@ -229,7 +345,109 @@ async fn ingest_attachment(
         data_base64,
     };
     let result = crate::ingestion::ingest::ingest_batch(db, &llm, &batch_id, &[upload]).await?;
-    Ok(result.items.len())
+    Ok(result.items)
+}
+
+/// Send one confirmation prompt per staged item: confirmable items get
+/// Konfirmasi/Tolak buttons, incomplete ones get Tolak plus a web-UI note.
+async fn send_review_prompts(
+    client: &TelegramClient,
+    db: &Db,
+    chat_id: i64,
+    items: &[ReviewItemRow],
+) {
+    if items.is_empty() {
+        send_or_log(client, chat_id, "Tidak ada transaksi yang terbaca dari file itu.").await;
+        return;
+    }
+    for item in items {
+        let entry: Option<ExtractedEntry> = serde_json::from_str(&item.payload_json).ok();
+        let account_name = match item.suggested_account_id {
+            Some(id) => crate::repo::accounts::get(db, id).await.ok().map(|a| a.name),
+            None => None,
+        };
+        let instrument_label = match item.suggested_instrument_id {
+            Some(id) => crate::repo::instruments::get(db, id)
+                .await
+                .ok()
+                .map(|i| format!("{} ({})", i.symbol, i.name)),
+            None => None,
+        };
+        let summary = item_summary(
+            item,
+            entry.as_ref(),
+            account_name.as_deref(),
+            instrument_label.as_deref(),
+        );
+        let confirm_data = format!("confirm:{}", item.id);
+        let reject_data = format!("reject:{}", item.id);
+        let send_result = match build_confirm_payload(item) {
+            Ok(_) => {
+                client
+                    .send_message_with_buttons(
+                        chat_id,
+                        &summary,
+                        &[("✅ Konfirmasi", &confirm_data), ("❌ Tolak", &reject_data)],
+                    )
+                    .await
+            }
+            Err(reason) => {
+                let text = format!("{summary}\n\n⚠️ {reason} — lengkapi di web UI → Data.");
+                client
+                    .send_message_with_buttons(chat_id, &text, &[("❌ Tolak", &reject_data)])
+                    .await
+            }
+        };
+        if let Err(e) = send_result {
+            tracing::error!("telegram: review prompt for #{} failed: {e:#}", item.id);
+        }
+    }
+}
+
+/// Handle an inline-button press: only the linked owner chat may act, the
+/// existing review confirm/reject guards prevent double-processing, and the
+/// prompt message is edited in place (which also retires its buttons).
+async fn handle_callback(client: &TelegramClient, db: &Db, callback: TgCallbackQuery) {
+    // Always acknowledge first so the client stops its loading spinner.
+    if let Err(e) = client.answer_callback_query(&callback.id).await {
+        tracing::warn!("telegram: answerCallbackQuery failed: {e:#}");
+    }
+    let Some(message) = callback.message else { return };
+    let chat_id = message.chat.id;
+    let linked = match crate::repo::telegram_link::get(db).await {
+        Ok(row) => row.map(|r| r.chat_id),
+        Err(e) => {
+            tracing::error!("telegram: failed to read link row: {e:#}");
+            return;
+        }
+    };
+    if linked != Some(chat_id) {
+        return;
+    }
+    let Some(action) = callback.data.as_deref().and_then(parse_callback) else { return };
+    let (item_id, outcome) = match action {
+        CallbackAction::Confirm(item_id) => (item_id, confirm_item(db, item_id).await),
+        CallbackAction::Reject(item_id) => (item_id, reject_item(db, item_id).await),
+    };
+    let status = outcome.unwrap_or_else(|e| format!("⚠️ {e:#}"));
+    let text = format!("🧾 Review #{item_id} — {status}");
+    if let Err(e) = client.edit_message_text(chat_id, message.message_id, &text).await {
+        tracing::error!("telegram: editMessageText failed: {e:#}");
+    }
+}
+
+/// Confirm a staged item using its suggested account/instrument.
+async fn confirm_item(db: &Db, item_id: i64) -> anyhow::Result<String> {
+    let item = crate::repo::review_items::get(db, item_id).await?;
+    let payload = build_confirm_payload(&item)
+        .map_err(|reason| anyhow::anyhow!("{reason} — lengkapi di web UI → Data"))?;
+    let txn_id = crate::ingestion::review::confirm(db, item_id, &payload).await?;
+    Ok(format!("✅ Transaksi #{txn_id} dibuat."))
+}
+
+async fn reject_item(db: &Db, item_id: i64) -> anyhow::Result<String> {
+    crate::ingestion::review::reject(db, item_id).await?;
+    Ok("❌ Ditolak.".to_string())
 }
 
 async fn send_or_log(client: &TelegramClient, chat_id: i64, text: &str) {
@@ -307,5 +525,99 @@ mod tests {
         let mut msg = bare_message();
         msg.text = Some("berapa net worth saya?".into());
         assert_eq!(pick_attachment(&msg), AttachmentPick::None);
+    }
+
+    // ── Inline confirmation ────────────────────────────────────────────────
+
+    #[test]
+    fn parses_confirm_and_reject_callbacks() {
+        assert_eq!(parse_callback("confirm:42"), Some(CallbackAction::Confirm(42)));
+        assert_eq!(parse_callback("reject:7"), Some(CallbackAction::Reject(7)));
+        assert_eq!(parse_callback("nope:1"), None);
+        assert_eq!(parse_callback("confirm:abc"), None);
+        assert_eq!(parse_callback("confirm"), None);
+    }
+
+    #[test]
+    fn coerces_dates_to_rfc3339() {
+        assert_eq!(to_rfc3339("2026-06-04T11:32:00Z").as_deref(), Some("2026-06-04T11:32:00Z"));
+        assert_eq!(to_rfc3339("2026-06-04T11:32").as_deref(), Some("2026-06-04T11:32:00Z"));
+        assert_eq!(to_rfc3339("2026-06-04").as_deref(), Some("2026-06-04T00:00:00Z"));
+        assert_eq!(to_rfc3339("kemarin"), None);
+    }
+
+    fn review_item(payload_json: &str) -> crate::repo::review_items::ReviewItemRow {
+        crate::repo::review_items::ReviewItemRow {
+            id: 42,
+            batch_id: "tg-1".into(),
+            source_kind: "image".into(),
+            source_filename: "telegram-photo.jpg".into(),
+            source_path: "".into(),
+            doc_type: "txn_history".into(),
+            status: "pending".into(),
+            needs_attention: 0,
+            payload_json: payload_json.into(),
+            raw_llm_json: "{}".into(),
+            suggested_instrument_id: Some(9),
+            suggested_account_id: Some(2),
+            created_txn_id: None,
+            created_at: "2026-06-05T00:00:00Z".into(),
+            confirmed_at: None,
+        }
+    }
+
+    const FULL_PAYLOAD: &str = r#"{
+        "entry_type": "buy", "symbol": "BTC", "quantity": "0.00128248",
+        "price_native": "1169608882", "fee_native": "0", "currency": "IDR",
+        "executed_at": "2026-06-04", "confidence": 0.95
+    }"#;
+
+    #[test]
+    fn full_items_build_a_confirm_payload() {
+        let payload = build_confirm_payload(&review_item(FULL_PAYLOAD)).expect("confirmable");
+        assert_eq!(payload.account_id, 2);
+        assert_eq!(payload.instrument_id, 9);
+        assert_eq!(payload.entry_type, "buy");
+        assert_eq!(payload.quantity, "0.00128248");
+        assert_eq!(payload.executed_at, "2026-06-04T00:00:00Z");
+        assert_eq!(payload.currency, "IDR");
+    }
+
+    #[test]
+    fn attention_items_are_not_confirmable() {
+        let mut item = review_item(FULL_PAYLOAD);
+        item.needs_attention = 1;
+        assert!(build_confirm_payload(&item).is_err());
+    }
+
+    #[test]
+    fn items_without_suggestions_are_not_confirmable() {
+        let mut item = review_item(FULL_PAYLOAD);
+        item.suggested_account_id = None;
+        assert!(build_confirm_payload(&item).is_err());
+
+        let mut item = review_item(FULL_PAYLOAD);
+        item.suggested_instrument_id = None;
+        assert!(build_confirm_payload(&item).is_err());
+    }
+
+    #[test]
+    fn items_missing_core_fields_are_not_confirmable() {
+        let payload = r#"{ "entry_type": "buy", "symbol": "BTC", "confidence": 0.95 }"#;
+        assert!(build_confirm_payload(&review_item(payload)).is_err());
+    }
+
+    #[test]
+    fn summary_shows_the_extracted_details() {
+        let item = review_item(FULL_PAYLOAD);
+        let entry: crate::ingestion::extract::ExtractedEntry =
+            serde_json::from_str(FULL_PAYLOAD).unwrap();
+        let summary = item_summary(&item, Some(&entry), Some("Pluang"), Some("BTC (Bitcoin)"));
+        assert!(summary.contains("Review #42"), "{summary}");
+        assert!(summary.contains("buy BTC"), "{summary}");
+        assert!(summary.contains("0,00128248"), "{summary}");
+        assert!(summary.contains("1.169.608.882"), "{summary}");
+        assert!(summary.contains("Akun: Pluang"), "{summary}");
+        assert!(summary.contains("Instrumen: BTC (Bitcoin)"), "{summary}");
     }
 }
