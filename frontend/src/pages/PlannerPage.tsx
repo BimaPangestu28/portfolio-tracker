@@ -2,9 +2,41 @@ import { useState, useEffect } from "react";
 import ReactDOM from "react-dom";
 import { Plus, Check, X, CheckCircle, AlertTriangle, Trash2 } from "lucide-react";
 import { toast } from "sonner";
-import { useCategories, useCreateCategory, useDeleteCategory, useSummary } from "../api/hooks";
+import { useCategories, useCreateCategory, useUpdateCategory, useDeleteCategory, useSummary, type Category } from "../api/hooks";
 import { QueryState } from "../components/QueryState";
-import { formatIDR, formatPct, parseNum } from "../lib/format";
+import { formatIDR, parseNum } from "../lib/format";
+
+/** Inline editor for a category's target percent — saves on blur/Enter. */
+function TargetEditor({ category }: { category: Category }) {
+  const update = useUpdateCategory();
+  const [target, setTarget] = useState(category.target_pct);
+
+  const save = () => {
+    if (target === category.target_pct) return;
+    update.mutate(
+      { id: category.id, patch: { target_pct: target } },
+      {
+        onSuccess: () => toast.success(`Target ${category.name} disimpan`),
+        onError: (err) => { toast.error((err as Error).message); setTarget(category.target_pct); },
+      },
+    );
+  };
+
+  return (
+    <span className="t-h2 num t-muted" style={{ display: "inline-flex", alignItems: "baseline", gap: 2 }}>
+      <input
+        className="input num"
+        style={{ width: 64, height: 28, textAlign: "right", fontSize: "inherit", padding: "0 4px" }}
+        aria-label={`Target ${category.name}`}
+        value={target}
+        onChange={(e) => setTarget(e.target.value)}
+        onBlur={save}
+        onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+      />
+      %
+    </span>
+  );
+}
 
 interface DialogProps {
   open: boolean;
@@ -223,7 +255,7 @@ export default function PlannerPage() {
                     </div>
                     <div style={{ textAlign: "right" }}>
                       <div className="t-xs t-muted">Target ±{tol}%</div>
-                      <div className="t-h2 num t-muted">{formatPct(c.target_pct)}</div>
+                      <TargetEditor category={c} />
                     </div>
                   </div>
                   <ProgressBar

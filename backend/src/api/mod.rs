@@ -49,7 +49,10 @@ pub fn router(state: AppState) -> Router {
             "/categories",
             get(crud::list_categories).post(crud::create_category),
         )
-        .route("/categories/:id", delete(crud::delete_category))
+        .route(
+            "/categories/:id",
+            delete(crud::delete_category).patch(crud::update_category),
+        )
         .route(
             "/instruments",
             get(crud::list_instruments).post(crud::create_instrument),
