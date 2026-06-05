@@ -20,6 +20,16 @@ export function formatPct(v: string | number): string {
   return `${parseNum(v).toFixed(1)}%`;
 }
 
+const qty = new Intl.NumberFormat("id-ID", { maximumFractionDigits: 8 });
+
+/**
+ * Format a unit quantity (shares, lots, coins): thousands grouped id-ID
+ * style, fractions kept up to 8 digits for fractional crypto amounts.
+ */
+export function formatQty(v: string | number): string {
+  return qty.format(parseNum(v));
+}
+
 /**
  * Format a value in its native currency. IDR and USD use the dedicated
  * formatters; any other ISO code is formatted via Intl with a graceful

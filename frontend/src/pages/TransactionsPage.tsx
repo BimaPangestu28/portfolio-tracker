@@ -6,6 +6,7 @@ import { QueryState } from "../components/QueryState";
 import { Dialog } from "../components/Dialog";
 import { AddTransactionDialog } from "../components/AddTransactionDialog";
 import { TXN_TYPES, txTone, txLabel } from "../lib/txn";
+import { formatCurrency, formatQty } from "../lib/format";
 
 export default function TransactionsPage() {
   const txns = useTransactions();
@@ -134,8 +135,8 @@ export default function TransactionsPage() {
                       </td>
                       <td style={{ fontWeight: 500 }}>{instrumentName(t.instrument_id)}</td>
                       <td className="t-muted t-sm">{accountName(t.account_id)}</td>
-                      <td className="r num">{t.quantity}</td>
-                      <td className="r num">{t.price_native} {t.currency}</td>
+                      <td className="r num">{formatQty(t.quantity)}</td>
+                      <td className="r num">{formatCurrency(t.price_native, t.currency)}</td>
                       <td className="r">
                         <button
                           type="button"

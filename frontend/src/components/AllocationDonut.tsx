@@ -1,5 +1,6 @@
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from "recharts";
 import type { CategoryAllocation } from "../api/schemas";
+import { formatIDR } from "../lib/format";
 
 const COLORS = [
   "hsl(var(--chart-1))",
@@ -24,6 +25,7 @@ export function AllocationDonut({ allocation }: { allocation: CategoryAllocation
             ))}
           </Pie>
           <Tooltip
+            formatter={(value: number) => formatIDR(value)}
             contentStyle={{
               background: "hsl(var(--popover))",
               border: "1px solid hsl(var(--border))",

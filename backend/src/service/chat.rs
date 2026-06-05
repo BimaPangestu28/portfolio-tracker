@@ -1,6 +1,45 @@
 use crate::repo::instruments::InstrumentRow;
 use crate::service::portfolio::PortfolioSummary;
+use rust_decimal::Decimal;
 use std::collections::HashMap;
+
+/// Format a Decimal in Indonesian style: dots for thousands, comma for the
+/// fraction, trailing zeros stripped (91960083 -> "91.960.083", 0.00052 ->
+/// "0,00052"). Matches the web UI's id-ID Intl formatting so the model sees
+/// and echoes numbers the way the rest of the app shows them.
+fn group_id(d: &Decimal) -> String {
+    let normalized = d.normalize();
+    let digits = normalized.abs().to_string();
+    let (int_part, frac_part) = match digits.split_once('.') {
+        Some((int_digits, frac_digits)) => (int_digits, Some(frac_digits)),
+        None => (digits.as_str(), None),
+    };
+    let mut out = String::new();
+    if normalized.is_sign_negative() {
+        out.push('-');
+    }
+    for (idx, ch) in int_part.chars().enumerate() {
+        if idx > 0 && (int_part.len() - idx) % 3 == 0 {
+            out.push('.');
+        }
+        out.push(ch);
+    }
+    if let Some(frac_digits) = frac_part {
+        out.push(',');
+        out.push_str(frac_digits);
+    }
+    out
+}
+
+/// IDR amounts: whole rupiah, grouped.
+fn fmt_idr(d: &Decimal) -> String {
+    group_id(&d.round_dp(0))
+}
+
+/// USD amounts: cents precision, grouped.
+fn fmt_usd(d: &Decimal) -> String {
+    group_id(&d.round_dp(2))
+}
 
 /// Render a compact text snapshot of the portfolio for the LLM context.
 ///
@@ -12,8 +51,8 @@ pub fn build_context(s: &PortfolioSummary, instruments: &[InstrumentRow]) -> Str
         .map(|i| (i.id, format!("{} ({})", i.symbol, i.name)))
         .collect();
     let mut out = String::new();
-    out.push_str(&format!("Net worth: Rp {} (USD {}).\n", s.net_worth_idr, s.net_worth_usd));
-    out.push_str(&format!("Unrealized P&L (IDR): {}. Realized P&L (IDR): {}.\n", s.total_unrealized_pnl_idr, s.total_realized_pnl_idr));
+    out.push_str(&format!("Net worth: Rp {} (USD {}).\n", fmt_idr(&s.net_worth_idr), fmt_usd(&s.net_worth_usd)));
+    out.push_str(&format!("Unrealized P&L (IDR): {}. Realized P&L (IDR): {}.\n", fmt_idr(&s.total_unrealized_pnl_idr), fmt_idr(&s.total_realized_pnl_idr)));
     match s.xirr { Some(x) => out.push_str(&format!("XIRR: {:.1}%\n", x * 100.0)), None => out.push_str("XIRR: n/a\n") }
     out.push_str("Allocation (actual% / target%):\n");
     for c in &s.allocation {
@@ -25,7 +64,7 @@ pub fn build_context(s: &PortfolioSummary, instruments: &[InstrumentRow]) -> Str
             .get(&p.instrument_id)
             .cloned()
             .unwrap_or_else(|| format!("instrument#{}", p.instrument_id));
-        out.push_str(&format!("- {}: qty {} value Rp {}\n", label, p.quantity, p.market_value_idr));
+        out.push_str(&format!("- {}: qty {} value Rp {}\n", label, group_id(&p.quantity), fmt_idr(&p.market_value_idr)));
     }
     out
 }
@@ -34,7 +73,7 @@ use crate::db::Db;
 use crate::llm::claude::{ClaudeClient, Part};
 use crate::repo::chat;
 
-const SYSTEM: &str = "You are a concise personal investment assistant. Answer the user's question using ONLY the portfolio snapshot provided. Amounts are in IDR unless noted. If the snapshot lacks the info, say so briefly. Keep answers short.";
+const SYSTEM: &str = "You are a concise personal investment assistant. Answer the user's question using ONLY the portfolio snapshot provided. Amounts are in IDR unless noted. If the snapshot lacks the info, say so briefly. Keep answers short. Format every number with Indonesian separators: dots for thousands, comma for decimals (e.g. Rp 91.960.083).";
 
 /// Telegram/WhatsApp render replies as raw text, so Markdown tables and
 /// **bold** markers show up literally — instruct plain text there. The in-app
@@ -95,9 +134,18 @@ mod tests {
     }
 
     #[test]
+    fn grouping_formats_indonesian_thousands() {
+        assert_eq!(group_id(&dec!(91960083)), "91.960.083");
+        assert_eq!(group_id(&dec!(-13964613)), "-13.964.613");
+        assert_eq!(group_id(&dec!(0.00052)), "0,00052");
+        assert_eq!(group_id(&dec!(1234.50)), "1.234,5");
+        assert_eq!(group_id(&dec!(100)), "100");
+    }
+
+    #[test]
     fn context_includes_net_worth_and_xirr() {
         let ctx = build_context(&summary(), &[]);
-        assert!(ctx.contains("Net worth: Rp 4875000"));
+        assert!(ctx.contains("Net worth: Rp 4.875.000"), "{ctx}");
         assert!(ctx.contains("XIRR: 16.8%"));
     }
 
@@ -112,7 +160,7 @@ mod tests {
         let mut s = summary();
         s.positions = vec![position(3)];
         let ctx = build_context(&s, &[instrument_row(3, "BBCA", "Bank Central Asia")]);
-        assert!(ctx.contains("- BBCA (Bank Central Asia): qty 100 value Rp 1000000"), "{ctx}");
+        assert!(ctx.contains("- BBCA (Bank Central Asia): qty 100 value Rp 1.000.000"), "{ctx}");
         assert!(!ctx.contains("instrument#3"), "{ctx}");
     }
 
@@ -121,7 +169,7 @@ mod tests {
         let mut s = summary();
         s.positions = vec![position(7)];
         let ctx = build_context(&s, &[]);
-        assert!(ctx.contains("- instrument#7: qty 100 value Rp 1000000"), "{ctx}");
+        assert!(ctx.contains("- instrument#7: qty 100 value Rp 1.000.000"), "{ctx}");
     }
 
     #[test]
