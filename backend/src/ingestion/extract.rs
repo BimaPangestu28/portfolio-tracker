@@ -50,17 +50,31 @@ pub enum ExtractError {
     Missing(String),
 }
 
-/// Strip an optional ```json ... ``` markdown fence the model may wrap around the JSON.
-fn strip_fence(s: &str) -> &str {
-    let t = s.trim();
-    if let Some(rest) = t.strip_prefix("```json").or_else(|| t.strip_prefix("```")) {
-        return rest.trim().strip_suffix("```").unwrap_or(rest).trim();
+/// Locate the JSON object in a model response. Despite the ONLY-JSON
+/// instruction the model sometimes prefixes reasoning prose and/or wraps the
+/// JSON in a ```json fence anywhere in the response — find it instead of
+/// assuming the response starts with it.
+fn extract_json(s: &str) -> &str {
+    // Prefer an explicit ```json fence wherever it appears.
+    if let Some(start) = s.find("```json") {
+        let body = &s[start + "```json".len()..];
+        let body = body.strip_prefix('\n').unwrap_or(body);
+        if let Some(end) = body.find("```") {
+            return body[..end].trim();
+        }
+        return body.trim();
     }
-    t
+    // Otherwise take the outermost braces (tolerates prose before/after).
+    if let (Some(start), Some(end)) = (s.find('{'), s.rfind('}')) {
+        if start < end {
+            return s[start..=end].trim();
+        }
+    }
+    s.trim()
 }
 
 pub fn parse_extraction(raw: &str) -> Result<Extraction, ExtractError> {
-    let cleaned = strip_fence(raw);
+    let cleaned = extract_json(raw);
     let v: serde_json::Value = serde_json::from_str(cleaned).map_err(|e| ExtractError::NotJson(e.to_string()))?;
     let doc_type = v.get("doc_type").and_then(|d| d.as_str())
         .ok_or_else(|| ExtractError::Missing("doc_type".into()))?.to_string();
@@ -295,6 +309,32 @@ mod tests {
         normalize_entry(&mut e);
         assert_eq!(e.quantity.as_deref(), Some("700"));
         assert_eq!(e.fee_native.as_deref(), Some("3014"));
+    }
+
+    #[test]
+    fn tolerates_reasoning_prose_before_fenced_json() {
+        // Real failure: the model "shows its work" before the JSON despite the
+        // ONLY-JSON instruction (seen with the IDX lot-rounding prompt).
+        let raw = "I'll process each IDX stock transaction using the lot-rounding rules.\n\
+            **BUY TLKM**: amount=2012014, price=2870 -> 2012014/2870=701.05 -> qty=700, fee=3014\n\
+            ```json\n\
+            {\"doc_type\":\"txn_history\",\"entries\":[\n\
+              {\"entry_type\":\"buy\",\"symbol\":\"TLKM\",\"quantity\":\"700\",\"price_native\":\"2870\",\"fee_native\":\"3014\",\"amount_native\":\"2012014\",\"currency\":\"IDR\",\"confidence\":0.95}\n\
+            ]}\n\
+            ```";
+        let e = parse_extraction(raw).unwrap();
+        assert_eq!(e.doc_type, "txn_history");
+        assert_eq!(e.entries.len(), 1);
+        assert_eq!(e.entries[0].quantity.as_deref(), Some("700"));
+        assert_eq!(e.entries[0].fee_native.as_deref(), Some("3014"));
+    }
+
+    #[test]
+    fn tolerates_prose_around_bare_json() {
+        let raw = "Here is the extraction:\n{\"doc_type\":\"txn_history\",\"entries\":[]}\nLet me know if you need anything else.";
+        let e = parse_extraction(raw).unwrap();
+        assert_eq!(e.doc_type, "txn_history");
+        assert!(e.entries.is_empty());
     }
 
     #[test]
