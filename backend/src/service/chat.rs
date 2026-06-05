@@ -110,6 +110,8 @@ mod tests {
         PortfolioSummary {
             net_worth_idr: dec!(4875000), net_worth_usd: dec!(300),
             total_unrealized_pnl_idr: dec!(100), total_realized_pnl_idr: dec!(0),
+            total_unrealized_price_pnl_idr: dec!(0), total_unrealized_fx_pnl_idr: dec!(0),
+            total_realized_price_pnl_idr: dec!(0), total_realized_fx_pnl_idr: dec!(0),
             xirr: Some(0.168), positions: vec![], allocation: vec![],
         }
     }

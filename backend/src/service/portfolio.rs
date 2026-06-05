@@ -18,6 +18,14 @@ pub struct PortfolioSummary {
     pub total_unrealized_pnl_idr: Decimal,
     #[serde(with = "rust_decimal::serde::str")]
     pub total_realized_pnl_idr: Decimal,
+    #[serde(with = "rust_decimal::serde::str")]
+    pub total_unrealized_price_pnl_idr: Decimal,
+    #[serde(with = "rust_decimal::serde::str")]
+    pub total_unrealized_fx_pnl_idr: Decimal,
+    #[serde(with = "rust_decimal::serde::str")]
+    pub total_realized_price_pnl_idr: Decimal,
+    #[serde(with = "rust_decimal::serde::str")]
+    pub total_realized_fx_pnl_idr: Decimal,
     pub xirr: Option<f64>,
     pub positions: Vec<Position>,
     pub allocation: Vec<CategoryAllocation>,
@@ -27,7 +35,6 @@ pub struct PortfolioSummary {
 /// at-or-before the txn date). Returns true when at least one txn still has no
 /// usable rate — callers must surface this (Position.fx_incomplete), never
 /// silently substitute the current rate.
-#[allow(dead_code)] // wired into build_summary in the next commit
 async fn resolve_fx_gaps(db: &Db, txns: &mut [crate::domain::models::Transaction]) -> anyhow::Result<bool> {
     let mut incomplete = false;
     for t in txns.iter_mut() {
@@ -57,11 +64,16 @@ pub async fn build_summary(db: &Db) -> anyhow::Result<PortfolioSummary> {
     let mut net_usd = Decimal::ZERO;
     let mut unreal_idr = Decimal::ZERO;
     let mut real_idr = Decimal::ZERO;
+    let mut unreal_price_idr = Decimal::ZERO;
+    let mut unreal_fx_idr = Decimal::ZERO;
+    let mut real_price_idr = Decimal::ZERO;
+    let mut real_fx_idr = Decimal::ZERO;
 
-    for (instrument_id, txns) in &grouped {
-        let cb = compute_cost_basis(txns);
-        let ins = instruments::get(db, *instrument_id).await?;
-        let latest = prices::latest(db, *instrument_id).await?;
+    for (instrument_id, mut txns) in grouped {
+        let fx_incomplete = resolve_fx_gaps(db, &mut txns).await?;
+        let cb = compute_cost_basis(&txns);
+        let ins = instruments::get(db, instrument_id).await?;
+        let latest = prices::latest(db, instrument_id).await?;
         let (price, stale) = match latest {
             Some(lp) => (lp.price, crate::pricing::service::is_stale(&lp.as_of, chrono::Utc::now(), 24)),
             None => (cb.avg_cost, true), // fall back to cost, flagged stale — never silently zero
@@ -72,12 +84,17 @@ pub async fn build_summary(db: &Db) -> anyhow::Result<PortfolioSummary> {
         } else {
             (usd_idr, Decimal::ONE)
         };
-        let ctx = PriceContext { instrument_id: *instrument_id, latest_price_native: price, price_stale: stale, fx_native_to_idr: to_idr, fx_native_to_usd: to_usd };
-        let p = build_position(*instrument_id, &cb, &ctx, false);
+        let ctx = PriceContext { instrument_id, latest_price_native: price, price_stale: stale, fx_native_to_idr: to_idr, fx_native_to_usd: to_usd };
+        let p = build_position(instrument_id, &cb, &ctx, fx_incomplete);
         net_idr += p.market_value_idr;
         net_usd += p.market_value_usd;
-        unreal_idr += p.unrealized_pnl * to_idr;
-        real_idr += p.realized_pnl * to_idr;
+        // FX-aware totals: cost basis at purchase-time rates, value at today's rate.
+        unreal_idr += p.unrealized_pnl_idr;
+        real_idr += p.realized_pnl_idr;
+        unreal_price_idr += p.unrealized_price_pnl_idr;
+        unreal_fx_idr += p.unrealized_fx_pnl_idr;
+        real_price_idr += p.realized_price_pnl_idr;
+        real_fx_idr += p.realized_fx_pnl_idr;
         positions.push(p);
     }
 
@@ -125,6 +142,10 @@ pub async fn build_summary(db: &Db) -> anyhow::Result<PortfolioSummary> {
         net_worth_usd: net_usd,
         total_unrealized_pnl_idr: unreal_idr,
         total_realized_pnl_idr: real_idr,
+        total_unrealized_price_pnl_idr: unreal_price_idr,
+        total_unrealized_fx_pnl_idr: unreal_fx_idr,
+        total_realized_price_pnl_idr: real_price_idr,
+        total_realized_fx_pnl_idr: real_fx_idr,
         xirr: xirr_val,
         positions,
         allocation,
@@ -170,6 +191,27 @@ mod tests {
         let incomplete = resolve_fx_gaps(&db, &mut txns).await.unwrap();
         assert!(incomplete);
         assert_eq!(txns[0].fx_to_idr, dec("0").unwrap()); // untouched, not guessed
+    }
+
+    #[tokio::test]
+    async fn summary_captures_fx_gain_on_usd_position() {
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        let cat = categories::create(&db, &categories::NewCategory { name:"Crypto".into(), target_pct:"100".into(), tolerance_band_pct:Some("5".into()), sort_order:None, color:None }).await.unwrap();
+        let acct = crate::repo::accounts::create(&db, &crate::repo::accounts::NewAccount{ name:"X".into(), account_type:"manual".into(), institution:None, native_currency:"USD".into(), note:None }).await.unwrap();
+        let ins = instruments::create(&db, &instruments::NewInstrument{ symbol:"BTC".into(), name:"BTC".into(), instrument_type:"crypto".into(), native_currency:"USD".into(), category_id:Some(cat.id), price_source:"coingecko:bitcoin".into(), decimals:Some(8), note:None }).await.unwrap();
+        // Bought at fx 16000; IDR has since weakened to 17000.
+        transactions::create(&db, &transactions::NewTransaction{ account_id:acct.id, instrument_id:ins.id, txn_type:"buy".into(), executed_at:Utc::now(), quantity:"1".into(), price_native:"100".into(), fee_native:None, currency:"USD".into(), fx_to_idr:"16000".into(), fx_to_usd:"1".into(), note:None, source:None, external_id:None }).await.unwrap();
+        prices::upsert_latest(&db, ins.id, dec("150").unwrap(), "USD", "test", "2099-01-01").await.unwrap();
+        prices::upsert_fx(&db, "USD", "IDR", dec("17000").unwrap(), "2099-01-01").await.unwrap();
+
+        let s = build_summary(&db).await.unwrap();
+        // total = 150*17000 - 100*16000 = 950,000 ; price = 50*17000 = 850,000 ; fx = 100,000
+        assert_eq!(s.total_unrealized_pnl_idr, dec("950000").unwrap());
+        assert_eq!(s.total_unrealized_price_pnl_idr, dec("850000").unwrap());
+        assert_eq!(s.total_unrealized_fx_pnl_idr, dec("100000").unwrap());
+        let p = &s.positions[0];
+        assert!(!p.fx_incomplete);
+        assert_eq!(p.unrealized_fx_pnl_idr, dec("100000").unwrap());
     }
 
     #[tokio::test]
