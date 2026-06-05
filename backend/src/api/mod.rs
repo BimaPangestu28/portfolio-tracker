@@ -67,6 +67,8 @@ pub fn router(state: AppState) -> Router {
         .route("/portfolio/history", get(portfolio::history))
         .route("/portfolio/insights", get(portfolio::insights))
         .route("/portfolio/performance", get(portfolio::performance))
+        .route("/portfolio/movers", get(portfolio::movers))
+        .route("/portfolio/benchmark", get(portfolio::benchmark))
         .route("/goals", get(goals::list_goals).post(goals::create_goal))
         .route("/goals/:id", delete(goals::delete_goal))
         .route(

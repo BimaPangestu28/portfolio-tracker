@@ -148,6 +148,10 @@ export const handlers = [
   http.get("/api/telegram/status", () =>
     HttpResponse.json({ configured: true, linked: false, username: null }),
   ),
+
+  // ── Dashboard: movers + benchmark ──────────────────────────────────────────
+  http.get("/api/portfolio/movers", () => HttpResponse.json([])),
+  http.get("/api/portfolio/benchmark", () => HttpResponse.json([])),
 ];
 
 export const server = setupServer(...handlers);

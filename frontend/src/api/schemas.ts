@@ -294,6 +294,27 @@ export const TelegramLinkCodeSchema = z.object({
 });
 export type TelegramLinkCode = z.infer<typeof TelegramLinkCodeSchema>;
 
+// ── Dashboard: movers + benchmark ───────────────────────────────────────────
+
+export const MoverSchema = z.object({
+  instrument_id: z.number(),
+  symbol: z.string(),
+  name: z.string(),
+  /** Day change of the whole position in IDR (string decimal) */
+  delta_idr: z.string(),
+  /** Day change of the price itself, percent */
+  delta_pct: z.number(),
+  value_idr: z.string(),
+});
+export type Mover = z.infer<typeof MoverSchema>;
+
+export const BenchmarkRowSchema = z.object({
+  label: z.string(),
+  /** Period return as a ratio (0.05 = +5%) */
+  return_ratio: z.number(),
+});
+export type BenchmarkRow = z.infer<typeof BenchmarkRowSchema>;
+
 export const LoginResponseSchema = z.object({ token: z.string() });
 export type LoginResponse = z.infer<typeof LoginResponseSchema>;
 

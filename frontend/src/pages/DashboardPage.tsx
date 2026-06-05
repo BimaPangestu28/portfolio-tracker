@@ -14,6 +14,7 @@
  */
 
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import {
   Loader2,
   RefreshCw,
@@ -25,16 +26,25 @@ import {
   PieChart as PieIcon,
   Target,
   CheckCircle2,
+  AlertTriangle,
+  Activity,
+  Trophy,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-import { useSummary, useHistory, useInsights, useGoals, useRefreshPrices } from "../api/hooks";
-import { formatIDR, formatUSD, formatPct, parseNum } from "../lib/format";
+import {
+  useSummary, useHistory, useInsights, useGoals, useRefreshPrices,
+  useMovers, useBenchmark, useReviewItems, useTransactions, useInstruments,
+} from "../api/hooks";
+import { formatIDR, formatUSD, formatPct, formatQty, parseNum } from "../lib/format";
+import { txTone, txLabel } from "../lib/txn";
 import { HeroSparkline } from "../components/charts/HeroSparkline";
 import { DonutChart } from "../components/charts/DonutChart";
 import { DriftBarsChart } from "../components/charts/DriftBarsChart";
 import { StackedAreaChart } from "../components/charts/StackedAreaChart";
-import type { CategoryAllocation, Goal } from "../api/schemas";
+import type {
+  CategoryAllocation, Goal, Mover, BenchmarkRow, Position, Instrument, Transaction,
+} from "../api/schemas";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -100,6 +110,28 @@ function StatCard({ label, icon, value, sub, tone, loading }: StatCardProps) {
 // Hero Section — net worth card + 2×2 stat cards
 // ─────────────────────────────────────────────────────────────────────────────
 
+/** Year-window trend: percent change across snapshots within the last 365
+ *  days, with an honest label — "12 bln" only when history actually spans a
+ *  year, otherwise "sejak <oldest date in window>". */
+export function yearTrend(
+  snapshots: Array<{ as_of: string; total_idr: string }>,
+  now: Date,
+): { pct: number; label: string } | null {
+  const cutoff = now.getTime() - 365 * 24 * 3600 * 1000;
+  const window = snapshots.filter((s) => new Date(s.as_of).getTime() >= cutoff);
+  if (window.length < 2) return null;
+  const first = Number(window[0].total_idr);
+  const last = Number(window[window.length - 1].total_idr);
+  if (!Number.isFinite(first) || first === 0) return null;
+  const pct = ((last - first) / first) * 100;
+  const coversFullYear =
+    snapshots.length > window.length || new Date(window[0].as_of).getTime() <= cutoff + 7 * 24 * 3600 * 1000;
+  const label = coversFullYear
+    ? "12 bln"
+    : `sejak ${new Date(window[0].as_of).toLocaleDateString("id-ID", { day: "numeric", month: "short" })}`;
+  return { pct, label };
+}
+
 interface HeroProps {
   netWorthIdr: string;
   netWorthUsd: string;
@@ -111,6 +143,7 @@ interface HeroProps {
   dividendTtmIdr: string;
   savingsRate: string;
   snapshots: Array<{ as_of: string; total_idr: string; total_usd: string; breakdown_json: string }>;
+  staleCount: number;
 }
 
 function HeroSection({
@@ -124,6 +157,7 @@ function HeroSection({
   dividendTtmIdr,
   savingsRate,
   snapshots,
+  staleCount,
 }: HeroProps) {
   const deltaPos = parseNum(dayDeltaIdr) >= 0;
   const pnlN = parseNum(unrealizedPnl);
@@ -136,12 +170,7 @@ function HeroSection({
   const yieldN = parseNum(yieldPct);
   const xirrVal = xirr == null ? "—" : `${(xirr * 100).toFixed(1)}%`;
 
-  // Compute 12-month trend from snapshots
-  const snapVals = snapshots.slice(-12).map((s) => Number(s.total_idr));
-  const twelveMoPct =
-    snapVals.length >= 2
-      ? ((snapVals[snapVals.length - 1] - snapVals[0]) / snapVals[0]) * 100
-      : 0;
+  const trend = yearTrend(snapshots, new Date());
 
   return (
     <div
@@ -163,10 +192,17 @@ function HeroSection({
           <span className="t-label" style={{ whiteSpace: "nowrap" }}>
             Total Kekayaan Bersih
           </span>
-          <span className="badge badge-gain">
-            <span className="badge-dot" style={{ background: "currentColor" }} />
-            Live
-          </span>
+          {staleCount > 0 ? (
+            <span className="badge badge-warn" title="Beberapa harga gagal di-refresh">
+              <span className="badge-dot" style={{ background: "currentColor" }} />
+              {staleCount} harga basi
+            </span>
+          ) : (
+            <span className="badge badge-gain">
+              <span className="badge-dot" style={{ background: "currentColor" }} />
+              Live
+            </span>
+          )}
         </div>
 
         <div className="flex col gap-2">
@@ -185,8 +221,9 @@ function HeroSection({
               {formatIDR(dayDeltaIdr)} ({formatPct(dayDeltaPct)})
             </span>
             <span className="t-xs t-muted">
-              hari ini · 12 bln {twelveMoPct >= 0 ? "+" : ""}
-              {twelveMoPct.toFixed(1)}%
+              hari ini
+              {trend &&
+                ` · ${trend.label} ${trend.pct >= 0 ? "+" : ""}${trend.pct.toFixed(1)}%`}
             </span>
           </div>
         </div>
@@ -779,10 +816,10 @@ function GoalsCard({ goals }: { goals: Goal[] }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Pergerakan Hari Ini — honest empty placeholder
+// Pergerakan Hari Ini — top movers by absolute IDR impact
 // ─────────────────────────────────────────────────────────────────────────────
 
-function MoversCard() {
+function MoversCard({ movers, loading }: { movers: Mover[]; loading: boolean }) {
   return (
     <div className="card">
       <div className="card-head">
@@ -791,18 +828,237 @@ function MoversCard() {
           <div className="card-sub">kontributor terbesar</div>
         </div>
       </div>
-      <div className="card-pad flex col" style={{ paddingTop: 14 }}>
-        <div className="empty">
-          <div className="empty-icon">
-            <TrendingUp size={26} />
-          </div>
-          <div>
-            <div className="t-h3">Pergerakan per-aset menyusul</div>
-            <div className="t-sm t-muted" style={{ marginTop: 4, maxWidth: 300 }}>
-              Fitur ini membutuhkan data intraday per-holding yang belum tersedia di backend.
+      <div className="card-pad flex col" style={{ paddingTop: 6 }}>
+        {loading ? (
+          [0, 1, 2].map((i) => (
+            <div key={i} className="skeleton" style={{ width: "100%", height: 36, marginTop: 8 }} />
+          ))
+        ) : movers.length === 0 ? (
+          <div className="empty">
+            <div className="empty-icon">
+              <TrendingUp size={26} />
+            </div>
+            <div>
+              <div className="t-h3">Belum cukup data harga</div>
+              <div className="t-sm t-muted" style={{ marginTop: 4, maxWidth: 300 }}>
+                Pergerakan harian muncul setelah ada dua hari data harga per instrumen.
+              </div>
             </div>
           </div>
+        ) : (
+          movers.map((m) => {
+            const up = parseNum(m.delta_idr) >= 0;
+            return (
+              <div
+                key={m.instrument_id}
+                className="flex items-center gap-3"
+                style={{ padding: "10px 0", borderBottom: "1px solid hsl(var(--border))" }}
+              >
+                <div className="flex-1" style={{ minWidth: 0 }}>
+                  <div className="t-sm" style={{ fontWeight: 600 }}>{m.symbol}</div>
+                  <div className="t-xs t-muted truncate">{m.name}</div>
+                </div>
+                <span
+                  className={cn("num t-xs", up ? "gain" : "loss")}
+                  style={{ fontWeight: 500 }}
+                >
+                  {up ? "▲" : "▼"} {Math.abs(m.delta_pct).toFixed(2).replace(".", ",")}%
+                </span>
+                <span
+                  className={cn("num t-sm", up ? "gain" : "loss")}
+                  style={{ fontWeight: 600, minWidth: 110, textAlign: "right" }}
+                >
+                  {up ? "+" : "−"}
+                  {formatIDR(String(Math.abs(parseNum(m.delta_idr))))}
+                </span>
+              </div>
+            );
+          })
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Pending review banner — closes the Telegram/web ingest loop
+// ─────────────────────────────────────────────────────────────────────────────
+
+function PendingReviewBanner({ count }: { count: number }) {
+  if (count === 0) return null;
+  return (
+    <Link
+      to="/data"
+      className="card card-pad flex items-center gap-3"
+      style={{ textDecoration: "none", color: "inherit", borderLeft: "3px solid hsl(var(--warn))" }}
+    >
+      <span style={{ color: "hsl(var(--warn))", display: "grid", placeItems: "center" }}>
+        <AlertTriangle size={18} />
+      </span>
+      <span className="t-sm" style={{ fontWeight: 500 }}>
+        {count} transaksi menunggu konfirmasi
+      </span>
+      <span className="t-xs t-muted" style={{ marginLeft: "auto" }}>
+        Buka Data →
+      </span>
+    </Link>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Top Holdings — largest positions by market value
+// ─────────────────────────────────────────────────────────────────────────────
+
+function TopHoldingsCard({
+  positions,
+  instruments,
+  netWorthIdr,
+}: {
+  positions: Position[];
+  instruments: Instrument[];
+  netWorthIdr: string;
+}) {
+  const labelOf = (id: number) => instruments.find((i) => i.id === id);
+  const netWorth = parseNum(netWorthIdr);
+  const top = [...positions]
+    .filter((p) => parseNum(p.quantity) !== 0)
+    .sort((a, b) => parseNum(b.market_value_idr) - parseNum(a.market_value_idr))
+    .slice(0, 5);
+
+  return (
+    <div className="card">
+      <div className="card-head">
+        <div>
+          <div className="card-title">Posisi Terbesar</div>
+          <div className="card-sub">5 holding teratas berdasarkan nilai</div>
         </div>
+      </div>
+      <div className="card-pad flex col" style={{ paddingTop: 6 }}>
+        {top.length === 0 ? (
+          <div className="t-sm t-muted" style={{ padding: "14px 0" }}>
+            Belum ada posisi.
+          </div>
+        ) : (
+          top.map((p) => {
+            const ins = labelOf(p.instrument_id);
+            const value = parseNum(p.market_value_idr);
+            const weight = netWorth > 0 ? (value / netWorth) * 100 : 0;
+            return (
+              <div
+                key={p.instrument_id}
+                className="flex items-center gap-3"
+                style={{ padding: "10px 0", borderBottom: "1px solid hsl(var(--border))" }}
+              >
+                <div className="flex-1" style={{ minWidth: 0 }}>
+                  <div className="t-sm" style={{ fontWeight: 600 }}>
+                    {ins?.symbol ?? `#${p.instrument_id}`}
+                  </div>
+                  <div className="t-xs t-muted truncate">
+                    {formatQty(p.quantity)} unit
+                  </div>
+                </div>
+                <span className="num t-xs t-muted">{weight.toFixed(1).replace(".", ",")}%</span>
+                <span className="num t-sm" style={{ fontWeight: 600, minWidth: 110, textAlign: "right" }}>
+                  {formatIDR(p.market_value_idr)}
+                </span>
+              </div>
+            );
+          })
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Aktivitas Terakhir — most recent transactions
+// ─────────────────────────────────────────────────────────────────────────────
+
+function ActivityCard({
+  transactions,
+  instruments,
+}: {
+  transactions: Transaction[];
+  instruments: Instrument[];
+}) {
+  const symbolOf = (id: number) =>
+    instruments.find((i) => i.id === id)?.symbol ?? `#${id}`;
+  const recent = [...transactions]
+    .sort((a, b) => b.executed_at.localeCompare(a.executed_at))
+    .slice(0, 5);
+
+  return (
+    <div className="card">
+      <div className="card-head">
+        <div>
+          <div className="card-title">Aktivitas Terakhir</div>
+          <div className="card-sub">5 transaksi terbaru</div>
+        </div>
+      </div>
+      <div className="card-pad flex col" style={{ paddingTop: 6 }}>
+        {recent.length === 0 ? (
+          <div className="empty">
+            <div className="empty-icon">
+              <Activity size={26} />
+            </div>
+            <div className="t-sm t-muted">Belum ada transaksi.</div>
+          </div>
+        ) : (
+          recent.map((t) => (
+            <div
+              key={t.id}
+              className="flex items-center gap-3"
+              style={{ padding: "10px 0", borderBottom: "1px solid hsl(var(--border))" }}
+            >
+              <span className={cn("badge", txTone(t.txn_type))}>{txLabel(t.txn_type)}</span>
+              <div className="flex-1" style={{ minWidth: 0 }}>
+                <div className="t-sm" style={{ fontWeight: 600 }}>{symbolOf(t.instrument_id)}</div>
+                <div className="t-xs t-muted">{t.executed_at.slice(0, 10)}</div>
+              </div>
+              <span className="num t-sm" style={{ fontWeight: 500 }}>
+                {formatQty(t.quantity)}
+              </span>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Benchmark — portfolio TWR vs index returns (1 year)
+// ─────────────────────────────────────────────────────────────────────────────
+
+function BenchmarkCard({ rows }: { rows: BenchmarkRow[] }) {
+  // Nothing useful to show while loading or when every fetch failed.
+  if (rows.length === 0) return null;
+  return (
+    <div className="card">
+      <div className="card-head">
+        <div>
+          <div className="card-title">vs Benchmark</div>
+          <div className="card-sub">return 1 tahun terakhir</div>
+        </div>
+        <Trophy size={16} style={{ color: "hsl(var(--muted-foreground))" }} />
+      </div>
+      <div
+        className="card-pad grid gap-4"
+        style={{ paddingTop: 10, gridTemplateColumns: `repeat(${rows.length}, 1fr)` }}
+      >
+        {rows.map((r) => {
+            const pct = r.return_ratio * 100;
+            const up = pct >= 0;
+            return (
+              <div key={r.label} className="flex col gap-1">
+                <span className="t-xs t-muted">{r.label}</span>
+                <span className={cn("num t-h3", up ? "gain" : "loss")}>
+                  {up ? "+" : ""}
+                  {pct.toFixed(1).replace(".", ",")}%
+                </span>
+              </div>
+            );
+        })}
       </div>
     </div>
   );
@@ -837,12 +1093,19 @@ export default function DashboardPage() {
   const insights = useInsights();
   const goals = useGoals();
   const refresh = useRefreshPrices();
+  const movers = useMovers();
+  const benchmark = useBenchmark();
+  const pendingReviews = useReviewItems("pending");
+  const transactions = useTransactions();
+  const instruments = useInstruments();
 
   const isLoadingCore = summary.isLoading || insights.isLoading;
 
   const outOfBandCount = summary.data?.allocation.filter((c) => c.out_of_band).length ?? 0;
   const activeCategories =
     summary.data?.allocation.filter((c) => Number(c.actual_value_idr) > 0).length ?? 0;
+  const staleCount =
+    summary.data?.positions.filter((p) => p.price_stale && parseNum(p.quantity) !== 0).length ?? 0;
 
   return (
     <div className="flex col gap-5">
@@ -872,6 +1135,9 @@ export default function DashboardPage() {
         </button>
       </div>
 
+      {/* ── 0. Pending review banner ──────────────────────────────────────── */}
+      <PendingReviewBanner count={pendingReviews.data?.length ?? 0} />
+
       {/* ── 1. Hero + KPI row ──────────────────────────────────────────────── */}
       {isLoadingCore ? (
         <HeroRowSkeleton />
@@ -898,6 +1164,7 @@ export default function DashboardPage() {
           dividendTtmIdr={insights.data.dividend_ttm_idr}
           savingsRate={insights.data.savings_rate}
           snapshots={history.data ?? []}
+          staleCount={staleCount}
         />
       ) : null}
 
@@ -953,7 +1220,7 @@ export default function DashboardPage() {
 
       {/* ── 5. Pergerakan + Tujuan side by side ───────────────────────────── */}
       <div className="grid gap-5" style={{ gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)" }}>
-        <MoversCard />
+        <MoversCard movers={movers.data ?? []} loading={movers.isLoading} />
 
         {goals.isLoading ? (
           <CardSkeleton rows={2} height={60} />
@@ -961,6 +1228,22 @@ export default function DashboardPage() {
           <GoalsCard goals={goals.data ?? []} />
         )}
       </div>
+
+      {/* ── 6. Posisi Terbesar + Aktivitas side by side ───────────────────── */}
+      <div className="grid gap-5" style={{ gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)" }}>
+        <TopHoldingsCard
+          positions={summary.data?.positions ?? []}
+          instruments={instruments.data ?? []}
+          netWorthIdr={summary.data?.net_worth_idr ?? "0"}
+        />
+        <ActivityCard
+          transactions={transactions.data ?? []}
+          instruments={instruments.data ?? []}
+        />
+      </div>
+
+      {/* ── 7. Benchmark ──────────────────────────────────────────────────── */}
+      <BenchmarkCard rows={benchmark.data ?? []} />
     </div>
   );
 }
