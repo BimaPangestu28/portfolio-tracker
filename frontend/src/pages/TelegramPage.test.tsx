@@ -59,3 +59,22 @@ test("shows the linked username and unlink button when linked", async () => {
   await waitFor(() => expect(screen.getByText(/@bima/)).toBeInTheDocument());
   expect(screen.getByRole("button", { name: /putus tautan/i })).toBeInTheDocument();
 });
+
+test("unlinking returns the page to the generate-code state", async () => {
+  let linked = true;
+  server.use(
+    http.get("/api/telegram/status", () =>
+      HttpResponse.json({ configured: true, linked, username: linked ? "bima" : null }),
+    ),
+    http.post("/api/telegram/unlink", () => {
+      linked = false;
+      return HttpResponse.json(null);
+    }),
+  );
+  renderPage();
+  const button = await screen.findByRole("button", { name: /putus tautan/i });
+  await userEvent.click(button);
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: /buat kode tautan/i })).toBeInTheDocument(),
+  );
+});
