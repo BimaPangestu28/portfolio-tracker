@@ -40,8 +40,16 @@ async fn amount_only_qty_price(
 ) -> anyhow::Result<(String, String)> {
     let amount_dec = crate::repo::dec(amount)?;
     if ins.price_source.starts_with("bibit:") {
+        // Once an instrument has value-based (price = 1) rows, stay on that
+        // convention: mixing NAV-derived units with rupiah-as-units rows would
+        // make the position unreconcilable (a derived sell could never close a
+        // price-1 buy). Edit the legacy rows to real units to unlock derivation.
+        if transactions::has_price_one_txn(db, ins.id).await? {
+            append_note(note, "dicatat nominal di harga 1 agar konsisten dengan transaksi sebelumnya");
+            return Ok((amount_dec.normalize().to_string(), "1".to_string()));
+        }
         if let Some(lp) = prices::latest(db, ins.id).await? {
-            if lp.price > Decimal::ZERO {
+            if lp.source == "bibit" && lp.price > Decimal::ZERO {
                 let qty = (amount_dec / lp.price).round_dp(4);
                 append_note(note, &format!("unit dihitung dari NAV {} per {}", lp.price.normalize(), lp.as_of));
                 return Ok((qty.normalize().to_string(), lp.price.normalize().to_string()));
@@ -371,6 +379,49 @@ mod tests {
         let txns = transactions::list_all(&db).await.unwrap();
         assert_eq!(txns[0].quantity, (dec!(5000000) / dec!(1617.0896)).round_dp(4));
         assert_eq!(txns[0].price_native, dec!(1617.0896));
+    }
+
+    #[tokio::test]
+    async fn derivation_skipped_when_instrument_has_price_one_history() {
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        let (account_id, instrument_id) = seed_fund(&db).await;
+        // First confirm happened before any NAV existed -> price=1 row.
+        let item1 = review_items::create(&db, &review_items::NewReviewItem {
+            batch_id:"b", source_kind:"image", source_filename:"a.jpeg", source_path:"p",
+            doc_type:"txn_history", needs_attention:false, payload_json:"{}", raw_llm_json:"{}",
+            suggested_instrument_id:Some(instrument_id), suggested_account_id:Some(account_id),
+        }).await.unwrap();
+        confirm(&db, item1.id, &amount_only_payload(account_id, instrument_id, "buy", "13000000")).await.unwrap();
+        // NAV arrives later; a second confirm must NOT switch conventions.
+        crate::repo::prices::upsert_latest(&db, instrument_id, dec!(1697.22), "IDR", "bibit", "2026-06-04").await.unwrap();
+        let item2 = review_items::create(&db, &review_items::NewReviewItem {
+            batch_id:"b", source_kind:"image", source_filename:"b.jpeg", source_path:"p",
+            doc_type:"txn_history", needs_attention:false, payload_json:"{}", raw_llm_json:"{}",
+            suggested_instrument_id:Some(instrument_id), suggested_account_id:Some(account_id),
+        }).await.unwrap();
+        confirm(&db, item2.id, &amount_only_payload(account_id, instrument_id, "sell", "5000000")).await.unwrap();
+        let txns = transactions::list_all(&db).await.unwrap();
+        let sell = txns.iter().find(|t| t.txn_type == crate::domain::models::TxnType::Sell).unwrap();
+        assert_eq!(sell.quantity, dec!(5000000), "must stay value-based");
+        assert_eq!(sell.price_native, dec!(1));
+        assert!(sell.note.clone().unwrap_or_default().contains("konsisten"), "note should explain the gate");
+    }
+
+    #[tokio::test]
+    async fn non_bibit_latest_quote_is_not_used_as_nav() {
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        let (account_id, instrument_id) = seed_fund(&db).await;
+        // A stray manual quote must not be mistaken for NAV.
+        crate::repo::prices::upsert_latest(&db, instrument_id, dec!(999), "IDR", "manual", "2026-06-04").await.unwrap();
+        let item = review_items::create(&db, &review_items::NewReviewItem {
+            batch_id:"b", source_kind:"image", source_filename:"a.jpeg", source_path:"p",
+            doc_type:"txn_history", needs_attention:false, payload_json:"{}", raw_llm_json:"{}",
+            suggested_instrument_id:Some(instrument_id), suggested_account_id:Some(account_id),
+        }).await.unwrap();
+        confirm(&db, item.id, &amount_only_payload(account_id, instrument_id, "buy", "1000000")).await.unwrap();
+        let txns = transactions::list_all(&db).await.unwrap();
+        assert_eq!(txns[0].quantity, dec!(1000000));
+        assert_eq!(txns[0].price_native, dec!(1));
     }
 
     #[tokio::test]

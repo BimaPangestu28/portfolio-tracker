@@ -88,13 +88,26 @@ Inside the existing amount-only gate (both quantity and price empty,
 
 1. Load the instrument (already fetched for validation) and check
    `price_source.starts_with("bibit:")`.
-2. If so, read `prices::latest(db, instrument_id)`. If a quote exists with a
+2. **Consistency gate**: before attempting NAV derivation, call
+   `transactions::has_price_one_txn(db, instrument_id)`. If the instrument
+   already has any ledger row with `price_native = '1'` (the value-based
+   convention), skip derivation and record `quantity = amount, price = 1`
+   with note `"(dicatat nominal di harga 1 agar konsisten dengan transaksi
+   sebelumnya)"`. This prevents a mixed-convention position where a
+   NAV-derived sell of ~3,000 units could never close a 13,000,000-"unit"
+   price-1 buy. To unlock derivation for an instrument, edit the legacy rows
+   to real units first.
+3. If so (and the consistency gate passes), read `prices::latest(db,
+   instrument_id)`. The stored quote is only treated as NAV when
+   `lp.source == "bibit"` (belt-and-suspenders: a stray manual or yahoo
+   quote must not be mistaken for NAV). If a bibit quote exists with a
    positive price: `quantity = (amount / nav).round_dp(4)`,
    `price_native = nav`, and append to the note:
    `"(unit dihitung dari NAV <nav> per <as_of>)"`.
-3. Otherwise (non-bibit instrument, or no quote yet): existing behavior —
-   `quantity = amount, price = "1"`, note appended:
-   `"(NAV belum tersedia; dicatat nominal di harga 1)"` for bibit instruments.
+4. Otherwise (non-bibit instrument, no quote yet, or quote from non-bibit
+   source): existing behavior — `quantity = amount, price = "1"`, note
+   appended `"(NAV belum tersedia; dicatat nominal di harga 1)"` for bibit
+   instruments.
 
 Derived values still flow through `repo::dec()` validation in
 `transactions::create`. Telegram one-tap confirm uses the same `confirm()`,
