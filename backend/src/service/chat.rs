@@ -23,12 +23,25 @@ use crate::repo::chat;
 
 const SYSTEM: &str = "You are a concise personal investment assistant. Answer the user's question using ONLY the portfolio snapshot provided. Amounts are in IDR unless noted. If the snapshot lacks the info, say so briefly. Keep answers short.";
 
+/// Telegram/WhatsApp render replies as raw text, so Markdown tables and
+/// **bold** markers show up literally — instruct plain text there. The in-app
+/// chat renders Markdown (see frontend MarkdownMessage) and keeps the base prompt.
+const PLAIN_TEXT_NOTE: &str = " You are replying inside a plain-text messenger: do NOT use any Markdown (no tables, no headers, no **bold**, no horizontal rules). Write short lines; for lists use simple dashes or emoji.";
+
+/// System prompt for a channel: messengers get plain-text formatting rules.
+fn system_prompt(channel: &str) -> String {
+    match channel {
+        "inapp" => SYSTEM.to_string(),
+        _ => format!("{SYSTEM}{PLAIN_TEXT_NOTE}"),
+    }
+}
+
 /// Build context, ask Claude, then store BOTH messages only on success (avoids orphaned user msgs).
 pub async fn answer(db: &Db, client: &ClaudeClient, channel: &str, user_msg: &str) -> anyhow::Result<String> {
     let summary = crate::service::portfolio::build_summary(db).await?;
     let context = build_context(&summary);
     let prompt = format!("Portfolio snapshot:\n{context}\n\nUser question: {user_msg}");
-    let reply = client.complete(SYSTEM, &[Part::Text(prompt)]).await
+    let reply = client.complete(&system_prompt(channel), &[Part::Text(prompt)]).await
         .map_err(|e| anyhow::anyhow!("llm error: {e}"))?;
     chat::add(db, "user", user_msg, channel).await?;
     chat::add(db, "assistant", &reply, channel).await?;
@@ -59,6 +72,20 @@ mod tests {
     fn context_handles_null_xirr() {
         let mut s = summary(); s.xirr = None;
         assert!(build_context(&s).contains("XIRR: n/a"));
+    }
+
+    #[test]
+    fn messenger_channels_get_plain_text_instructions() {
+        for channel in ["telegram", "whatsapp"] {
+            let prompt = system_prompt(channel);
+            assert!(prompt.contains("plain-text"), "{channel} prompt must forbid Markdown");
+            assert!(prompt.starts_with(SYSTEM), "{channel} prompt must keep the base instructions");
+        }
+    }
+
+    #[test]
+    fn inapp_channel_keeps_the_markdown_capable_prompt() {
+        assert_eq!(system_prompt("inapp"), SYSTEM);
     }
 
     #[tokio::test]
