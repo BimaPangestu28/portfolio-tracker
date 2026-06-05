@@ -12,6 +12,7 @@ import { NavLink, Outlet, useLocation } from "react-router-dom";
 import {
   LayoutDashboard,
   Wallet,
+  LineChart,
   Target,
   Banknote,
   Inbox,
@@ -45,6 +46,7 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { to: "/",          label: "Dashboard",  icon: LayoutDashboard, end: true },
   { to: "/portfolio", label: "Portofolio", icon: Wallet },
+  { to: "/performance", label: "Performa",   icon: LineChart },
   { to: "/planner",   label: "Rencana",    icon: Target },
   { to: "/budget",    label: "Budget",     icon: Banknote },
   { to: "/data",      label: "Data",       icon: Inbox },
@@ -306,7 +308,7 @@ function Topbar({
 
       <div
         className="flex-1 truncate"
-        style={{ fontWeight: 620, fontSize: 17, letterSpacing: "-0.015em" }}
+        style={{ fontWeight: 600, fontSize: 17, letterSpacing: "-0.015em" }}
       >
         {title}
       </div>
@@ -350,7 +352,7 @@ function Topbar({
           padding: "0 12px",
           borderRadius: "var(--radius-sm)",
           fontSize: 13,
-          fontWeight: 560,
+          fontWeight: 500,
           border: "1px solid hsl(var(--border-strong))",
           background: "hsl(var(--card))",
           color: "hsl(var(--foreground))",

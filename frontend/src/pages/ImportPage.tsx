@@ -83,17 +83,27 @@ function ReviewCard({
     try {
       let instrumentId = form.instrument_id ? Number(form.instrument_id) : 0;
       if (form.instrument_id === CREATE_NEW) {
-        const created = await createInstrument.mutateAsync({
-          symbol: form.new_symbol,
-          name: p.instrument_name ?? form.new_symbol,
-          instrument_type: "other",
-          native_currency: form.currency,
-          category_id: null,
-          price_source: "manual",
-          decimals: 8,
-          note: null,
-        });
-        instrumentId = created.id;
+        // Dedup: reuse an existing instrument with the same symbol (case-insensitive)
+        // instead of creating a duplicate — e.g. two ASII rows from one screenshot.
+        const symbol = form.new_symbol.trim();
+        const existing = instruments.find(
+          (i) => i.symbol.toLowerCase() === symbol.toLowerCase(),
+        );
+        if (existing) {
+          instrumentId = existing.id;
+        } else {
+          const created = await createInstrument.mutateAsync({
+            symbol: form.new_symbol,
+            name: p.instrument_name ?? form.new_symbol,
+            instrument_type: "other",
+            native_currency: form.currency,
+            category_id: null,
+            price_source: "manual",
+            decimals: 8,
+            note: null,
+          });
+          instrumentId = created.id;
+        }
       }
       let accountId = form.account_id ? Number(form.account_id) : 0;
       if (form.account_id === CREATE_NEW) {

@@ -7,12 +7,14 @@ use base64::Engine;
 
 pub const SYSTEM_PROMPT: &str = r#"You extract financial transactions from an uploaded image or PDF for a personal investment tracker.
 Classify the document as one of: holdings_snapshot, txn_history, bank_statement, trade_confirmation.
-Return ONLY a JSON object, no prose, shaped exactly:
-{"doc_type": "<one of the four>", "entries": [ { "entry_type": "buy|sell|dividend|interest|fee|deposit|withdrawal|opening_balance", "symbol": "...", "instrument_name": "...", "quantity": "...", "price_native": "...", "fee_native": "...", "currency": "...", "executed_at": "YYYY-MM-DDTHH:MM:SSZ", "account_hint": "...", "note": "...", "confidence": 0.0 } ] }
-Rules: holdings_snapshot rows -> entry_type "opening_balance" with quantity and average cost as price_native. txn_history/trade_confirmation -> buy/sell/dividend/fee. bank_statement -> deposit/withdrawal/dividend/interest. Numbers as strings, no thousands separators. Omit unknown fields. Set confidence in [0,1]. If a value is uncertain, still include the entry with a lower confidence."#;
+Return ONLY a JSON object, no prose, no markdown fences, no explanations of your arithmetic — do all calculations silently. Your entire response must start with "{" and end with "}". Shaped exactly:
+{"doc_type": "<one of the four>", "entries": [ { "entry_type": "buy|sell|dividend|interest|fee|deposit|withdrawal|opening_balance", "symbol": "...", "instrument_name": "...", "quantity": "...", "price_native": "...", "fee_native": "...", "amount_native": "...", "currency": "...", "executed_at": "YYYY-MM-DDTHH:MM:SSZ", "account_hint": "...", "note": "...", "confidence": 0.0 } ] }
+Rules: holdings_snapshot rows -> entry_type "opening_balance" with quantity and average cost as price_native. txn_history/trade_confirmation -> buy/sell/dividend/fee. bank_statement -> deposit/withdrawal/dividend/interest. Numbers as strings, no thousands separators. Omit unknown fields. Set confidence in [0,1]. If a value is uncertain, still include the entry with a lower confidence.
+IMPORTANT for Indonesian (IDX) brokers such as Stockbit, Ajaib, IPOT, BIONS: a column labeled "AMOUNT" (or "Total"/"Nilai") is the TOTAL transaction value in IDR INCLUDING fees, i.e. amount = quantity*price + fee. It is NOT the share quantity. Put that total in "amount_native" verbatim and do NOT use it as "quantity". IDX shares trade in lots of 100, so quantity is always a positive multiple of 100 (100, 200, 700, ...). Derive quantity by taking amount/price and rounding DOWN to the nearest multiple of 100, then set fee_native = amount - quantity*price. Example: BUY TLKM with AMOUNT 2.012.014 and PRICE 2.870 -> amount/price = 701.05, round down to lot -> quantity "700", fee_native = 2012014 - 700*2870 = "3014", amount_native "2012014", price_native "2870". Never emit quantity 701 here. These IDX lot/fee rules apply only to IDR-denominated stock rows; do NOT apply lot rounding to crypto, US stocks, or fractional shares."#;
 
 /// Decide if an entry needs human attention (low confidence or missing core fields).
 pub fn needs_attention(e: &ExtractedEntry) -> bool {
+    if e.force_attention { return true; }
     if e.confidence < 0.6 { return true; }
     match e.entry_type.as_str() {
         "deposit" | "withdrawal" | "dividend" | "interest" => e.quantity.is_none() && e.price_native.is_none(),
@@ -121,7 +123,7 @@ mod tests {
     fn entry(conf: f64, symbol: Option<&str>, qty: Option<&str>) -> ExtractedEntry {
         ExtractedEntry { entry_type:"buy".into(), symbol:symbol.map(String::from), instrument_name:None,
             quantity:qty.map(String::from), price_native:Some("1".into()), fee_native:None, currency:Some("USD".into()),
-            executed_at:None, account_hint:None, note:None, confidence:conf }
+            executed_at:None, account_hint:None, note:None, confidence:conf, amount_native:None, force_attention:false }
     }
 
     #[test]

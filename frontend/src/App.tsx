@@ -6,6 +6,7 @@ import { useAuth } from "./auth/AuthContext";
 // Primary 6-item IA pages
 import DashboardPage from "./pages/DashboardPage";
 import PortfolioPage from "./pages/PortfolioPage";
+import PerformancePage from "./pages/PerformancePage";
 import PlannerPage from "./pages/PlannerPage";
 import BudgetPage from "./pages/BudgetPage";
 import DataPage from "./pages/DataPage";
@@ -17,8 +18,8 @@ export default function App() {
   const { isUnlocked } = useAuth();
 
   // ── Auth gate ─────────────────────────────────────────────────────────────
-  // If not unlocked, show LoginPage (setup or login depending on hasPassword).
-  // This is a frontend-only mock; see AuthContext.tsx for security notes.
+  // No stored JWT => show the master-password login. The token is issued by
+  // POST /auth/login and validated server-side; see AuthContext.tsx.
   if (!isUnlocked) {
     return <LoginPage />;
   }
@@ -29,6 +30,7 @@ export default function App() {
         {/* ── Primary 6-item IA ── */}
         <Route index element={<DashboardPage />} />
         <Route path="portfolio" element={<PortfolioPage />} />
+        <Route path="performance" element={<PerformancePage />} />
         <Route path="planner" element={<PlannerPage />} />
         <Route path="budget" element={<BudgetPage />} />
         <Route path="data" element={<DataPage />} />

@@ -250,9 +250,9 @@ export default function BudgetPage() {
                   return (
                     <div key={cat.category_id ?? "uncategorized"} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                       <div className="flex items-center justify-between">
-                        <span className="t-sm" style={{ fontWeight: 540 }}>{cat.name}</span>
+                        <span className="t-sm" style={{ fontWeight: 500 }}>{cat.name}</span>
                         <span className="t-sm num">
-                          <span style={{ color, fontWeight: 580 }}>{formatIDR(cat.actual)}</span>
+                          <span style={{ color, fontWeight: 500 }}>{formatIDR(cat.actual)}</span>
                           {cat.budget != null && (
                             <span className="t-muted"> / {formatIDR(cat.budget)}</span>
                           )}
@@ -305,13 +305,13 @@ export default function BudgetPage() {
                       {f.direction === "in" ? <ArrowDown size={16} strokeWidth={2.4} /> : <ArrowUp size={16} strokeWidth={2.4} />}
                     </span>
                     <div className="flex-1" style={{ minWidth: 0 }}>
-                      <div className="t-sm truncate" style={{ fontWeight: 540 }}>{f.note ?? f.currency}</div>
+                      <div className="t-sm truncate" style={{ fontWeight: 500 }}>{f.note ?? f.currency}</div>
                       <div className="t-xs t-muted truncate">{f.occurred_on}</div>
                     </div>
                     <div className="flex items-center" style={{ gap: 8 }}>
                       <span
                         className={"num t-sm " + (f.direction === "in" ? "gain" : "")}
-                        style={{ fontWeight: 580 }}
+                        style={{ fontWeight: 500 }}
                       >
                         {f.direction === "in" ? "+" : "−"}{formatIDR(f.amount)}
                       </span>

@@ -1,12 +1,23 @@
 import { z } from "zod";
 
 const BASE = import.meta.env.VITE_API_BASE ?? "/api";
+const TOKEN_KEY = "pt-auth-token";
+
+function authHeader(): Record<string, string> {
+  const token = localStorage.getItem(TOKEN_KEY);
+  return token ? { authorization: `Bearer ${token}` } : {};
+}
 
 async function request<T>(path: string, schema: z.ZodType<T>, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", ...authHeader() },
     ...init,
   });
+  if (res.status === 401) {
+    // Token missing/expired/invalid — drop it and tell the app to lock.
+    localStorage.removeItem(TOKEN_KEY);
+    window.dispatchEvent(new Event("pt-unauthorized"));
+  }
   if (!res.ok) {
     let msg = `HTTP ${res.status}`;
     try { const body = await res.json(); if (body?.error) msg = body.error; } catch { /* keep default */ }

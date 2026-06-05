@@ -231,7 +231,7 @@ export default function PlannerPage() {
                     color={color}
                   />
                   {outOfBand && rebalanceIdr !== 0 && (
-                    <div className="t-xs warn num" style={{ marginTop: 8, fontWeight: 540 }}>
+                    <div className="t-xs warn num" style={{ marginTop: 8, fontWeight: 500 }}>
                       {rebalanceIdr > 0 ? "Beli " : "Pangkas "}
                       {formatIDR(Math.abs(rebalanceIdr))}
                     </div>

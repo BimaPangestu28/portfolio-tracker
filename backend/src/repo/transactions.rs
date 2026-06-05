@@ -84,7 +84,13 @@ pub async fn list_for_instrument(db: &Db, instrument_id: i64) -> anyhow::Result<
 }
 
 pub async fn delete(db: &Db, id: i64) -> anyhow::Result<()> {
-    sqlx::query("DELETE FROM txn WHERE id = ?").bind(id).execute(db).await?;
+    // Txns confirmed from ingest are referenced by review_item.created_txn_id;
+    // clear the reference first or the FK constraint rejects the delete.
+    let mut tx = db.begin().await?;
+    sqlx::query("UPDATE review_item SET created_txn_id = NULL WHERE created_txn_id = ?")
+        .bind(id).execute(&mut *tx).await?;
+    sqlx::query("DELETE FROM txn WHERE id = ?").bind(id).execute(&mut *tx).await?;
+    tx.commit().await?;
     Ok(())
 }
 
@@ -100,6 +106,34 @@ mod tests {
     use super::*;
     use crate::repo::{accounts, instruments};
     use rust_decimal_macros::dec as d;
+
+    #[tokio::test]
+    async fn delete_clears_review_item_reference() {
+        // Txn created from ingest confirm is referenced by review_item.created_txn_id;
+        // delete must clear that reference instead of failing the FK constraint.
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        let acc = accounts::create(&db, &accounts::NewAccount { name:"A".into(), account_type:"manual".into(), institution:None, native_currency:"IDR".into(), note:None }).await.unwrap();
+        let ins = instruments::create(&db, &instruments::NewInstrument { symbol:"BMRI".into(), name:"Bank Mandiri".into(), instrument_type:"stock_id".into(), native_currency:"IDR".into(), category_id:None, price_source:"manual".into(), decimals:Some(0), note:None }).await.unwrap();
+        let nt = NewTransaction { account_id: acc.id, instrument_id: ins.id, txn_type:"buy".into(),
+            executed_at: Utc::now(), quantity:"200".into(), price_native:"3960".into(),
+            fee_native: Some("0".into()), currency:"IDR".into(), fx_to_idr:"16000".into(), fx_to_usd:"1".into(), note:None,
+            source: None, external_id: None };
+        let txn = create(&db, &nt).await.unwrap();
+
+        let item = crate::repo::review_items::create(&db, &crate::repo::review_items::NewReviewItem {
+            batch_id:"b", source_kind:"image", source_filename:"f.png", source_path:"p",
+            doc_type:"txn_history", needs_attention:false, payload_json:"{}", raw_llm_json:"{}",
+            suggested_instrument_id:Some(ins.id), suggested_account_id:Some(acc.id),
+        }).await.unwrap();
+        crate::repo::review_items::mark_confirmed(&db, item.id, txn.id).await.unwrap();
+
+        delete(&db, txn.id).await.unwrap();
+
+        assert!(list_for_instrument(&db, ins.id).await.unwrap().is_empty());
+        let reloaded = crate::repo::review_items::get(&db, item.id).await.unwrap();
+        assert_eq!(reloaded.created_txn_id, None);
+        assert_eq!(reloaded.status, "confirmed"); // history of the review stays intact
+    }
 
     #[tokio::test]
     async fn insert_and_load_transactions_as_domain() {

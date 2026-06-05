@@ -45,6 +45,8 @@ pub fn parse_csv_rows(csv_text: &str, mapping: &ColumnMapping, entry_type_const:
             account_hint: get(&cells, "account_hint"),
             note: None,
             confidence: 1.0,
+            amount_native: get(&cells, "amount_native"),
+            force_attention: false,
         });
     }
     Ok(out)

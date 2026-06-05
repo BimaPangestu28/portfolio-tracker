@@ -169,7 +169,7 @@ function HeroSection({
             <span className="t-display num">{formatIDR(netWorthIdr)}</span>
             <span
               className="num t-muted"
-              style={{ fontSize: 17, fontWeight: 540, paddingBottom: 5 }}
+              style={{ fontSize: 17, fontWeight: 500, paddingBottom: 5 }}
             >
               ≈ {formatUSD(netWorthUsd)}
             </span>
@@ -315,10 +315,10 @@ function MetricRow({ icon, label, value, hint, status }: MetricRowProps) {
       </span>
       <div className="flex-1" style={{ minWidth: 0 }}>
         <div className="flex items-center justify-between gap-2">
-          <span className="t-sm" style={{ fontWeight: 540 }}>
+          <span className="t-sm" style={{ fontWeight: 500 }}>
             {label}
           </span>
-          <span className="num t-sm" style={{ fontWeight: 620, color: s.color }}>
+          <span className="num t-sm" style={{ fontWeight: 600, color: s.color }}>
             {value}
           </span>
         </div>
@@ -381,7 +381,7 @@ function AlokasiCard({ allocation, loading }: AloksiProps) {
                 ) : (
                   <>
                     <span className="t-sm flex-1 truncate">{a.name}</span>
-                    <span className="t-sm num" style={{ fontWeight: 580 }}>
+                    <span className="t-sm num" style={{ fontWeight: 500 }}>
                       {Number(a.actual_pct).toFixed(1).replace(".", ",")}%
                     </span>
                   </>
@@ -515,7 +515,7 @@ function RebalancingCard({ allocation }: { allocation: CategoryAllocation[] }) {
                 <span
                   className="num t-sm"
                   style={{
-                    fontWeight: 620,
+                    fontWeight: 600,
                     color: isBuy ? "hsl(var(--gain))" : "hsl(var(--warn))",
                   }}
                 >
@@ -616,12 +616,12 @@ function HealthCard({
           </span>
           <div className="flex-1">
             <div className="flex items-center justify-between gap-2">
-              <span className="t-sm" style={{ fontWeight: 540 }}>
+              <span className="t-sm" style={{ fontWeight: 500 }}>
                 Diversifikasi
               </span>
               <span
                 className="num t-sm"
-                style={{ fontWeight: 620, color: STATUS_STYLE[driftStatus].color }}
+                style={{ fontWeight: 600, color: STATUS_STYLE[driftStatus].color }}
               >
                 {categoryCount} kelas
               </span>
@@ -722,7 +722,7 @@ function GoalRow({ goal }: { goal: Goal }) {
           </div>
           <div className="t-xs t-muted">{goal.note ?? ""}</div>
         </div>
-        <span className="num t-sm" style={{ fontWeight: 620 }}>
+        <span className="num t-sm" style={{ fontWeight: 600 }}>
           {pct.toFixed(0)}%
         </span>
       </div>

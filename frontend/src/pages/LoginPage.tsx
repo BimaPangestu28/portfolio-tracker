@@ -10,11 +10,9 @@
  *   - Radial gradient + grid overlay via CSS (auth-aside::after)
  *   - © catalystlabs.id footer
  *
- * Form states:
- *   - First-run setup  (hasPassword === false) — "Buat sandi master" + confirm
- *   - Login            (hasPassword === true)  — unlock field + "Lupa sandi?"
- *
- * ⚠️ FRONTEND MOCK — NOT REAL SECURITY ⚠️
+ * Form: a single master-password field. The password is exchanged at
+ * POST /auth/login for a JWT (see AuthContext.unlock); a 401 surfaces the
+ * server's error message inline.
  */
 
 import { useState, useRef, type FormEvent } from "react";
@@ -115,205 +113,24 @@ function ThemeCornerBtn() {
   );
 }
 
-// ── Password field with show/hide affix ─────────────────────────────────────
-
-interface PasswordFieldProps {
-  id: string;
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  onClearError?: () => void;
-  placeholder?: string;
-  autoComplete?: string;
-  autoFocus?: boolean;
-}
-
-function PasswordField({
-  id,
-  label,
-  value,
-  onChange,
-  onClearError,
-  placeholder = "••••••••",
-  autoComplete = "current-password",
-  autoFocus = false,
-}: PasswordFieldProps) {
-  const [show, setShow] = useState(false);
-  return (
-    <label className="field">
-      <span className="field-label" id={`${id}-label`}>
-        {label}
-      </span>
-      <div className="input-affix">
-        <input
-          id={id}
-          type={show ? "text" : "password"}
-          className="input"
-          value={value}
-          onChange={(e) => {
-            onChange(e.target.value);
-            onClearError?.();
-          }}
-          placeholder={placeholder}
-          autoComplete={autoComplete}
-          autoFocus={autoFocus}
-          aria-label={label}
-        />
-        <button
-          type="button"
-          className="affix-btn"
-          onClick={() => setShow((s) => !s)}
-          tabIndex={-1}
-          aria-label={show ? "Sembunyikan sandi" : "Tampilkan sandi"}
-        >
-          {show ? <EyeOff size={17} /> : <Eye size={17} />}
-        </button>
-      </div>
-    </label>
-  );
-}
-
-// ── Setup form (first-run) ───────────────────────────────────────────────────
-
-function SetupForm() {
-  const { setup, loginDemo } = useAuth();
-  const [pw, setPw] = useState("");
-  const [confirm, setConfirm] = useState("");
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-  const formRef = useRef<HTMLFormElement>(null);
-
-  async function handleSubmit(e: FormEvent) {
-    e.preventDefault();
-    setError("");
-    setBusy(true);
-    const result = await setup(pw, confirm);
-    setBusy(false);
-    if (!result.ok) {
-      setError(result.error ?? "Gagal membuat sandi.");
-      if (formRef.current) {
-        formRef.current.classList.remove("auth-shake");
-        void formRef.current.offsetWidth;
-        formRef.current.classList.add("auth-shake");
-      }
-    }
-  }
-
-  return (
-    <form
-      className="auth-card"
-      onSubmit={handleSubmit}
-      noValidate
-      ref={formRef}
-    >
-      {/* Mobile brand — hidden on desktop (CSS .auth-mobile-brand) */}
-      <div className="auth-mobile-brand">
-        <div className="auth-aside-mark" style={{ width: 34, height: 34, borderRadius: 9 }}>
-          <PieIcon size={19} strokeWidth={2} />
-        </div>
-        <span className="auth-aside-name" style={{ fontSize: 17 }}>
-          Portfolio
-        </span>
-      </div>
-
-      <div>
-        <h2 className="t-h1">Buat sandi master</h2>
-        <p className="t-sm t-muted" style={{ margin: "6px 0 0" }}>
-          Sandi ini membuka akses ke portofolio kamu di perangkat ini.
-        </p>
-      </div>
-
-      <div className="flex col gap-3">
-        <PasswordField
-          id="setup-pw"
-          label="Sandi baru"
-          value={pw}
-          onChange={setPw}
-          onClearError={() => setError("")}
-          placeholder="Minimal 6 karakter"
-          autoComplete="new-password"
-          autoFocus
-        />
-        <PasswordField
-          id="setup-confirm"
-          label="Konfirmasi sandi"
-          value={confirm}
-          onChange={setConfirm}
-          onClearError={() => setError("")}
-          placeholder="Ulangi sandi"
-          autoComplete="new-password"
-        />
-        <div
-          className="auth-error"
-          role="alert"
-          aria-live="polite"
-        >
-          {error && (
-            <>
-              <AlertCircle size={14} />
-              {error}
-            </>
-          )}
-        </div>
-      </div>
-
-      <button
-        type="submit"
-        className="btn btn-primary"
-        disabled={busy}
-        style={{ width: "100%", height: 42 }}
-      >
-        {busy ? (
-          "Memverifikasi…"
-        ) : (
-          <>
-            <Lock size={16} />
-            Buat &amp; masuk
-            <ArrowRight size={16} />
-          </>
-        )}
-      </button>
-
-      <div className="flex items-center gap-3">
-        <hr className="divider flex-1" />
-        <span className="t-xs t-muted">atau</span>
-        <hr className="divider flex-1" />
-      </div>
-
-      <button
-        type="button"
-        className="btn btn-outline"
-        style={{ width: "100%" }}
-        onClick={loginDemo}
-      >
-        Masuk dengan data demo
-      </button>
-
-      <div className="auth-foot-note">
-        <Shield size={13} />
-        Terenkripsi di perangkat · tidak ada server pihak ketiga
-      </div>
-    </form>
-  );
-}
-
-// ── Login form (password exists) ─────────────────────────────────────────────
+// ── Login form (single master-password field) ────────────────────────────────
 
 function LoginForm() {
-  const { unlock, resetPassword, loginDemo } = useAuth();
+  const { unlock } = useAuth();
   const [pw, setPw] = useState("");
-  const [error, setError] = useState("");
+  const [show, setShow] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
-    setError("");
     setBusy(true);
+    setError(null);
     const result = await unlock(pw);
     setBusy(false);
     if (!result.ok) {
-      setError(result.error ?? "Sandi salah.");
+      setError(result.error ?? "Gagal masuk.");
       setPw("");
       if (formRef.current) {
         formRef.current.classList.remove("auth-shake");
@@ -323,24 +140,9 @@ function LoginForm() {
     }
   }
 
-  function handleForgot() {
-    if (
-      window.confirm(
-        "Reset sandi akan menghapus sandi tersimpan dan Anda perlu membuat sandi baru. Lanjutkan?",
-      )
-    ) {
-      resetPassword();
-    }
-  }
-
   return (
-    <form
-      className="auth-card"
-      onSubmit={handleSubmit}
-      noValidate
-      ref={formRef}
-    >
-      {/* Mobile brand */}
+    <form className="auth-card" onSubmit={handleSubmit} noValidate ref={formRef}>
+      {/* Mobile brand — hidden on desktop (CSS .auth-mobile-brand) */}
       <div className="auth-mobile-brand">
         <div className="auth-aside-mark" style={{ width: 34, height: 34, borderRadius: 9 }}>
           <PieIcon size={19} strokeWidth={2} />
@@ -358,20 +160,36 @@ function LoginForm() {
       </div>
 
       <div className="flex col gap-3">
-        <PasswordField
-          id="login-pw"
-          label="Sandi master"
-          value={pw}
-          onChange={setPw}
-          onClearError={() => setError("")}
-          autoComplete="current-password"
-          autoFocus
-        />
-        <div
-          className="auth-error"
-          role="alert"
-          aria-live="polite"
-        >
+        <div className="field">
+          <label className="field-label" htmlFor="master-pw">
+            Sandi master
+          </label>
+          <div className="input-affix">
+            <input
+              id="master-pw"
+              type={show ? "text" : "password"}
+              className="input"
+              value={pw}
+              onChange={(e) => {
+                setPw(e.target.value);
+                setError(null);
+              }}
+              placeholder="••••••••"
+              autoComplete="current-password"
+              autoFocus
+            />
+            <button
+              type="button"
+              className="affix-btn"
+              onClick={() => setShow((s) => !s)}
+              tabIndex={-1}
+              aria-label={show ? "Sembunyikan" : "Tampilkan"}
+            >
+              {show ? <EyeOff size={17} /> : <Eye size={17} />}
+            </button>
+          </div>
+        </div>
+        <div className="auth-error" role="alert" aria-live="polite">
           {error && (
             <>
               <AlertCircle size={14} />
@@ -379,50 +197,29 @@ function LoginForm() {
             </>
           )}
         </div>
-        <button
-          type="button"
-          className="auth-link"
-          onClick={handleForgot}
-        >
-          Lupa sandi?
-        </button>
       </div>
 
       <button
         type="submit"
         className="btn btn-primary"
-        disabled={busy}
+        disabled={busy || !pw}
         style={{ width: "100%", height: 42 }}
+        aria-label="Masuk"
       >
         {busy ? (
-          "Memverifikasi…"
+          "Membuka…"
         ) : (
           <>
             <Lock size={16} />
-            Buka portofolio
+            Masuk
             <ArrowRight size={16} />
           </>
         )}
       </button>
 
-      <div className="flex items-center gap-3">
-        <hr className="divider flex-1" />
-        <span className="t-xs t-muted">atau</span>
-        <hr className="divider flex-1" />
-      </div>
-
-      <button
-        type="button"
-        className="btn btn-outline"
-        style={{ width: "100%" }}
-        onClick={loginDemo}
-      >
-        Masuk dengan data demo
-      </button>
-
       <div className="auth-foot-note">
         <Shield size={13} />
-        Terenkripsi di perangkat · tidak ada server pihak ketiga
+        Token JWT · diverifikasi oleh server kamu
       </div>
     </form>
   );
@@ -431,14 +228,12 @@ function LoginForm() {
 // ── LoginPage ────────────────────────────────────────────────────────────────
 
 export default function LoginPage() {
-  const { hasPassword } = useAuth();
-
   return (
     <div className="auth-shell">
       <BrandAside />
       <main className="auth-main">
         <ThemeCornerBtn />
-        {hasPassword ? <LoginForm /> : <SetupForm />}
+        <LoginForm />
       </main>
     </div>
   );

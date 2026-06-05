@@ -8,15 +8,9 @@ metadata:
   name: portfolio
   namespace: portfolio
   annotations:
+    # The backend now enforces JWT auth itself (POST /auth/login), so the
+    # previous ingress-level HTTP basic-auth is gone.
     cert-manager.io/cluster-issuer: letsencrypt-prod
-    # HTTP basic auth in front of the whole app (the backend has no server-side
-    # auth, so this is what protects the public endpoints — including the
-    # WhatsApp pairing QR at /api/whatsapp/status). Create the secret with:
-    #   htpasswd -nbB <user> <pass> > auth && \
-    #   kubectl -n portfolio create secret generic portfolio-basic-auth --from-file=auth
-    nginx.ingress.kubernetes.io/auth-type: basic
-    nginx.ingress.kubernetes.io/auth-secret: portfolio-basic-auth
-    nginx.ingress.kubernetes.io/auth-realm: "Portfolio Tracker"
 spec:
   ingressClassName: nginx
   tls:

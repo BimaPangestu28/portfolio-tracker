@@ -55,6 +55,16 @@ spec:
                 secretKeyRef:
                   name: portfolio-secrets
                   key: GATEWAY_TOKEN
+            - name: AUTH_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: portfolio-secrets
+                  key: AUTH_PASSWORD
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: portfolio-secrets
+                  key: JWT_SECRET
           volumeMounts:
             - name: data
               mountPath: /data
