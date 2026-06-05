@@ -14,8 +14,8 @@ pub async fn add(db: &Db, role: &str, content: &str, channel: &str) -> anyhow::R
     if !matches!(role, "user" | "assistant") {
         anyhow::bail!("invalid role '{}': must be 'user' or 'assistant'", role);
     }
-    if !matches!(channel, "inapp" | "whatsapp") {
-        anyhow::bail!("invalid channel '{}': must be 'inapp' or 'whatsapp'", channel);
+    if !matches!(channel, "inapp" | "whatsapp" | "telegram") {
+        anyhow::bail!("invalid channel '{}': must be 'inapp', 'whatsapp', or 'telegram'", channel);
     }
     let now = chrono::Utc::now().to_rfc3339();
     let id = sqlx::query(
@@ -80,9 +80,16 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn telegram_channel_is_accepted() {
+        let db = mem_db().await;
+        let msg = add(&db, "user", "berapa net worth saya?", "telegram").await.unwrap();
+        assert_eq!(msg.channel, "telegram");
+    }
+
+    #[tokio::test]
     async fn invalid_channel_returns_error() {
         let db = mem_db().await;
-        let result = add(&db, "user", "hello", "telegram").await;
+        let result = add(&db, "user", "hello", "email").await;
         assert!(result.is_err());
     }
 }
