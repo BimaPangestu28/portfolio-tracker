@@ -1,6 +1,6 @@
 use crate::db::Db;
 use crate::ingestion::extract::{parse_extraction, ExtractedEntry};
-use crate::ingestion::matching::{suggest_account, suggest_instrument};
+use crate::ingestion::matching::{suggest_account, suggest_instrument_for_entry};
 use crate::llm::claude::{ClaudeClient, Part};
 use crate::repo::review_items::{self, NewReviewItem};
 use base64::Engine;
@@ -101,7 +101,7 @@ pub async fn ingest_batch(db: &Db, client: &ClaudeClient, batch_id: &str, files:
         }
         for entry in &extraction.entries {
             let payload = serde_json::to_string(entry)?;
-            let sug_ins = match &entry.symbol { Some(s) => suggest_instrument(db, s).await?, None => None };
+            let sug_ins = suggest_instrument_for_entry(db, entry.symbol.as_deref(), entry.instrument_name.as_deref()).await?;
             let sug_acc = match &entry.account_hint { Some(a) => suggest_account(db, a).await?, None => None };
             let row = review_items::create(db, &NewReviewItem {
                 batch_id,
