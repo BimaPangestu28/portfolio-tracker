@@ -12,6 +12,7 @@ import {
   InsightsSchema, GoalSchema,
   PerformanceSchema,
   WhatsappStatusSchema,
+  TelegramStatusSchema, TelegramLinkCodeSchema,
   type Account, type Category, type Instrument, type Transaction, type ReviewItem,
   type CashflowCategory, type Cashflow, type Connector, type Goal,
 } from "./schemas";
@@ -207,5 +208,27 @@ export const useDisconnectWhatsapp = () => {
   return useMutation({
     mutationFn: () => api.post("/whatsapp/disconnect", z.unknown(), {}),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["whatsapp-status"] }); },
+  });
+};
+
+// ── Telegram connection hooks ────────────────────────────────────────────────
+
+export const useTelegramStatus = () =>
+  useQuery({
+    queryKey: ["telegram-status"],
+    queryFn: () => api.get("/telegram/status", TelegramStatusSchema),
+    refetchInterval: 2000,
+  });
+
+export const useTelegramLinkCode = () =>
+  useMutation({
+    mutationFn: () => api.post("/telegram/link-code", TelegramLinkCodeSchema, {}),
+  });
+
+export const useUnlinkTelegram = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.post("/telegram/unlink", z.unknown(), {}),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["telegram-status"] }); },
   });
 };

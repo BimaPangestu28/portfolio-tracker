@@ -278,6 +278,21 @@ export const WhatsappStatusSchema = z.object({
 });
 export type WhatsappStatus = z.infer<typeof WhatsappStatusSchema>;
 
+// ── Telegram connection ─────────────────────────────────────────────────────
+
+export const TelegramStatusSchema = z.object({
+  configured: z.boolean(),
+  linked: z.boolean(),
+  username: z.string().nullable(),
+});
+export type TelegramStatus = z.infer<typeof TelegramStatusSchema>;
+
+export const TelegramLinkCodeSchema = z.object({
+  code: z.string(),
+  expires_in: z.number(),
+});
+export type TelegramLinkCode = z.infer<typeof TelegramLinkCodeSchema>;
+
 export const LoginResponseSchema = z.object({ token: z.string() });
 export type LoginResponse = z.infer<typeof LoginResponseSchema>;
 

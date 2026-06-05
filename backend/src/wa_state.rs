@@ -92,7 +92,7 @@ impl WaState {
         // STALE_AFTER counts as fresh.
         let stale = self
             .last_seen
-            .map_or(true, |seen| now.duration_since(seen) > STALE_AFTER);
+            .is_none_or(|seen| now.duration_since(seen) > STALE_AFTER);
         let status = if stale && self.status == WaStatus::Connected {
             WaStatus::Connecting
         } else {

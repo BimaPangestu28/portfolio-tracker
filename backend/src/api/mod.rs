@@ -6,6 +6,7 @@ pub mod crud;
 pub mod goals;
 pub mod ingest;
 pub mod portfolio;
+pub mod telegram;
 pub mod whatsapp;
 
 use crate::AppState;
@@ -36,6 +37,9 @@ pub fn router(state: AppState) -> Router {
         .route("/whatsapp/status", get(whatsapp::status))
         .route("/whatsapp/connect", post(whatsapp::connect))
         .route("/whatsapp/disconnect", post(whatsapp::disconnect))
+        .route("/telegram/status", get(telegram::status))
+        .route("/telegram/link-code", post(telegram::link_code))
+        .route("/telegram/unlink", post(telegram::unlink))
         .route(
             "/accounts",
             get(crud::list_accounts).post(crud::create_account),
@@ -117,6 +121,7 @@ mod router_tests {
         AppState {
             db,
             wa: Default::default(),
+            tg: Default::default(),
         }
     }
 

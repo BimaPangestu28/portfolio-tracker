@@ -12,6 +12,7 @@ import BudgetPage from "./pages/BudgetPage";
 import DataPage from "./pages/DataPage";
 import ChatPage from "./pages/ChatPage";
 import WhatsAppPage from "./pages/WhatsAppPage";
+import TelegramPage from "./pages/TelegramPage";
 import SettingsPage from "./pages/SettingsPage";
 
 export default function App() {
@@ -36,6 +37,7 @@ export default function App() {
         <Route path="data" element={<DataPage />} />
         <Route path="chat" element={<ChatPage />} />
         <Route path="whatsapp" element={<WhatsAppPage />} />
+        <Route path="telegram" element={<TelegramPage />} />
 
         {/* ── Legacy route redirects ── */}
         <Route path="holdings" element={<Navigate to="/portfolio" replace />} />

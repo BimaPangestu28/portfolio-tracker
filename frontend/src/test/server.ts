@@ -143,6 +143,11 @@ export const handlers = [
   http.get("/api/whatsapp/status", () =>
     HttpResponse.json({ status: "disconnected", qr: null, number: null }),
   ),
+
+  // ── Telegram ───────────────────────────────────────────────────────────────
+  http.get("/api/telegram/status", () =>
+    HttpResponse.json({ configured: true, linked: false, username: null }),
+  ),
 ];
 
 export const server = setupServer(...handlers);

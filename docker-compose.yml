@@ -15,6 +15,8 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:?ANTHROPIC_API_KEY is required}
       INGEST_MODEL: ${INGEST_MODEL:-claude-sonnet-4-6}
       GATEWAY_TOKEN: ${GATEWAY_TOKEN:?GATEWAY_TOKEN is required}
+      # Optional: enables the Telegram chatbot channel when set.
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       RUST_LOG: ${RUST_LOG:-info}
     volumes:
       - backend_data:/data

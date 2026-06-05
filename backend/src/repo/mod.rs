@@ -10,6 +10,7 @@ pub mod transactions;
 pub mod prices;
 pub mod snapshots;
 pub mod review_items;
+pub mod telegram_link;
 
 use rust_decimal::Decimal;
 use std::str::FromStr;
