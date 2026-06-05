@@ -5,7 +5,7 @@ import { QueryState } from "../components/QueryState";
 import { AddTransactionDialog } from "../components/AddTransactionDialog";
 import { formatIDR, formatCurrency, formatPct, formatQty, parseNum } from "../lib/format";
 
-type SortKey = "instrument_id" | "quantity" | "avg_cost" | "latest_price" | "market_value_idr" | "unrealized_pnl";
+type SortKey = "instrument_id" | "quantity" | "avg_cost" | "latest_price" | "market_value_idr" | "unrealized_pnl_idr";
 type SortDir = "asc" | "desc";
 
 export default function HoldingsPage() {
@@ -107,16 +107,18 @@ export default function HoldingsPage() {
                     {th("avg_cost", "Avg Cost", true)}
                     {th("latest_price", "Harga Terakhir", true)}
                     {th("market_value_idr", "Nilai Pasar", true)}
-                    {th("unrealized_pnl", "Unrealized P&L", true)}
+                    {th("unrealized_pnl_idr", "Unrealized P&L", true)}
                   </tr>
                 </thead>
                 <tbody>
                   {sorted.map((p) => {
                     const symbol = nameOf(p.instrument_id);
                     const currency = currencyOf(p.instrument_id);
-                    const pnl = parseNum(p.unrealized_pnl);
-                    const costBasis = parseNum(p.cost_basis_total);
-                    const pnlPct = costBasis !== 0 ? (pnl / costBasis) * 100 : 0;
+                    const pnl = parseNum(p.unrealized_pnl); // native, secondary context
+                    const pnlIdr = parseNum(p.unrealized_pnl_idr); // FX-aware, primary
+                    const fxPnlIdr = parseNum(p.unrealized_fx_pnl_idr);
+                    const costBasisIdr = parseNum(p.cost_basis_idr_total);
+                    const pnlPct = costBasisIdr !== 0 ? (pnlIdr / costBasisIdr) * 100 : 0;
                     // Primary display is always IDR. For non-IDR instruments convert at the
                     // position's implied current FX (market_value_idr / market_value_native)
                     // and keep the native figure visible as secondary context.
@@ -160,16 +162,26 @@ export default function HoldingsPage() {
                         </td>
                         <td className="r num" style={{ fontWeight: 500 }}>{formatIDR(p.market_value_idr)}</td>
                         <td className="r">
-                          <div className={"num " + (pnl >= 0 ? "gain" : "loss")} style={{ fontWeight: 500 }}>
-                            {pnl >= 0 ? "+" : "−"}
-                            {fx == null ? formatCurrency(Math.abs(pnl), currency) : formatIDR(Math.abs(pnl) * fx)}
+                          <div className={"num " + (pnlIdr >= 0 ? "gain" : "loss")} style={{ fontWeight: 500 }}>
+                            {pnlIdr >= 0 ? "+" : "−"}
+                            {formatIDR(Math.abs(pnlIdr))}
+                            {p.fx_incomplete && (
+                              <span className="badge badge-warn" style={{ marginLeft: 6 }} title="Sebagian transaksi tidak punya kurs historis — dekomposisi FX tidak lengkap">
+                                FX?
+                              </span>
+                            )}
                           </div>
-                          {fx != null && (
-                            <div className={"t-xs num " + (pnl >= 0 ? "gain" : "loss")}>
-                              {pnl >= 0 ? "+" : "−"}{formatCurrency(Math.abs(pnl), currency)}
-                            </div>
+                          {currency !== "IDR" && (
+                            <>
+                              <div className={"t-xs num " + (pnl >= 0 ? "gain" : "loss")}>
+                                {pnl >= 0 ? "+" : "−"}{formatCurrency(Math.abs(pnl), currency)}
+                              </div>
+                              <div className="t-xs num t-muted">
+                                FX {fxPnlIdr >= 0 ? "+" : "−"}{formatIDR(Math.abs(fxPnlIdr))}
+                              </div>
+                            </>
                           )}
-                          <div className={"t-xs num " + (pnl >= 0 ? "gain" : "loss")}>
+                          <div className={"t-xs num " + (pnlIdr >= 0 ? "gain" : "loss")}>
                             {formatPct(pnlPct)}
                           </div>
                         </td>
