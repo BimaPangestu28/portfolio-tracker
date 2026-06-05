@@ -122,6 +122,14 @@ mod tests {
             market_value_native: dec!(1000000), market_value_idr: dec!(1000000),
             market_value_usd: dec!(62), unrealized_pnl: dec!(100000),
             realized_pnl: dec!(0), income: dec!(0),
+            cost_basis_idr_total: dec!(0),
+            unrealized_pnl_idr: dec!(0),
+            unrealized_price_pnl_idr: dec!(0),
+            unrealized_fx_pnl_idr: dec!(0),
+            realized_pnl_idr: dec!(0),
+            realized_price_pnl_idr: dec!(0),
+            realized_fx_pnl_idr: dec!(0),
+            fx_incomplete: false,
         }
     }
 
