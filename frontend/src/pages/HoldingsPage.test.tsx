@@ -126,8 +126,15 @@ test("formats native-currency fields in USD for a USD-denominated instrument", a
 
   render(<HoldingsPage />, { wrapper });
 
-  expect(await screen.findByText("$150.00")).toBeInTheDocument();
+  // Primary display is IDR, converted at the position's implied FX
+  // (market_value_idr / market_value_native = 16,000 here).
+  expect(await screen.findByText(/Rp\s*2\.400\.000/)).toBeInTheDocument(); // avg 150 x 16000
+  expect(screen.getByText(/Rp\s*3\.200\.000/)).toBeInTheDocument(); // latest 200 x 16000
+  // The native USD figures stay visible as secondary context.
+  expect(screen.getByText("$150.00")).toBeInTheDocument();
   expect(screen.getByText("$200.00")).toBeInTheDocument();
+  // P&L 250 USD -> Rp 4.000.000 primary
+  expect(screen.getByText(/Rp\s*4\.000\.000/)).toBeInTheDocument();
 });
 
 test("renders the Holdings page header and table headers", async () => {

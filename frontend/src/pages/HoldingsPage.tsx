@@ -117,6 +117,21 @@ export default function HoldingsPage() {
                     const pnl = parseNum(p.unrealized_pnl);
                     const costBasis = parseNum(p.cost_basis_total);
                     const pnlPct = costBasis !== 0 ? (pnl / costBasis) * 100 : 0;
+                    // Primary display is always IDR. For non-IDR instruments convert at the
+                    // position's implied current FX (market_value_idr / market_value_native)
+                    // and keep the native figure visible as secondary context.
+                    const mvNative = parseNum(p.market_value_native);
+                    const fx = currency !== "IDR" && mvNative !== 0 ? parseNum(p.market_value_idr) / mvNative : null;
+                    const cell = (value: string | number) => {
+                      const v = typeof value === "number" ? value : parseNum(value);
+                      if (fx == null) return <span className="num">{formatCurrency(v, currency)}</span>;
+                      return (
+                        <>
+                          <div className="num">{formatIDR(v * fx)}</div>
+                          <div className="t-xs t-muted num">{formatCurrency(v, currency)}</div>
+                        </>
+                      );
+                    };
                     return (
                       <tr key={p.instrument_id}>
                         <td>
@@ -131,7 +146,7 @@ export default function HoldingsPage() {
                           </div>
                         </td>
                         <td className="r num">{p.quantity}</td>
-                        <td className="r num t-muted">{formatCurrency(p.avg_cost, currency)}</td>
+                        <td className="r num t-muted">{cell(p.avg_cost)}</td>
                         <td className="r">
                           <div className="flex items-center justify-end" style={{ gap: 8 }}>
                             {p.price_stale && (
@@ -140,14 +155,20 @@ export default function HoldingsPage() {
                                 stale
                               </span>
                             )}
-                            <span className="num">{formatCurrency(p.latest_price, currency)}</span>
+                            <div>{cell(p.latest_price)}</div>
                           </div>
                         </td>
                         <td className="r num" style={{ fontWeight: 500 }}>{formatIDR(p.market_value_idr)}</td>
                         <td className="r">
                           <div className={"num " + (pnl >= 0 ? "gain" : "loss")} style={{ fontWeight: 500 }}>
-                            {pnl >= 0 ? "+" : "−"}{formatCurrency(Math.abs(pnl), currency)}
+                            {pnl >= 0 ? "+" : "−"}
+                            {fx == null ? formatCurrency(Math.abs(pnl), currency) : formatIDR(Math.abs(pnl) * fx)}
                           </div>
+                          {fx != null && (
+                            <div className={"t-xs num " + (pnl >= 0 ? "gain" : "loss")}>
+                              {pnl >= 0 ? "+" : "−"}{formatCurrency(Math.abs(pnl), currency)}
+                            </div>
+                          )}
                           <div className={"t-xs num " + (pnl >= 0 ? "gain" : "loss")}>
                             {formatPct(pnlPct)}
                           </div>
