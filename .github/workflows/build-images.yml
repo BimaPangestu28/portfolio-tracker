@@ -51,3 +51,33 @@ jobs:
             ghcr.io/bimapangestu28/portfolio-${{ matrix.name }}:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  deploy:
+    name: Deploy to k3s
+    runs-on: ubuntu-latest
+    needs: build
+    # Serialize deploys so two quick merges can't interleave rollouts.
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    steps:
+      - name: Pin deployments to the new image and wait for rollout
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          SSH_USER: ${{ secrets.DEPLOY_SSH_USER }}
+          SSH_HOST: ${{ secrets.DEPLOY_SSH_HOST }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          # Pin to the immutable :sha tag (not :latest) so what runs is exactly
+          # what this workflow built, and rollback is a one-line `set image`.
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=accept-new "$SSH_USER@$SSH_HOST" "
+            set -euo pipefail
+            kubectl -n portfolio set image deploy/backend  backend=ghcr.io/bimapangestu28/portfolio-backend:$GITHUB_SHA
+            kubectl -n portfolio set image deploy/frontend frontend=ghcr.io/bimapangestu28/portfolio-frontend:$GITHUB_SHA
+            kubectl -n portfolio set image deploy/gateway  gateway=ghcr.io/bimapangestu28/portfolio-gateway:$GITHUB_SHA
+            kubectl -n portfolio rollout status deploy/backend  --timeout=180s
+            kubectl -n portfolio rollout status deploy/frontend --timeout=180s
+            kubectl -n portfolio rollout status deploy/gateway  --timeout=180s
+          "
