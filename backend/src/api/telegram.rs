@@ -84,7 +84,10 @@ mod tests {
         }
     }
 
-    // These tests mutate TELEGRAM_BOT_TOKEN, so they run serially.
+    // These tests mutate TELEGRAM_BOT_TOKEN, so they run serially. Cleanup is
+    // not panic-safe (a failed assertion skips the trailing remove_var), so
+    // every test that needs a clean env must defensively remove_var at its
+    // START rather than rely on the previous test's cleanup.
     #[serial]
     #[tokio::test]
     async fn status_reports_unconfigured_without_token() {
