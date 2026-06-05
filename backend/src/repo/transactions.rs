@@ -108,6 +108,17 @@ pub async fn delete(db: &Db, id: i64) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// True if the instrument already has a value-based (price = 1) ledger row —
+/// the amount-only fallback convention. Used to keep an instrument on ONE
+/// convention: once value-based rows exist, NAV derivation must not mix in
+/// unit-based rows.
+pub async fn has_price_one_txn(db: &Db, instrument_id: i64) -> anyhow::Result<bool> {
+    let row = sqlx::query_as::<_, (i64,)>(
+        "SELECT COUNT(*) FROM txn WHERE instrument_id = ? AND price_native = '1'")
+        .bind(instrument_id).fetch_one(db).await?;
+    Ok(row.0 > 0)
+}
+
 /// Returns the set of external_ids already present for the given source.
 pub async fn existing_external_ids(db: &Db, source: &str) -> anyhow::Result<std::collections::HashSet<String>> {
     let rows = sqlx::query_as::<_, (String,)>("SELECT external_id FROM txn WHERE source = ? AND external_id IS NOT NULL")
@@ -213,6 +224,48 @@ mod tests {
         assert!(create(&db, &bad).await.is_err());
         // No row must have been persisted.
         assert_eq!(list_all(&db).await.unwrap().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn has_price_one_txn_detects_value_based_rows() {
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        let acc = accounts::create(&db, &accounts::NewAccount {
+            name:"A".into(), account_type:"manual".into(), institution:None,
+            native_currency:"IDR".into(), note:None,
+        }).await.unwrap();
+        let ins1 = instruments::create(&db, &instruments::NewInstrument {
+            symbol:"RD1436".into(), name:"Sucorinvest Bond Fund".into(),
+            instrument_type:"mutual_fund".into(), native_currency:"IDR".into(),
+            category_id:None, price_source:"bibit:RD1436".into(), decimals:Some(4), note:None,
+        }).await.unwrap();
+        let ins2 = instruments::create(&db, &instruments::NewInstrument {
+            symbol:"RD831".into(), name:"Majoris".into(),
+            instrument_type:"mutual_fund".into(), native_currency:"IDR".into(),
+            category_id:None, price_source:"bibit:RD831".into(), decimals:Some(4), note:None,
+        }).await.unwrap();
+
+        // No transactions yet — must be false for ins1.
+        assert!(!has_price_one_txn(&db, ins1.id).await.unwrap());
+
+        // Insert a price=1 (value-based) txn for ins1.
+        let nt = NewTransaction {
+            account_id: acc.id, instrument_id: ins1.id, txn_type:"buy".into(),
+            executed_at: Utc::now(), quantity:"13000000".into(), price_native:"1".into(),
+            fee_native: None, currency:"IDR".into(), fx_to_idr:"1".into(), fx_to_usd:"1".into(),
+            note:None, source:None, external_id:None,
+        };
+        create(&db, &nt).await.unwrap();
+        assert!(has_price_one_txn(&db, ins1.id).await.unwrap());
+
+        // ins2 only has a NAV-priced txn — must be false for ins2.
+        let nt2 = NewTransaction {
+            account_id: acc.id, instrument_id: ins2.id, txn_type:"buy".into(),
+            executed_at: Utc::now(), quantity:"7658.8934".into(), price_native:"1697.22".into(),
+            fee_native: None, currency:"IDR".into(), fx_to_idr:"1".into(), fx_to_usd:"1".into(),
+            note:None, source:None, external_id:None,
+        };
+        create(&db, &nt2).await.unwrap();
+        assert!(!has_price_one_txn(&db, ins2.id).await.unwrap());
     }
 
     #[tokio::test]

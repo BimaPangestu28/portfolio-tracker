@@ -3,7 +3,7 @@ use crate::repo::dec;
 use rust_decimal::Decimal;
 
 #[derive(Debug, Clone)]
-pub struct LatestPrice { pub price: Decimal, pub as_of: String, #[allow(dead_code)] pub source: String }
+pub struct LatestPrice { pub price: Decimal, pub as_of: String, pub source: String }
 
 pub async fn upsert_latest(db: &Db, instrument_id: i64, price: Decimal, currency: &str, source: &str, as_of: &str) -> anyhow::Result<()> {
     sqlx::query(

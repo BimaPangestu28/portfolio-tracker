@@ -1,3 +1,4 @@
+pub mod bibit;
 pub mod coingecko;
 pub mod fx;
 pub mod service;
