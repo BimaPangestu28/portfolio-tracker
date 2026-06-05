@@ -3,7 +3,7 @@ import { ArrowUp, ArrowDown, Clock, Filter, Plus } from "lucide-react";
 import { useSummary, useInstruments } from "../api/hooks";
 import { QueryState } from "../components/QueryState";
 import { AddTransactionDialog } from "../components/AddTransactionDialog";
-import { formatIDR, formatCurrency, formatPct, parseNum } from "../lib/format";
+import { formatIDR, formatCurrency, formatPct, formatQty, parseNum } from "../lib/format";
 
 type SortKey = "instrument_id" | "quantity" | "avg_cost" | "latest_price" | "market_value_idr" | "unrealized_pnl";
 type SortDir = "asc" | "desc";
@@ -145,7 +145,7 @@ export default function HoldingsPage() {
                             </div>
                           </div>
                         </td>
-                        <td className="r num">{p.quantity}</td>
+                        <td className="r num">{formatQty(p.quantity)}</td>
                         <td className="r num t-muted">{cell(p.avg_cost)}</td>
                         <td className="r">
                           <div className="flex items-center justify-end" style={{ gap: 8 }}>
