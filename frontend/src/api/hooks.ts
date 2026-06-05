@@ -13,6 +13,7 @@ import {
   PerformanceSchema,
   WhatsappStatusSchema,
   TelegramStatusSchema, TelegramLinkCodeSchema,
+  MoverSchema, BenchmarkRowSchema,
   type Account, type Category, type Instrument, type Transaction, type ReviewItem,
   type CashflowCategory, type Cashflow, type Connector, type Goal,
 } from "./schemas";
@@ -222,6 +223,14 @@ export const useDisconnectWhatsapp = () => {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["whatsapp-status"] }); },
   });
 };
+
+// ── Dashboard: movers + benchmark hooks ─────────────────────────────────────
+
+export const useMovers = () =>
+  useQuery({ queryKey: ["movers"], queryFn: () => api.get("/portfolio/movers", z.array(MoverSchema)) });
+
+export const useBenchmark = () =>
+  useQuery({ queryKey: ["benchmark"], queryFn: () => api.get("/portfolio/benchmark", z.array(BenchmarkRowSchema)) });
 
 // ── Telegram connection hooks ────────────────────────────────────────────────
 

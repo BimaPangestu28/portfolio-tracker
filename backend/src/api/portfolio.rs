@@ -24,6 +24,45 @@ pub async fn insights(State(s): State<AppState>) -> Result<Json<Insights>, AppEr
     Ok(Json(build_insights(&s.db).await.map_err(AppError::Other)?))
 }
 
+/// Top day-movers among held positions (largest absolute IDR impact first).
+pub async fn movers(State(s): State<AppState>) -> Result<Json<Vec<crate::service::movers::Mover>>, AppError> {
+    Ok(Json(
+        crate::service::movers::daily_movers(&s.db, 6)
+            .await
+            .map_err(AppError::Other)?,
+    ))
+}
+
+#[derive(serde::Serialize)]
+pub struct BenchmarkRow {
+    pub label: String,
+    /// Period return as a ratio (0.05 = +5%), matching performance metrics.
+    pub return_ratio: f64,
+}
+
+/// 1-year returns: portfolio TWR vs index benchmarks. Best-effort — an index
+/// that fails to fetch is omitted rather than failing the whole response.
+pub async fn benchmark(State(s): State<AppState>) -> Result<Json<Vec<BenchmarkRow>>, AppError> {
+    let mut rows = Vec::new();
+    let perf = build_performance(&s.db, "idr", "1y")
+        .await
+        .map_err(AppError::Other)?;
+    if !perf.insufficient_data {
+        rows.push(BenchmarkRow {
+            label: "Portofolio".into(),
+            return_ratio: perf.metrics.total_return,
+        });
+    }
+    let yahoo = crate::pricing::yahoo::Yahoo::new();
+    for (label, symbol) in [("IHSG", "%5EJKSE"), ("S&P 500", "%5EGSPC")] {
+        match yahoo.range_return(symbol, "1y").await {
+            Ok(ratio) => rows.push(BenchmarkRow { label: label.into(), return_ratio: ratio }),
+            Err(e) => tracing::warn!("benchmark fetch for {label} failed: {e}"),
+        }
+    }
+    Ok(Json(rows))
+}
+
 #[derive(Deserialize)]
 pub struct PerfQuery {
     pub base: Option<String>,
