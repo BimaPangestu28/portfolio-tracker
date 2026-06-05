@@ -18,6 +18,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import WhatsAppPage from "./WhatsAppPage";
+import TelegramPage from "./TelegramPage";
 
 const today = () => new Date().toISOString().slice(0, 10);
 const ACCOUNT_TYPES = ["manual", "exchange", "broker", "bank", "wallet"];
@@ -80,7 +82,49 @@ function InstrumentRow({ instrument, categories }: { instrument: Instrument; cat
   );
 }
 
+/**
+ * SettingsPage — 6-item IA consolidation
+ * Hosts General settings + WhatsApp + Telegram bot connections as tabs.
+ */
 export default function SettingsPage() {
+  const [tab, setTab] = useState<Tab>("general");
+
+  return (
+    <div className="space-y-0">
+      <div className="ptabs">
+        <button
+          type="button"
+          className={`ptab${tab === "general" ? " active" : ""}`}
+          onClick={() => setTab("general")}
+        >
+          Umum
+        </button>
+        <button
+          type="button"
+          className={`ptab${tab === "whatsapp" ? " active" : ""}`}
+          onClick={() => setTab("whatsapp")}
+        >
+          WhatsApp
+        </button>
+        <button
+          type="button"
+          className={`ptab${tab === "telegram" ? " active" : ""}`}
+          onClick={() => setTab("telegram")}
+        >
+          Telegram
+        </button>
+      </div>
+
+      {tab === "general" && <GeneralSettings />}
+      {tab === "whatsapp" && <WhatsAppPage />}
+      {tab === "telegram" && <TelegramPage />}
+    </div>
+  );
+}
+
+type Tab = "general" | "whatsapp" | "telegram";
+
+function GeneralSettings() {
   const accounts = useAccounts();
   const instruments = useInstruments();
   const categories = useCategories();
@@ -97,7 +141,7 @@ export default function SettingsPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-xl font-semibold">Settings</h1>
+      <h1 className="text-xl font-semibold">Pengaturan</h1>
 
       <Card>
         <CardHeader>

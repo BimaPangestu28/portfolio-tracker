@@ -48,3 +48,28 @@ test("renders 6-item nav items", () => {
   expect(screen.getAllByText("Data").length).toBeGreaterThan(0);
   expect(screen.getAllByText("Chat").length).toBeGreaterThan(0);
 });
+
+test("consolidated pages are not standalone nav items", () => {
+  renderApp();
+  // Performa lives as a tab inside Portofolio; WhatsApp/Telegram inside Pengaturan
+  expect(screen.queryByRole("link", { name: /performa/i })).not.toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: /whatsapp/i })).not.toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: /telegram/i })).not.toBeInTheDocument();
+});
+
+test("settings link lives in the sidebar footer", () => {
+  renderApp();
+  expect(screen.getAllByRole("link", { name: /pengaturan/i }).length).toBeGreaterThan(0);
+});
+
+test("legacy /performance redirects to /portfolio", () => {
+  renderApp("/performance");
+  // Portfolio page renders its tab bar
+  expect(screen.getAllByText("Transaksi").length).toBeGreaterThan(0);
+});
+
+test("legacy /whatsapp and /telegram redirect to /settings", () => {
+  renderApp("/whatsapp");
+  // Settings page renders its tab bar with the Umum tab
+  expect(screen.getAllByText("Umum").length).toBeGreaterThan(0);
+});
