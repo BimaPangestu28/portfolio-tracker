@@ -64,8 +64,21 @@ pub async fn list(db: &Db) -> anyhow::Result<Vec<InstrumentRow>> {
 }
 
 pub async fn delete(db: &Db, id: i64) -> anyhow::Result<()> {
-    sqlx::query("DELETE FROM instrument WHERE id = ?").bind(id).execute(db).await?;
+    // Instruments from ingest are referenced by review_item.suggested_instrument_id;
+    // clear the suggestion first or the FK constraint rejects the delete.
+    let mut tx = db.begin().await?;
+    sqlx::query("UPDATE review_item SET suggested_instrument_id = NULL WHERE suggested_instrument_id = ?")
+        .bind(id).execute(&mut *tx).await?;
+    sqlx::query("DELETE FROM instrument WHERE id = ?").bind(id).execute(&mut *tx).await?;
+    tx.commit().await?;
     Ok(())
+}
+
+/// Number of ledger transactions referencing this instrument.
+pub async fn txn_count(db: &Db, id: i64) -> anyhow::Result<i64> {
+    let (n,) = sqlx::query_as::<_, (i64,)>("SELECT COUNT(*) FROM txn WHERE instrument_id = ?")
+        .bind(id).fetch_one(db).await?;
+    Ok(n)
 }
 
 #[cfg(test)]
@@ -87,6 +100,26 @@ mod tests {
             decimals: Some(2),
             note: None,
         }
+    }
+
+    #[tokio::test]
+    async fn delete_clears_review_item_suggestion() {
+        // Instruments created via ingest are referenced by
+        // review_item.suggested_instrument_id; delete must clear the
+        // suggestion instead of failing the FK constraint.
+        let db = mem_db().await;
+        let ins = create(&db, &new_asii()).await.unwrap();
+        crate::repo::review_items::create(&db, &crate::repo::review_items::NewReviewItem {
+            batch_id: "b", source_kind: "image", source_filename: "f.png", source_path: "p",
+            doc_type: "txn_history", needs_attention: false, payload_json: "{}", raw_llm_json: "{}",
+            suggested_instrument_id: Some(ins.id), suggested_account_id: None,
+        }).await.unwrap();
+
+        delete(&db, ins.id).await.unwrap();
+
+        let rows = sqlx::query_as::<_, (Option<i64>,)>("SELECT suggested_instrument_id FROM review_item")
+            .fetch_all(&db).await.unwrap();
+        assert_eq!(rows, vec![(None,)]);
     }
 
     #[tokio::test]

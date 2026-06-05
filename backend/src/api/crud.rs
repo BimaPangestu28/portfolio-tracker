@@ -36,6 +36,12 @@ pub async fn create_instrument(State(s): State<AppState>, Json(b): Json<instrume
     Ok(Json(instruments::find_or_create(&s.db, &b).await.map_err(AppError::Other)?))
 }
 pub async fn delete_instrument(State(s): State<AppState>, Path(id): Path<i64>) -> Result<Json<()>, AppError> {
+    let n = instruments::txn_count(&s.db, id).await.map_err(AppError::Other)?;
+    if n > 0 {
+        return Err(AppError::Conflict(format!(
+            "instrument masih direferensikan {n} transaksi — hapus transaksinya dulu"
+        )));
+    }
     instruments::delete(&s.db, id).await.map_err(AppError::Other)?; Ok(Json(()))
 }
 
