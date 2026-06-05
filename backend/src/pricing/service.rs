@@ -8,6 +8,12 @@ pub fn is_stale(as_of: &str, now: DateTime<Utc>, max_age_hours: i64) -> bool {
     }
 }
 
+/// Staleness window per quote source. Fund NAV (bibit) is T-1 and pauses over
+/// weekends/market holidays, so it gets 4 days; everything else 24h.
+pub fn stale_window_hours(source: &str) -> i64 {
+    if source == "bibit" { 96 } else { 24 }
+}
+
 use crate::db::Db;
 use crate::pricing::{coingecko::CoinGecko, fx::FxClient, PriceProvider};
 use crate::repo::{instruments, prices};
@@ -111,5 +117,24 @@ mod tests {
     fn old_price_is_stale() {
         let now = Utc.with_ymd_and_hms(2026,5,31,12,0,0).unwrap();
         assert!(is_stale("2026-05-29", now, 24));
+    }
+
+    #[test]
+    fn bibit_quotes_get_a_four_day_stale_window() {
+        assert_eq!(stale_window_hours("bibit"), 96);
+        assert_eq!(stale_window_hours("yahoo"), 24);
+        assert_eq!(stale_window_hours("coingecko"), 24);
+        assert_eq!(stale_window_hours("manual"), 24);
+    }
+
+    #[test]
+    fn fund_nav_three_days_old_is_fresh_five_days_is_stale() {
+        let now = Utc.with_ymd_and_hms(2026, 6, 8, 12, 0, 0).unwrap(); // Monday
+        // NAV dated Friday-ish (3 days back) — fine under the 96h fund window.
+        assert!(!is_stale("2026-06-05", now, stale_window_hours("bibit")));
+        // 5 days back — stale even for funds.
+        assert!(is_stale("2026-06-03", now, stale_window_hours("bibit")));
+        // Same age under the default window — stale.
+        assert!(is_stale("2026-06-05", now, stale_window_hours("yahoo")));
     }
 }
