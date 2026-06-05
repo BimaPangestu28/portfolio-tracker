@@ -98,8 +98,21 @@ pub fn build_confirm_payload(item: &ReviewItemRow) -> Result<ConfirmPayload, Str
     let instrument_id = item.suggested_instrument_id.ok_or("instrumen belum dikenali")?;
     let entry: ExtractedEntry = serde_json::from_str(&item.payload_json)
         .map_err(|e| format!("payload tidak terbaca: {e}"))?;
-    let quantity = entry.quantity.ok_or("jumlah tidak ada")?;
-    let price_native = entry.price_native.ok_or("harga tidak ada")?;
+    // Amount-only fund entries (an IDR amount, no units/NAV — e.g. Bibit) are
+    // one-tap confirmable: confirm() maps amount_native to quantity = amount at
+    // price 1 for buy/sell.
+    let amount_only = entry.quantity.is_none()
+        && entry.price_native.is_none()
+        && entry.amount_native.is_some()
+        && matches!(entry.entry_type.as_str(), "buy" | "sell");
+    let (quantity, price_native) = if amount_only {
+        (String::new(), String::new())
+    } else {
+        (
+            entry.quantity.ok_or("jumlah tidak ada")?,
+            entry.price_native.ok_or("harga tidak ada")?,
+        )
+    };
     let currency = entry.currency.ok_or("mata uang tidak ada")?;
     let executed_at = match &entry.executed_at {
         Some(raw) => to_rfc3339(raw).ok_or_else(|| format!("tanggal tidak terbaca: {raw}"))?,
@@ -118,6 +131,7 @@ pub fn build_confirm_payload(item: &ReviewItemRow) -> Result<ConfirmPayload, Str
         fx_to_idr: None,
         fx_to_usd: None,
         note: entry.note,
+        amount_native: entry.amount_native,
     })
 }
 
@@ -150,6 +164,13 @@ fn item_summary(
         if let Some(price) = &e.price_native {
             let currency = e.currency.as_deref().unwrap_or("");
             out.push_str(&format!("Harga: {currency} {}\n", fmt_payload_num(price)));
+        }
+        // Amount-only fund entries have no qty/price; show the nominal instead.
+        if e.quantity.is_none() && e.price_native.is_none() {
+            if let Some(amount) = &e.amount_native {
+                let currency = e.currency.as_deref().unwrap_or("");
+                out.push_str(&format!("Nominal: {currency} {}\n", fmt_payload_num(amount)));
+            }
         }
         out.push_str(&format!(
             "Tanggal: {}\n",
@@ -605,6 +626,44 @@ mod tests {
     fn items_missing_core_fields_are_not_confirmable() {
         let payload = r#"{ "entry_type": "buy", "symbol": "BTC", "confidence": 0.95 }"#;
         assert!(build_confirm_payload(&review_item(payload)).is_err());
+    }
+
+    const AMOUNT_ONLY_PAYLOAD: &str = r#"{
+        "entry_type": "buy", "instrument_name": "Sucorinvest Bond Fund",
+        "amount_native": "13000000", "currency": "IDR", "confidence": 0.72
+    }"#;
+
+    #[test]
+    fn amount_only_fund_items_build_a_confirm_payload() {
+        // Bibit-style: nominal only, no units/NAV. confirm() maps the amount to
+        // quantity = amount at price 1, so empty qty/price are intentional here.
+        let payload =
+            build_confirm_payload(&review_item(AMOUNT_ONLY_PAYLOAD)).expect("confirmable");
+        assert_eq!(payload.quantity, "");
+        assert_eq!(payload.price_native, "");
+        assert_eq!(payload.amount_native.as_deref(), Some("13000000"));
+        assert_eq!(payload.currency, "IDR");
+    }
+
+    #[test]
+    fn amount_only_dividend_is_not_confirmable() {
+        let payload = r#"{ "entry_type": "dividend", "amount_native": "100000", "currency": "IDR", "confidence": 0.9 }"#;
+        assert!(build_confirm_payload(&review_item(payload)).is_err());
+    }
+
+    #[test]
+    fn amount_only_summary_shows_the_nominal() {
+        let item = review_item(AMOUNT_ONLY_PAYLOAD);
+        let entry: crate::ingestion::extract::ExtractedEntry =
+            serde_json::from_str(AMOUNT_ONLY_PAYLOAD).unwrap();
+        let summary = item_summary(
+            &item,
+            Some(&entry),
+            Some("Pendidikan Noah"),
+            Some("Sucorinvest Bond Fund"),
+        );
+        assert!(summary.contains("Nominal: IDR 13.000.000"), "{summary}");
+        assert!(!summary.contains("Qty:"), "{summary}");
     }
 
     #[test]
