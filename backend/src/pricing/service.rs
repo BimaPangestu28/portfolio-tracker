@@ -26,7 +26,10 @@ pub async fn refresh_all(db: &Db) -> anyhow::Result<()> {
 
     for ins in instruments::list(db).await? {
         if let Some(ext) = ins.price_source.strip_prefix("coingecko:") {
-            match cg.latest(ext).await {
+            // Quote in the instrument's native currency so cost basis and
+            // latest price stay comparable (IDR for local-exchange crypto).
+            let vs = crate::pricing::coingecko::vs_currency(&ins.native_currency);
+            match cg.latest_in(ext, vs).await {
                 Ok(q) => { let _ = prices::upsert_latest(db, ins.id, q.price, &q.currency, "coingecko", &today).await; }
                 Err(e) => tracing::warn!("price refresh failed for {}: {e}", ins.symbol),
             }
