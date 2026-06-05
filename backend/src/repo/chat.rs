@@ -36,6 +36,20 @@ pub async fn add(db: &Db, role: &str, content: &str, channel: &str) -> anyhow::R
     Ok(row)
 }
 
+/// The last `limit` messages for one channel, oldest first — conversation
+/// context for the LLM.
+pub async fn recent_by_channel(db: &Db, channel: &str, limit: i64) -> anyhow::Result<Vec<ChatMessageRow>> {
+    let mut rows = sqlx::query_as::<_, ChatMessageRow>(
+        "SELECT * FROM chat_message WHERE channel = ? ORDER BY id DESC LIMIT ?",
+    )
+    .bind(channel)
+    .bind(limit)
+    .fetch_all(db)
+    .await?;
+    rows.reverse();
+    Ok(rows)
+}
+
 pub async fn history(db: &Db, limit: i64) -> anyhow::Result<Vec<ChatMessageRow>> {
     let rows = sqlx::query_as::<_, ChatMessageRow>(
         "SELECT * FROM chat_message ORDER BY id ASC LIMIT ?",
@@ -77,6 +91,21 @@ mod tests {
         let db = mem_db().await;
         let result = add(&db, "system", "hello", "inapp").await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn recent_by_channel_returns_last_n_chronologically() {
+        let db = mem_db().await;
+        add(&db, "user", "q1 inapp", "inapp").await.unwrap();
+        add(&db, "user", "q1", "telegram").await.unwrap();
+        add(&db, "assistant", "a1", "telegram").await.unwrap();
+        add(&db, "user", "q2", "telegram").await.unwrap();
+        add(&db, "assistant", "a2", "telegram").await.unwrap();
+
+        let recent = recent_by_channel(&db, "telegram", 3).await.unwrap();
+        let contents: Vec<&str> = recent.iter().map(|m| m.content.as_str()).collect();
+        // Last 3 telegram messages, oldest first; inapp rows excluded.
+        assert_eq!(contents, vec!["a1", "q2", "a2"]);
     }
 
     #[tokio::test]

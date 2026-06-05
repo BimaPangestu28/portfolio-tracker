@@ -70,10 +70,40 @@ pub fn build_context(s: &PortfolioSummary, instruments: &[InstrumentRow]) -> Str
 }
 
 use crate::db::Db;
-use crate::llm::claude::{ClaudeClient, Part};
+use crate::llm::claude::ClaudeClient;
 use crate::repo::chat;
 
-const SYSTEM: &str = "You are a concise personal investment assistant. Answer the user's question using ONLY the portfolio snapshot provided. Amounts are in IDR unless noted. If the snapshot lacks the info, say so briefly. Keep answers short. Format every number with Indonesian separators: dots for thousands, comma for decimals (e.g. Rp 91.960.083).";
+const SYSTEM: &str = "You are a concise personal investment assistant. Answer the user's question using ONLY the portfolio snapshot provided. Amounts are in IDR unless noted. If the snapshot lacks the info, say so briefly. Keep answers short. Format every number with Indonesian separators: dots for thousands, comma for decimals (e.g. Rp 91.960.083). Use the recent conversation to resolve follow-up questions. If pending review items are listed you may discuss them, but you cannot edit or confirm them — direct the user to the buttons in chat or the web UI Data page.";
+
+/// How many prior messages of the channel's conversation the model sees.
+const HISTORY_LIMIT: i64 = 12;
+
+/// Render pending review items for the LLM context so the assistant knows
+/// about staged-but-unconfirmed transactions (it cannot act on them).
+fn render_pending_reviews(items: &[crate::repo::review_items::ReviewItemRow]) -> String {
+    if items.is_empty() {
+        return String::new();
+    }
+    let mut out = String::from(
+        "\nPending review items (user confirms via chat buttons or web UI Data page; you CANNOT edit or confirm them):\n",
+    );
+    for item in items {
+        let entry: Option<crate::ingestion::extract::ExtractedEntry> =
+            serde_json::from_str(&item.payload_json).ok();
+        match entry {
+            Some(e) => out.push_str(&format!(
+                "- #{} {} {} qty {} price {}\n",
+                item.id,
+                e.entry_type,
+                e.symbol.as_deref().unwrap_or("?"),
+                e.quantity.as_deref().unwrap_or("?"),
+                e.price_native.as_deref().unwrap_or("?"),
+            )),
+            None => out.push_str(&format!("- #{}\n", item.id)),
+        }
+    }
+    out
+}
 
 /// Telegram/WhatsApp render replies as raw text, so Markdown tables and
 /// **bold** markers show up literally — instruct plain text there. The in-app
@@ -88,13 +118,29 @@ fn system_prompt(channel: &str) -> String {
     }
 }
 
-/// Build context, ask Claude, then store BOTH messages only on success (avoids orphaned user msgs).
+/// Build context (snapshot + pending reviews), replay the channel's recent
+/// conversation, ask Claude, then store BOTH messages only on success
+/// (avoids orphaned user msgs).
 pub async fn answer(db: &Db, client: &ClaudeClient, channel: &str, user_msg: &str) -> anyhow::Result<String> {
     let summary = crate::service::portfolio::build_summary(db).await?;
     let instruments = crate::repo::instruments::list(db).await?;
-    let context = build_context(&summary, &instruments);
-    let prompt = format!("Portfolio snapshot:\n{context}\n\nUser question: {user_msg}");
-    let reply = client.complete(&system_prompt(channel), &[Part::Text(prompt)]).await
+    let mut context = build_context(&summary, &instruments);
+    let pending = crate::repo::review_items::list_by_status(db, "pending")
+        .await
+        .unwrap_or_default();
+    context.push_str(&render_pending_reviews(&pending));
+
+    let system = format!("{}\n\nPortfolio snapshot:\n{context}", system_prompt(channel));
+    let history = chat::recent_by_channel(db, channel, HISTORY_LIMIT)
+        .await
+        .unwrap_or_default();
+    let mut turns: Vec<(String, String)> =
+        history.into_iter().map(|m| (m.role, m.content)).collect();
+    turns.push(("user".to_string(), user_msg.to_string()));
+
+    let reply = client
+        .complete_chat(&system, &turns)
+        .await
         .map_err(|e| anyhow::anyhow!("llm error: {e}"))?;
     chat::add(db, "user", user_msg, channel).await?;
     chat::add(db, "assistant", &reply, channel).await?;
@@ -170,6 +216,43 @@ mod tests {
         s.positions = vec![position(7)];
         let ctx = build_context(&s, &[]);
         assert!(ctx.contains("- instrument#7: qty 100 value Rp 1.000.000"), "{ctx}");
+    }
+
+    fn pending_item(payload_json: &str) -> crate::repo::review_items::ReviewItemRow {
+        crate::repo::review_items::ReviewItemRow {
+            id: 75,
+            batch_id: "tg-1".into(),
+            source_kind: "image".into(),
+            source_filename: "telegram-photo.jpg".into(),
+            source_path: "".into(),
+            doc_type: "holdings_snapshot".into(),
+            status: "pending".into(),
+            needs_attention: 0,
+            payload_json: payload_json.into(),
+            raw_llm_json: "{}".into(),
+            suggested_instrument_id: None,
+            suggested_account_id: None,
+            created_txn_id: None,
+            created_at: "2026-06-05T00:00:00Z".into(),
+            confirmed_at: None,
+        }
+    }
+
+    #[test]
+    fn pending_reviews_render_with_their_details() {
+        let item = pending_item(
+            r#"{ "entry_type": "opening_balance", "symbol": "USDT", "quantity": "5661.940057" }"#,
+        );
+        let rendered = render_pending_reviews(&[item]);
+        assert!(rendered.contains("#75"), "{rendered}");
+        assert!(rendered.contains("opening_balance USDT"), "{rendered}");
+        assert!(rendered.contains("5661.940057"), "{rendered}");
+        assert!(rendered.to_lowercase().contains("cannot edit"), "{rendered}");
+    }
+
+    #[test]
+    fn no_pending_reviews_renders_nothing() {
+        assert_eq!(render_pending_reviews(&[]), "");
     }
 
     #[test]
