@@ -616,14 +616,14 @@ git commit -m "feat(portfolio): FX-aware P&L totals with price/FX decomposition 
 ### Task 5: Snapshot decomposition columns
 
 **Files:**
-- Create: `backend/migrations/0009_snapshot_pnl_decomposition.sql`
+- Create: `backend/migrations/0010_snapshot_pnl_decomposition.sql`
 - Modify: `backend/src/repo/snapshots.rs`
 - Modify: `backend/src/scheduler.rs:15`
 - Modify: `backend/src/service/performance.rs` (3 `snapshots::upsert` test call sites)
 
 - [ ] **Step 1: Write the migration**
 
-`backend/migrations/0009_snapshot_pnl_decomposition.sql`:
+`backend/migrations/0010_snapshot_pnl_decomposition.sql`:
 
 ```sql
 -- Unrealized P&L decomposition (price vs FX, in IDR) captured per daily snapshot.
@@ -707,12 +707,12 @@ pub struct SnapshotRow { pub as_of: String, pub total_idr: String, pub total_usd
 - [ ] **Step 6: Run the full backend suite + clippy**
 
 Run: `cd backend && cargo test && cargo clippy --all-targets`
-Expected: tests PASS, clippy clean. (sqlx runs migration 0009 automatically via `migrate!`.)
+Expected: tests PASS, clippy clean. (sqlx runs migration 0010 automatically via `migrate!`.)
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add backend/migrations/0009_snapshot_pnl_decomposition.sql backend/src/repo/snapshots.rs backend/src/scheduler.rs backend/src/service/performance.rs
+git add backend/migrations/0010_snapshot_pnl_decomposition.sql backend/src/repo/snapshots.rs backend/src/scheduler.rs backend/src/service/performance.rs
 git commit -m "feat(snapshot): persist daily price/FX P&L decomposition (nullable columns)"
 ```
 
