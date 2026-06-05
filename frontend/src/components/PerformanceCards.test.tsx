@@ -5,6 +5,9 @@ import type { PortfolioSummary } from "../api/schemas";
 const base: PortfolioSummary = {
   net_worth_idr: "4875000", net_worth_usd: "300",
   total_unrealized_pnl_idr: "100", total_realized_pnl_idr: "0",
+  total_unrealized_price_pnl_idr: "80", total_unrealized_fx_pnl_idr: "20",
+  total_realized_price_pnl_idr: "0", total_realized_fx_pnl_idr: "0",
+  fx_incomplete: false,
   xirr: 0.168, positions: [], allocation: [],
 };
 

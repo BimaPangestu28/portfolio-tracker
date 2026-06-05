@@ -35,6 +35,9 @@ test("unrealized P&L sub shows percent of cost basis, not the raw IDR amount", a
       HttpResponse.json({
         net_worth_idr: "90000", net_worth_usd: "6",
         total_unrealized_pnl_idr: "-10000", total_realized_pnl_idr: "0", xirr: null,
+        total_unrealized_price_pnl_idr: "-10000", total_unrealized_fx_pnl_idr: "0",
+        total_realized_price_pnl_idr: "0", total_realized_fx_pnl_idr: "0",
+        fx_incomplete: false,
         positions: [], allocation: [],
       }),
     ),
