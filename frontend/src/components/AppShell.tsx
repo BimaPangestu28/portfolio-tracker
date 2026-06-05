@@ -59,15 +59,6 @@ const NAV_ITEMS: NavItem[] = [
 /** Bottom nav shows first 4 + "More" (opens sheet) */
 const BOTTOM_KEYS = ["/", "/portfolio", "/budget", "/chat"];
 
-/* ── Currency context ───────────────────────────────────────────────── */
-
-export type BaseCurrency = "IDR" | "USD";
-import { createContext, useContext } from "react";
-
-interface CurrencyCtx { base: BaseCurrency; setBase: (c: BaseCurrency) => void }
-const CurrencyContext = createContext<CurrencyCtx>({ base: "IDR", setBase: () => {} });
-export function useCurrency() { return useContext(CurrencyContext); }
-
 /* ── Small primitives ───────────────────────────────────────────────── */
 
 function IconBtn({
@@ -85,31 +76,6 @@ function IconBtn({
     <button type="button" className={cn("pt-icon-btn", className)} onClick={onClick} title={title}>
       {children}
     </button>
-  );
-}
-
-function SegControl({
-  value,
-  onChange,
-  options,
-}: {
-  value: string;
-  onChange: (v: string) => void;
-  options: { value: string; label: string }[];
-}) {
-  return (
-    <div className="pt-seg">
-      {options.map((o) => (
-        <button
-          key={o.value}
-          type="button"
-          className={value === o.value ? "active" : ""}
-          onClick={() => onChange(o.value)}
-        >
-          {o.label}
-        </button>
-      ))}
-    </div>
   );
 }
 
@@ -289,15 +255,7 @@ function usePageTitle() {
 
 /* ── Topbar ─────────────────────────────────────────────────────────── */
 
-function Topbar({
-  onHamburger,
-  base,
-  setBase,
-}: {
-  onHamburger: () => void;
-  base: BaseCurrency;
-  setBase: (c: BaseCurrency) => void;
-}) {
+function Topbar({ onHamburger }: { onHamburger: () => void }) {
   const title = usePageTitle();
   const { theme, setTheme } = useTheme();
   const refresh = useRefreshPrices();
@@ -314,15 +272,6 @@ function Topbar({
       >
         {title}
       </div>
-
-      <SegControl
-        value={base}
-        onChange={(v) => setBase(v as BaseCurrency)}
-        options={[
-          { value: "IDR", label: "IDR" },
-          { value: "USD", label: "USD" },
-        ]}
-      />
 
       <IconBtn
         onClick={() =>
@@ -375,37 +324,27 @@ function Topbar({
 export default function AppShell() {
   const [collapsed, setCollapsed] = useState(false);
   const [sheet, setSheet] = useState(false);
-  const [base, setBase] = useState<BaseCurrency>(
-    () => (localStorage.getItem("pt-base") as BaseCurrency) ?? "IDR",
-  );
-
-  function handleSetBase(c: BaseCurrency) {
-    setBase(c);
-    localStorage.setItem("pt-base", c);
-  }
 
   return (
-    <CurrencyContext.Provider value={{ base, setBase: handleSetBase }}>
-      <div className="pt-shell">
-        {/* Desktop sidebar */}
-        <Sidebar collapsed={collapsed} onCollapse={() => setCollapsed((c) => !c)} />
+    <div className="pt-shell">
+      {/* Desktop sidebar */}
+      <Sidebar collapsed={collapsed} onCollapse={() => setCollapsed((c) => !c)} />
 
-        {/* Mobile sheet + scrim */}
-        <MobileSheet open={sheet} onClose={() => setSheet(false)} />
+      {/* Mobile sheet + scrim */}
+      <MobileSheet open={sheet} onClose={() => setSheet(false)} />
 
-        {/* Main area */}
-        <div className="pt-main">
-          <Topbar onHamburger={() => setSheet(true)} base={base} setBase={handleSetBase} />
-          <div className="pt-page-scroll">
-            <div className="pt-page">
-              <Outlet />
-            </div>
+      {/* Main area */}
+      <div className="pt-main">
+        <Topbar onHamburger={() => setSheet(true)} />
+        <div className="pt-page-scroll">
+          <div className="pt-page">
+            <Outlet />
           </div>
         </div>
-
-        {/* Mobile bottom nav */}
-        <BottomNav onMore={() => setSheet(true)} />
       </div>
-    </CurrencyContext.Provider>
+
+      {/* Mobile bottom nav */}
+      <BottomNav onMore={() => setSheet(true)} />
+    </div>
   );
 }
