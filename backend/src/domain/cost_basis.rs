@@ -96,20 +96,7 @@ mod tests {
     use rust_decimal_macros::dec;
 
     fn tx(t: TxnType, qty: Decimal, price: Decimal, fee: Decimal) -> Transaction {
-        Transaction {
-            id: 0,
-            account_id: 1,
-            instrument_id: 1,
-            txn_type: t,
-            executed_at: Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
-            quantity: qty,
-            price_native: price,
-            fee_native: fee,
-            currency: "USD".into(),
-            fx_to_idr: dec!(16000),
-            fx_to_usd: dec!(1),
-            note: None,
-        }
+        tx_fx(t, qty, price, fee, dec!(16000))
     }
 
     #[test]
@@ -266,5 +253,31 @@ mod tests {
         ];
         let cb = compute_cost_basis(&txns);
         assert_eq!(cb.realized_pnl_idr, cb.realized_price_pnl_idr + cb.realized_fx_pnl_idr);
+    }
+
+    #[test]
+    fn rebuy_after_full_close_resets_idr_basis() {
+        // Buy 2 @ 100 fx 16000 -> avg_idr 1,600,000.
+        // Sell 2 @ 150 fx 17000 (full close):
+        //   native realized = (150-100)*2 = 100
+        //   total idr = (150*17000 - 1,600,000)*2 = 1,900,000
+        //   price idr = 100*17000 = 1,700,000
+        //   fx idr    = 200,000
+        // Re-buy 1 @ 200 fx 18000:
+        //   avg resets to 200; avg_idr resets to 200*18000 = 3,600,000.
+        // Realized figures must be RETAINED from the close.
+        let txns = vec![
+            tx_fx(TxnType::Buy,  dec!(2), dec!(100), dec!(0), dec!(16000)),
+            tx_fx(TxnType::Sell, dec!(2), dec!(150), dec!(0), dec!(17000)),
+            tx_fx(TxnType::Buy,  dec!(1), dec!(200), dec!(0), dec!(18000)),
+        ];
+        let cb = compute_cost_basis(&txns);
+        assert_eq!(cb.quantity,              dec!(1));
+        assert_eq!(cb.avg_cost,              dec!(200));
+        assert_eq!(cb.avg_cost_idr,          dec!(3600000));
+        assert_eq!(cb.cost_basis_idr_total,  dec!(3600000));
+        assert_eq!(cb.realized_pnl_idr,      dec!(1900000));
+        assert_eq!(cb.realized_price_pnl_idr, dec!(1700000));
+        assert_eq!(cb.realized_fx_pnl_idr,   dec!(200000));
     }
 }
