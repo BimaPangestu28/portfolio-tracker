@@ -53,6 +53,23 @@ pub fn build_body(model: &str, system: &str, parts: &[Part]) -> serde_json::Valu
     })
 }
 
+/// Build the JSON body for a multi-turn text conversation. Leading assistant
+/// turns are dropped — the Messages API requires the first message to be from
+/// the user, and a recent-history window can start on an assistant reply.
+pub fn build_chat_body(model: &str, system: &str, turns: &[(String, String)]) -> serde_json::Value {
+    let first_user = turns.iter().position(|(role, _)| role == "user").unwrap_or(turns.len());
+    let messages: Vec<serde_json::Value> = turns[first_user..]
+        .iter()
+        .map(|(role, content)| serde_json::json!({ "role": role, "content": content }))
+        .collect();
+    serde_json::json!({
+        "model": model,
+        "max_tokens": 4096,
+        "system": system,
+        "messages": messages
+    })
+}
+
 /// Extract concatenated text from an Anthropic Messages API response body.
 pub fn extract_text(resp: &serde_json::Value) -> Result<String, LlmError> {
     let content = resp.get("content").and_then(|c| c.as_array())
@@ -84,6 +101,20 @@ impl ClaudeClient {
     /// Send a single user message (system + parts) and return the concatenated text output.
     pub async fn complete(&self, system: &str, parts: &[Part]) -> Result<String, LlmError> {
         let body = build_body(&self.model, system, parts);
+        self.post(body).await
+    }
+
+    /// Send a multi-turn text conversation and return the text output.
+    pub async fn complete_chat(
+        &self,
+        system: &str,
+        turns: &[(String, String)],
+    ) -> Result<String, LlmError> {
+        let body = build_chat_body(&self.model, system, turns);
+        self.post(body).await
+    }
+
+    async fn post(&self, body: serde_json::Value) -> Result<String, LlmError> {
         let resp = self.client
             .post("https://api.anthropic.com/v1/messages")
             .header("x-api-key", &self.api_key)
@@ -120,6 +151,37 @@ mod tests {
         let blocks = body["messages"][0]["content"].as_array().unwrap();
         assert_eq!(blocks[0]["type"], "document");
         assert_eq!(blocks[0]["source"]["media_type"], "application/pdf");
+    }
+
+    #[test]
+    fn build_chat_body_renders_alternating_turns() {
+        let turns = vec![
+            ("user".to_string(), "q1".to_string()),
+            ("assistant".to_string(), "a1".to_string()),
+            ("user".to_string(), "q2".to_string()),
+        ];
+        let body = build_chat_body("claude-sonnet-4-6", "sys", &turns);
+        assert_eq!(body["system"], "sys");
+        let messages = body["messages"].as_array().unwrap();
+        assert_eq!(messages.len(), 3);
+        assert_eq!(messages[0]["role"], "user");
+        assert_eq!(messages[0]["content"], "q1");
+        assert_eq!(messages[1]["role"], "assistant");
+        assert_eq!(messages[2]["content"], "q2");
+    }
+
+    #[test]
+    fn build_chat_body_drops_leading_assistant_turns() {
+        // The Messages API requires the first message to be from the user; a
+        // history window can start mid-conversation on an assistant reply.
+        let turns = vec![
+            ("assistant".to_string(), "a0".to_string()),
+            ("user".to_string(), "q1".to_string()),
+        ];
+        let body = build_chat_body("m", "s", &turns);
+        let messages = body["messages"].as_array().unwrap();
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0]["role"], "user");
     }
 
     #[test]
