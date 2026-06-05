@@ -209,6 +209,7 @@ git commit -m "feat(pricing): refresh bibit NAV quotes under their page NAV date
 ---
 
 ### Task 3: Source-aware staleness (96h for `bibit`)
+> (window widened 96h → 144h during review)
 
 **Files:**
 - Modify: `backend/src/pricing/service.rs` (new fn + tests)

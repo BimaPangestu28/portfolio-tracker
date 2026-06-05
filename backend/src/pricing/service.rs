@@ -8,10 +8,16 @@ pub fn is_stale(as_of: &str, now: DateTime<Utc>, max_age_hours: i64) -> bool {
     }
 }
 
-/// Staleness window per quote source. Fund NAV (bibit) is T-1 and pauses over
-/// weekends/market holidays, so it gets 4 days; everything else 24h.
+/// Staleness window per quote source, in hours.
+const FUND_STALE_HOURS: i64 = 144; // 6 days
+const DEFAULT_STALE_HOURS: i64 = 24;
+
+/// Fund NAV (bibit) is published T-1 with date-only as_of (midnight UTC) and
+/// pauses over weekends, so a 6-day window keeps long weekends (e.g. a Monday
+/// exchange holiday) from false-flagging. Week-long closures (Lebaran) will
+/// still flag stale — by design, the data really is old. Everything else: 24h.
 pub fn stale_window_hours(source: &str) -> i64 {
-    if source == "bibit" { 96 } else { 24 }
+    if source == "bibit" { FUND_STALE_HOURS } else { DEFAULT_STALE_HOURS }
 }
 
 use crate::db::Db;
@@ -120,21 +126,25 @@ mod tests {
     }
 
     #[test]
-    fn bibit_quotes_get_a_four_day_stale_window() {
-        assert_eq!(stale_window_hours("bibit"), 96);
+    fn bibit_quotes_get_a_six_day_stale_window() {
+        assert_eq!(stale_window_hours("bibit"), 144);
         assert_eq!(stale_window_hours("yahoo"), 24);
         assert_eq!(stale_window_hours("coingecko"), 24);
         assert_eq!(stale_window_hours("manual"), 24);
     }
 
     #[test]
-    fn fund_nav_three_days_old_is_fresh_five_days_is_stale() {
-        let now = Utc.with_ymd_and_hms(2026, 6, 8, 12, 0, 0).unwrap(); // Monday
-        // NAV dated Friday-ish (3 days back) — fine under the 96h fund window.
-        assert!(!is_stale("2026-06-05", now, stale_window_hours("bibit")));
-        // 5 days back — stale even for funds.
-        assert!(is_stale("2026-06-03", now, stale_window_hours("bibit")));
-        // Same age under the default window — stale.
-        assert!(is_stale("2026-06-05", now, stale_window_hours("yahoo")));
+    fn fund_nav_survives_a_monday_holiday_but_not_a_week() {
+        // Friday NAV, single Monday holiday: next refresh lands Tuesday evening
+        // WIB (~Tue 11:00 UTC) — 4d11h old, must NOT be stale for funds.
+        let tue = Utc.with_ymd_and_hms(2026, 6, 9, 11, 0, 0).unwrap();
+        assert!(!is_stale("2026-06-05", tue, stale_window_hours("bibit")));
+        // Same quote under the default window — stale.
+        assert!(is_stale("2026-06-05", tue, stale_window_hours("yahoo")));
+        // Boundary: exactly 144h is fresh, just past it is stale.
+        let exactly = Utc.with_ymd_and_hms(2026, 6, 11, 0, 0, 0).unwrap();
+        assert!(!is_stale("2026-06-05", exactly, stale_window_hours("bibit")));
+        let past = Utc.with_ymd_and_hms(2026, 6, 11, 0, 0, 1).unwrap();
+        assert!(is_stale("2026-06-05", past, stale_window_hours("bibit")));
     }
 }

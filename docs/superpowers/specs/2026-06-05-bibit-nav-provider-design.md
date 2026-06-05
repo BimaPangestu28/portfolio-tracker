@@ -28,8 +28,12 @@ fund positions get real units and a daily-moving market value.
    note. Confirm never fails because Bibit is down.
 3. **RDCODE is manual**: `instrument.price_source = "bibit:RD1436"` — same
    pattern as `"yahoo:BBCA.JK"`. No name→code auto-resolution.
-4. **Staleness window for fund quotes is 4 days** (NAV is T-1 and pauses on
-   weekends/market holidays); other sources keep the existing 24h window.
+4. **Staleness window for fund quotes is 6 days / 144h** (NAV is T-1 with
+   date-only as_of at midnight UTC and pauses on weekends/market holidays; a
+   single Monday exchange holiday makes Friday's NAV ~107h old before Tuesday's
+   refresh — 4 days / 96h was too tight). Week-long closures (Lebaran) will
+   still flag stale — by design, the data really is old. Other sources keep the
+   existing 24h window.
 
 ## Design
 
@@ -74,7 +78,7 @@ if let Some(code) = ins.price_source.strip_prefix("bibit:") {
 ### 3. Source-aware staleness — `backend/src/service/portfolio.rs`
 
 The stale check (currently >24h) becomes source-aware: quotes with
-`source == "bibit"` use a 4-day window; everything else keeps 24h.
+`source == "bibit"` use a 6-day / 144h window; everything else keeps 24h.
 `LatestPrice` already carries `source`, so no repo change.
 
 ### 4. Unit derivation — `backend/src/ingestion/review.rs::confirm()`
@@ -130,8 +134,9 @@ The amount-only hint becomes: `"amount-only — unit dihitung otomatis dari NAV
   (assert 4 dp rounding and exact NAV price); bibit instrument without quote →
   price=1 fallback + note; non-bibit instrument → unchanged behavior
   (existing tests stay green).
-- Staleness: bibit-source quote aged 3 days → not stale; 5 days → stale;
-  yahoo-source quote aged 2 days → stale.
+- Staleness: bibit-source quote aged ~4d11h (Friday NAV, Monday holiday,
+  Tuesday refresh) → not stale; aged 7 days → stale; yahoo-source quote aged
+  2 days → stale. Boundary: exactly 144h is fresh, 144h+1s is stale.
 - Dispatch: unit test for the price/`as_of` mapping if testable without
   network; otherwise covered by provider + repo tests (no live-network tests
   in CI).
