@@ -18,6 +18,7 @@ import {
   Inbox,
   MessageSquare,
   MessageCircle,
+  Send,
   Menu,
   X,
   RefreshCw,
@@ -52,6 +53,7 @@ const NAV_ITEMS: NavItem[] = [
   { to: "/data",      label: "Data",       icon: Inbox },
   { to: "/chat",      label: "Chat",       icon: MessageSquare },
   { to: "/whatsapp", label: "WhatsApp",   icon: MessageCircle },
+  { to: "/telegram",  label: "Telegram",   icon: Send },
 ];
 
 /** Bottom nav shows first 4 + "More" (opens sheet) */
