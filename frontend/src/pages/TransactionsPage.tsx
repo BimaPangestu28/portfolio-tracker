@@ -1,20 +1,31 @@
 import { useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
-import { useTransactions, useDeleteTransaction } from "../api/hooks";
+import { useTransactions, useDeleteTransaction, useInstruments, useAccounts } from "../api/hooks";
 import { QueryState } from "../components/QueryState";
 import { Dialog } from "../components/Dialog";
 import { AddTransactionDialog } from "../components/AddTransactionDialog";
-import { txTone, txLabel } from "../lib/txn";
+import { TXN_TYPES, txTone, txLabel } from "../lib/txn";
 
 export default function TransactionsPage() {
   const txns = useTransactions();
+  const instruments = useInstruments();
+  const accounts = useAccounts();
   const del = useDeleteTransaction();
 
   const [open, setOpen] = useState(false);
   const [confirmTx, setConfirmTx] = useState<null | (typeof txns_data)[number]>(null);
+  const [filterType, setFilterType] = useState("");
+  const [filterInstrument, setFilterInstrument] = useState("");
 
-  const txns_data = txns.data ?? [];
+  const instrumentName = (id: number) => instruments.data?.find((i) => i.id === id)?.symbol ?? `#${id}`;
+  const accountName = (id: number) => accounts.data?.find((a) => a.id === id)?.name ?? `#${id}`;
+
+  const txns_data = (txns.data ?? []).filter(
+    (t) =>
+      (filterType === "" || t.txn_type === filterType) &&
+      (filterInstrument === "" || t.instrument_id === Number(filterInstrument)),
+  );
 
   const handleDelete = () => {
     if (!confirmTx) return;
@@ -35,15 +46,41 @@ export default function TransactionsPage() {
           <h1 className="t-h1">Transaksi</h1>
           <div className="t-sm t-muted" style={{ marginTop: 2 }}>{txns_data.length} catatan</div>
         </div>
-        <button
-          type="button"
-          className="btn btn-primary btn-sm"
-          onClick={() => setOpen(true)}
-          aria-label="Tambah transaksi"
-        >
-          <Plus size={15} />
-          Tambah Transaksi
-        </button>
+        <div className="flex items-center" style={{ gap: 8, flexWrap: "wrap" }}>
+          <select
+            className="select"
+            style={{ width: "auto", minWidth: 130 }}
+            value={filterType}
+            onChange={(e) => setFilterType(e.target.value)}
+            aria-label="Filter tipe"
+          >
+            <option value="">Semua tipe</option>
+            {TXN_TYPES.map((t) => (
+              <option key={t} value={t}>{txLabel(t)}</option>
+            ))}
+          </select>
+          <select
+            className="select"
+            style={{ width: "auto", minWidth: 130 }}
+            value={filterInstrument}
+            onChange={(e) => setFilterInstrument(e.target.value)}
+            aria-label="Filter instrumen"
+          >
+            <option value="">Semua instrumen</option>
+            {(instruments.data ?? []).map((i) => (
+              <option key={i.id} value={i.id}>{i.symbol}</option>
+            ))}
+          </select>
+          <button
+            type="button"
+            className="btn btn-primary btn-sm"
+            onClick={() => setOpen(true)}
+            aria-label="Tambah transaksi"
+          >
+            <Plus size={15} />
+            Tambah Transaksi
+          </button>
+        </div>
       </div>
 
       {/* Table */}
@@ -95,8 +132,8 @@ export default function TransactionsPage() {
                           {txLabel(t.txn_type)}
                         </span>
                       </td>
-                      <td style={{ fontWeight: 500 }}>#{t.instrument_id}</td>
-                      <td className="t-muted t-sm">#{t.account_id}</td>
+                      <td style={{ fontWeight: 500 }}>{instrumentName(t.instrument_id)}</td>
+                      <td className="t-muted t-sm">{accountName(t.account_id)}</td>
                       <td className="r num">{t.quantity}</td>
                       <td className="r num">{t.price_native} {t.currency}</td>
                       <td className="r">
