@@ -369,4 +369,24 @@ mod tests {
         let e = parse_extraction(raw).unwrap();
         assert_eq!(e.entries[0].confidence, 1.0);
     }
+
+    #[test]
+    fn bibit_amount_only_fund_buys_parse_and_stay_untouched() {
+        // Verbatim raw_llm_json from production review items 54-56 (asdc.jpeg,
+        // Bibit "Transaksi -> Order" tab): three fund buys with an IDR amount
+        // and no units/NAV. normalize_entry must not invent quantity/price
+        // (its price >= IDX_PRICE_FLOOR guard skips these) or flag them.
+        let raw = r#"{"doc_type": "txn_history", "entries": [{"entry_type": "buy", "instrument_name": "Pendidikan Noah - Obligasi (Sucorinvest Bond Fund)", "amount_native": "13000000", "currency": "IDR", "note": "Goal: Pendidikan Noah, Obligasi category. Fund: Sucorinvest Bond Fund. Pembelian Berhasil.", "confidence": 0.72}, {"entry_type": "buy", "instrument_name": "Mobil - Pasar Uang (Majoris Pasar Uang Indonesia)", "amount_native": "20000000", "currency": "IDR", "note": "Goal: Mobil, Pasar Uang category. Fund: Majoris Pasar Uang Indonesia. Pembelian Berhasil.", "confidence": 0.72}, {"entry_type": "buy", "instrument_name": "Dana Darurat - Pasar Uang (Majoris Pasar Uang Indonesia)", "amount_native": "3000000", "currency": "IDR", "note": "Goal: Dana Darurat, Pasar Uang category. Fund: Majoris Pasar Uang Indonesia. Pembelian Berhasil.", "confidence": 0.72}]}"#;
+        let e = parse_extraction(raw).unwrap();
+        assert_eq!(e.doc_type, "txn_history");
+        assert_eq!(e.entries.len(), 3);
+        for entry in &e.entries {
+            assert_eq!(entry.quantity, None, "must not invent units");
+            assert_eq!(entry.price_native, None, "must not invent NAV");
+            assert!(!entry.force_attention);
+        }
+        assert_eq!(e.entries[0].amount_native.as_deref(), Some("13000000"));
+        assert_eq!(e.entries[1].amount_native.as_deref(), Some("20000000"));
+        assert_eq!(e.entries[2].amount_native.as_deref(), Some("3000000"));
+    }
 }
