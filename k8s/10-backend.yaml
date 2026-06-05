@@ -65,6 +65,13 @@ spec:
                 secretKeyRef:
                   name: portfolio-secrets
                   key: JWT_SECRET
+            # Optional: enables the Telegram chatbot channel when present in the secret.
+            - name: TELEGRAM_BOT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: portfolio-secrets
+                  key: TELEGRAM_BOT_TOKEN
+                  optional: true
           volumeMounts:
             - name: data
               mountPath: /data
