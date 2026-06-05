@@ -31,13 +31,28 @@ pub fn parse_simple_price(body: &serde_json::Value, ext_id: &str, vs: &str) -> R
     Ok(Quote { price, currency: vs.to_uppercase() })
 }
 
+/// Map a response (status + JSON body) to a Quote. Non-success statuses become
+/// HTTP errors carrying the status and CoinGecko's message, so a 403/429 never
+/// masquerades as "price not found".
+pub fn quote_from_response(status: u16, body: &serde_json::Value, ext_id: &str, vs: &str) -> Result<Quote, PriceError> {
+    if !(200..300).contains(&status) {
+        let msg = body.pointer("/status/error_message").and_then(|m| m.as_str()).unwrap_or("");
+        return Err(PriceError::Http(format!("coingecko returned {status}: {msg}")));
+    }
+    parse_simple_price(body, ext_id, vs)
+}
+
 impl CoinGecko {
     /// Latest quote in the given vs currency (see `vs_currency`).
     pub async fn latest_in(&self, ext_id: &str, vs: &str) -> Result<Quote, PriceError> {
         let url = format!("{}/simple/price?ids={}&vs_currencies={}", self.base, ext_id, vs);
-        let resp = self.client.get(&url).send().await.map_err(|e| PriceError::Http(e.to_string()))?;
+        let resp = self.client.get(&url)
+            // CoinGecko rejects requests without a descriptive User-Agent (403).
+            .header("User-Agent", "portfolio-tracker/0.1 (self-hosted)")
+            .send().await.map_err(|e| PriceError::Http(e.to_string()))?;
+        let status = resp.status().as_u16();
         let body: serde_json::Value = resp.json().await.map_err(|e| PriceError::Parse(e.to_string()))?;
-        parse_simple_price(&body, ext_id, vs)
+        quote_from_response(status, &body, ext_id, vs)
     }
 }
 
@@ -66,6 +81,26 @@ mod tests {
         let body = serde_json::json!({ "bitcoin": { "idr": 1182000000.0_f64 } });
         let q = parse_simple_price(&body, "bitcoin", "idr").unwrap();
         assert_eq!(q.price, dec!(1182000000));
+        assert_eq!(q.currency, "IDR");
+    }
+
+    #[test]
+    fn non_success_status_maps_to_http_error_not_notfound() {
+        // CoinGecko 403s (e.g. missing User-Agent) with a JSON error body that
+        // has no coin key; that must surface as an HTTP error with the status,
+        // not a misleading "price not found".
+        let body = serde_json::json!({ "status": { "error_code": 403, "error_message": "Please add a descriptive User-Agent" } });
+        let err = quote_from_response(403, &body, "bitcoin", "idr").unwrap_err();
+        match err {
+            PriceError::Http(msg) => assert!(msg.contains("403"), "missing status: {msg}"),
+            other => panic!("expected Http error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn success_status_parses_quote() {
+        let body = serde_json::json!({ "bitcoin": { "idr": 1128122399.0_f64 } });
+        let q = quote_from_response(200, &body, "bitcoin", "idr").unwrap();
         assert_eq!(q.currency, "IDR");
     }
 
