@@ -126,7 +126,12 @@ function HeroSection({
   snapshots,
 }: HeroProps) {
   const deltaPos = parseNum(dayDeltaIdr) >= 0;
-  const pnlPos = parseNum(unrealizedPnl) >= 0;
+  const pnlN = parseNum(unrealizedPnl);
+  const pnlPos = pnlN >= 0;
+  // P&L as a percentage of cost basis (net worth = market value, so
+  // cost basis = net worth - unrealized P&L).
+  const pnlCostBasis = parseNum(netWorthIdr) - pnlN;
+  const pnlPct = pnlCostBasis !== 0 ? (pnlN / pnlCostBasis) * 100 : 0;
   const savingsN = parseNum(savingsRate);
   const yieldN = parseNum(yieldPct);
   const xirrVal = xirr == null ? "—" : `${(xirr * 100).toFixed(1)}%`;
@@ -199,7 +204,7 @@ function HeroSection({
           tone={pnlPos ? "gain" : "loss"}
           sub={
             <span className={cn("stat-delta num", pnlPos ? "gain" : "loss")}>
-              {pnlPos ? "▲" : "▼"} {formatPct(unrealizedPnl)}
+              {pnlPos ? "▲" : "▼"} {formatPct(pnlPct)}
             </span>
           }
         />

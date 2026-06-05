@@ -11,6 +11,8 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import { render, screen, waitFor } from "@testing-library/react";
+import { http, HttpResponse } from "msw";
+import { server } from "../test/server";
 import DashboardPage from "./DashboardPage";
 
 function renderPage() {
@@ -25,6 +27,23 @@ function renderPage() {
 }
 
 // ── Hero ──────────────────────────────────────────────────────────────────────
+
+test("unrealized P&L sub shows percent of cost basis, not the raw IDR amount", async () => {
+  // net worth 90.000, pnl -10.000 -> cost basis 100.000 -> -10.0%
+  server.use(
+    http.get("/api/portfolio/summary", () =>
+      HttpResponse.json({
+        net_worth_idr: "90000", net_worth_usd: "6",
+        total_unrealized_pnl_idr: "-10000", total_realized_pnl_idr: "0", xirr: null,
+        positions: [], allocation: [],
+      }),
+    ),
+  );
+  renderPage();
+  await waitFor(() => expect(screen.getByText(/▼\s*-10\.0%/)).toBeInTheDocument());
+  // The raw amount must never be rendered as a percentage
+  expect(screen.queryByText(/-10000\.0%/)).not.toBeInTheDocument();
+});
 
 test("dashboard shows net worth IDR from summary", async () => {
   renderPage();
