@@ -63,6 +63,14 @@ export const PositionSchema = z.object({
   unrealized_pnl: z.string(),
   realized_pnl: z.string(),
   income: z.string(),
+  cost_basis_idr_total: z.string(),
+  unrealized_pnl_idr: z.string(),
+  unrealized_price_pnl_idr: z.string(),
+  unrealized_fx_pnl_idr: z.string(),
+  realized_pnl_idr: z.string(),
+  realized_price_pnl_idr: z.string(),
+  realized_fx_pnl_idr: z.string(),
+  fx_incomplete: z.boolean(),
 });
 export type Position = z.infer<typeof PositionSchema>;
 
@@ -84,6 +92,11 @@ export const PortfolioSummarySchema = z.object({
   net_worth_usd: z.string(),
   total_unrealized_pnl_idr: z.string(),
   total_realized_pnl_idr: z.string(),
+  total_unrealized_price_pnl_idr: z.string(),
+  total_unrealized_fx_pnl_idr: z.string(),
+  total_realized_price_pnl_idr: z.string(),
+  total_realized_fx_pnl_idr: z.string(),
+  fx_incomplete: z.boolean(),
   xirr: z.number().nullable(),
   positions: z.array(PositionSchema),
   allocation: z.array(CategoryAllocationSchema),
@@ -95,6 +108,8 @@ export const SnapshotSchema = z.object({
   total_idr: z.string(),
   total_usd: z.string(),
   breakdown_json: z.string(),
+  price_pnl_idr: z.string().nullable().optional(),
+  fx_pnl_idr: z.string().nullable().optional(),
 });
 export type Snapshot = z.infer<typeof SnapshotSchema>;
 

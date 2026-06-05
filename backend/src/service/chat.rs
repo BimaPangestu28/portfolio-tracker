@@ -156,6 +156,9 @@ mod tests {
         PortfolioSummary {
             net_worth_idr: dec!(4875000), net_worth_usd: dec!(300),
             total_unrealized_pnl_idr: dec!(100), total_realized_pnl_idr: dec!(0),
+            total_unrealized_price_pnl_idr: dec!(0), total_unrealized_fx_pnl_idr: dec!(0),
+            total_realized_price_pnl_idr: dec!(0), total_realized_fx_pnl_idr: dec!(0),
+            fx_incomplete: false,
             xirr: Some(0.168), positions: vec![], allocation: vec![],
         }
     }
@@ -168,6 +171,14 @@ mod tests {
             market_value_native: dec!(1000000), market_value_idr: dec!(1000000),
             market_value_usd: dec!(62), unrealized_pnl: dec!(100000),
             realized_pnl: dec!(0), income: dec!(0),
+            cost_basis_idr_total: dec!(0),
+            unrealized_pnl_idr: dec!(0),
+            unrealized_price_pnl_idr: dec!(0),
+            unrealized_fx_pnl_idr: dec!(0),
+            realized_pnl_idr: dec!(0),
+            realized_price_pnl_idr: dec!(0),
+            realized_fx_pnl_idr: dec!(0),
+            fx_incomplete: false,
         }
     }
 

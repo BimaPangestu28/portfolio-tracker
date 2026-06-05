@@ -35,6 +35,9 @@ test("unrealized P&L sub shows percent of cost basis, not the raw IDR amount", a
       HttpResponse.json({
         net_worth_idr: "90000", net_worth_usd: "6",
         total_unrealized_pnl_idr: "-10000", total_realized_pnl_idr: "0", xirr: null,
+        total_unrealized_price_pnl_idr: "-10000", total_unrealized_fx_pnl_idr: "0",
+        total_realized_price_pnl_idr: "0", total_realized_fx_pnl_idr: "0",
+        fx_incomplete: false,
         positions: [], allocation: [],
       }),
     ),
@@ -242,11 +245,18 @@ test("hero badge warns when held positions have stale prices", async () => {
       HttpResponse.json({
         net_worth_idr: "1000000", net_worth_usd: "61",
         total_unrealized_pnl_idr: "0", total_realized_pnl_idr: "0", xirr: null,
+        total_unrealized_price_pnl_idr: "0", total_unrealized_fx_pnl_idr: "0",
+        total_realized_price_pnl_idr: "0", total_realized_fx_pnl_idr: "0",
+        fx_incomplete: false,
         positions: [{
           instrument_id: 10, quantity: "3.23", avg_cost: "2600000",
           cost_basis_total: "8398000", latest_price: "2600000", price_stale: true,
           market_value_native: "8398000", market_value_idr: "8398000",
           market_value_usd: "515", unrealized_pnl: "0", realized_pnl: "0", income: "0",
+          cost_basis_idr_total: "8398000", unrealized_pnl_idr: "0",
+          unrealized_price_pnl_idr: "0", unrealized_fx_pnl_idr: "0",
+          realized_pnl_idr: "0", realized_price_pnl_idr: "0", realized_fx_pnl_idr: "0",
+          fx_incomplete: false,
         }],
         allocation: [],
       }),
@@ -295,4 +305,44 @@ test("dashboard renders Refresh harga button", async () => {
   await waitFor(() =>
     expect(screen.getByRole("button", { name: /Refresh harga/i })).toBeInTheDocument(),
   );
+});
+
+// ── FX breakdown on Unrealized P&L card ──────────────────────────────────────
+
+test("unrealized P&L card shows the price vs FX breakdown", async () => {
+  server.use(
+    http.get("/api/portfolio/summary", () =>
+      HttpResponse.json({
+        net_worth_idr: "2550000", net_worth_usd: "150",
+        total_unrealized_pnl_idr: "950000", total_realized_pnl_idr: "0", xirr: null,
+        total_unrealized_price_pnl_idr: "850000", total_unrealized_fx_pnl_idr: "100000",
+        total_realized_price_pnl_idr: "0", total_realized_fx_pnl_idr: "0",
+        fx_incomplete: false,
+        positions: [], allocation: [],
+      }),
+    ),
+  );
+  renderPage();
+  await waitFor(() =>
+    expect(screen.getByText(/Harga\s*Rp\s*850\.000/)).toBeInTheDocument(),
+  );
+  expect(screen.getByText(/FX\s*Rp\s*100\.000/)).toBeInTheDocument();
+  expect(screen.queryByText("FX?")).not.toBeInTheDocument();
+});
+
+test("unrealized P&L card warns when FX data is incomplete", async () => {
+  server.use(
+    http.get("/api/portfolio/summary", () =>
+      HttpResponse.json({
+        net_worth_idr: "2550000", net_worth_usd: "150",
+        total_unrealized_pnl_idr: "950000", total_realized_pnl_idr: "0", xirr: null,
+        total_unrealized_price_pnl_idr: "850000", total_unrealized_fx_pnl_idr: "100000",
+        total_realized_price_pnl_idr: "0", total_realized_fx_pnl_idr: "0",
+        fx_incomplete: true,
+        positions: [], allocation: [],
+      }),
+    ),
+  );
+  renderPage();
+  await waitFor(() => expect(screen.getByText("FX?")).toBeInTheDocument());
 });

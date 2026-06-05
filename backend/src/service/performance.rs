@@ -159,10 +159,10 @@ mod tests {
     async fn deposit_does_not_create_return() {
         let db = crate::db::connect("sqlite::memory:").await.unwrap();
         // Two snapshots: 1,000,000 -> 2,000,000 IDR, but caused by a deposit.
-        crate::repo::snapshots::upsert(&db, "2026-01-01", "1000000", "65", "{}")
+        crate::repo::snapshots::upsert(&db, "2026-01-01", "1000000", "65", "{}", None, None)
             .await
             .unwrap();
-        crate::repo::snapshots::upsert(&db, "2026-01-02", "2000000", "130", "{}")
+        crate::repo::snapshots::upsert(&db, "2026-01-02", "2000000", "130", "{}", None, None)
             .await
             .unwrap();
         // Need an account + instrument to satisfy FKs for the txn.
@@ -199,10 +199,10 @@ mod tests {
     async fn deposit_does_not_create_return_usd_base() {
         let db = crate::db::connect("sqlite::memory:").await.unwrap();
         // Snapshots' USD totals also double via the deposit -> TWR must net to 0.
-        crate::repo::snapshots::upsert(&db, "2026-01-01", "1000000", "65", "{}")
+        crate::repo::snapshots::upsert(&db, "2026-01-01", "1000000", "65", "{}", None, None)
             .await
             .unwrap();
-        crate::repo::snapshots::upsert(&db, "2026-01-02", "2000000", "130", "{}")
+        crate::repo::snapshots::upsert(&db, "2026-01-02", "2000000", "130", "{}", None, None)
             .await
             .unwrap();
         let acc = crate::repo::accounts::create(
@@ -236,7 +236,7 @@ mod tests {
     #[tokio::test]
     async fn insufficient_when_one_snapshot() {
         let db = crate::db::connect("sqlite::memory:").await.unwrap();
-        crate::repo::snapshots::upsert(&db, "2026-01-01", "1000000", "65", "{}")
+        crate::repo::snapshots::upsert(&db, "2026-01-01", "1000000", "65", "{}", None, None)
             .await
             .unwrap();
         let view = build_performance(&db, "idr", "all").await.unwrap();

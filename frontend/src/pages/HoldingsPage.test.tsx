@@ -27,9 +27,14 @@ test("formats native-currency fields (avg cost, latest price, P&L) in IDR for an
       HttpResponse.json({
         net_worth_idr: "39600000",
         net_worth_usd: "2475",
-        total_unrealized_pnl_idr: "0",
+        total_unrealized_pnl_idr: "2400000",
         total_realized_pnl_idr: "0",
         xirr: null,
+        total_unrealized_price_pnl_idr: "2400000",
+        total_unrealized_fx_pnl_idr: "0",
+        total_realized_price_pnl_idr: "0",
+        total_realized_fx_pnl_idr: "0",
+        fx_incomplete: false,
         positions: [
           {
             instrument_id: 1,
@@ -44,6 +49,14 @@ test("formats native-currency fields (avg cost, latest price, P&L) in IDR for an
             unrealized_pnl: "2400000",
             realized_pnl: "0",
             income: "0",
+            cost_basis_idr_total: "39600000",
+            unrealized_pnl_idr: "2400000",
+            unrealized_price_pnl_idr: "2400000",
+            unrealized_fx_pnl_idr: "0",
+            realized_pnl_idr: "0",
+            realized_price_pnl_idr: "0",
+            realized_fx_pnl_idr: "0",
+            fx_incomplete: false,
           },
         ],
         allocation: [],
@@ -85,9 +98,14 @@ test("formats native-currency fields in USD for a USD-denominated instrument", a
       HttpResponse.json({
         net_worth_idr: "16000000",
         net_worth_usd: "1000",
-        total_unrealized_pnl_idr: "0",
+        total_unrealized_pnl_idr: "4000000",
         total_realized_pnl_idr: "0",
         xirr: null,
+        total_unrealized_price_pnl_idr: "4000000",
+        total_unrealized_fx_pnl_idr: "0",
+        total_realized_price_pnl_idr: "0",
+        total_realized_fx_pnl_idr: "0",
+        fx_incomplete: false,
         positions: [
           {
             instrument_id: 2,
@@ -102,6 +120,14 @@ test("formats native-currency fields in USD for a USD-denominated instrument", a
             unrealized_pnl: "250",
             realized_pnl: "0",
             income: "0",
+            cost_basis_idr_total: "12000000",
+            unrealized_pnl_idr: "4000000",
+            unrealized_price_pnl_idr: "4000000",
+            unrealized_fx_pnl_idr: "0",
+            realized_pnl_idr: "0",
+            realized_price_pnl_idr: "0",
+            realized_fx_pnl_idr: "0",
+            fx_incomplete: false,
           },
         ],
         allocation: [],
@@ -146,4 +172,72 @@ test("renders the Holdings page header and table headers", async () => {
     const instrHeader = screen.queryByText("Instrumen");
     expect(emptyState || instrHeader).toBeTruthy();
   });
+});
+
+test("shows FX-aware P&L with an FX sub-line for a USD instrument", async () => {
+  server.use(
+    http.get("/api/portfolio/summary", () =>
+      HttpResponse.json({
+        net_worth_idr: "16000000",
+        net_worth_usd: "1000",
+        total_unrealized_pnl_idr: "4750000",
+        total_realized_pnl_idr: "0",
+        total_unrealized_price_pnl_idr: "4000000",
+        total_unrealized_fx_pnl_idr: "750000",
+        total_realized_price_pnl_idr: "0",
+        total_realized_fx_pnl_idr: "0",
+        fx_incomplete: false,
+        xirr: null,
+        positions: [
+          {
+            instrument_id: 2,
+            quantity: "5",
+            avg_cost: "150",
+            cost_basis_total: "750",
+            latest_price: "200",
+            price_stale: false,
+            market_value_native: "1000",
+            market_value_idr: "16000000",
+            market_value_usd: "1000",
+            unrealized_pnl: "250",
+            realized_pnl: "0",
+            income: "0",
+            cost_basis_idr_total: "11250000",
+            unrealized_pnl_idr: "4750000",
+            unrealized_price_pnl_idr: "4000000",
+            unrealized_fx_pnl_idr: "750000",
+            realized_pnl_idr: "0",
+            realized_price_pnl_idr: "0",
+            realized_fx_pnl_idr: "0",
+            fx_incomplete: false,
+          },
+        ],
+        allocation: [],
+      }),
+    ),
+    http.get("/api/instruments", () =>
+      HttpResponse.json([
+        {
+          id: 2,
+          symbol: "AAPL",
+          name: "Apple Inc.",
+          instrument_type: "stock",
+          native_currency: "USD",
+          category_id: null,
+          price_source: "yahoo",
+          decimals: 2,
+          note: null,
+        },
+      ]),
+    ),
+  );
+
+  render(<HoldingsPage />, { wrapper });
+
+  // Primary P&L is the FX-aware IDR figure (4.75M), not native x current fx (4M).
+  expect(await screen.findByText(/Rp\s*4\.750\.000/)).toBeInTheDocument();
+  // FX contribution is broken out on its own sub-line.
+  expect(screen.getByText(/FX\s*\+\s*Rp\s*750\.000/)).toBeInTheDocument();
+  // Percent is against the purchase-rate IDR cost basis: 4.75M / 11.25M = 42.2%.
+  expect(screen.getByText(/42[.,]2\s*%/)).toBeInTheDocument();
 });

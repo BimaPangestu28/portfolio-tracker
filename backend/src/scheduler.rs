@@ -12,7 +12,15 @@ pub fn spawn(db: Db, interval: Duration) {
                 Ok(s) => {
                     let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
                     let breakdown = serde_json::to_string(&s.allocation).unwrap_or_else(|_| "[]".into());
-                    let _ = crate::repo::snapshots::upsert(&db, &today, &s.net_worth_idr.to_string(), &s.net_worth_usd.to_string(), &breakdown).await;
+                    let _ = crate::repo::snapshots::upsert(
+                        &db,
+                        &today,
+                        &s.net_worth_idr.to_string(),
+                        &s.net_worth_usd.to_string(),
+                        &breakdown,
+                        Some(&s.total_unrealized_price_pnl_idr.to_string()),
+                        Some(&s.total_unrealized_fx_pnl_idr.to_string()),
+                    ).await;
                 }
                 Err(e) => tracing::warn!("snapshot build error: {e}"),
             }

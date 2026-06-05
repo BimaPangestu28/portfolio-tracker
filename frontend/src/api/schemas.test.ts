@@ -4,12 +4,19 @@ test("parses a portfolio summary", () => {
   const json = {
     net_worth_idr: "4875000", net_worth_usd: "300",
     total_unrealized_pnl_idr: "100", total_realized_pnl_idr: "0",
+    total_unrealized_price_pnl_idr: "80", total_unrealized_fx_pnl_idr: "20",
+    total_realized_price_pnl_idr: "0", total_realized_fx_pnl_idr: "0",
+    fx_incomplete: false,
     xirr: 1.68,
     positions: [{
       instrument_id: 1, quantity: "2", avg_cost: "100", cost_basis_total: "200",
       latest_price: "150", price_stale: false, market_value_native: "300",
       market_value_idr: "4875000", market_value_usd: "300",
       unrealized_pnl: "100", realized_pnl: "0", income: "0",
+      cost_basis_idr_total: "200", unrealized_pnl_idr: "100",
+      unrealized_price_pnl_idr: "80", unrealized_fx_pnl_idr: "20",
+      realized_pnl_idr: "0", realized_price_pnl_idr: "0", realized_fx_pnl_idr: "0",
+      fx_incomplete: false,
     }],
     allocation: [{
       category_id: 1, name: "Crypto", target_pct: "100", tolerance_band_pct: "5",
@@ -26,7 +33,11 @@ test("parses a portfolio summary", () => {
 test("xirr may be null", () => {
   const parsed = PortfolioSummarySchema.parse({
     net_worth_idr: "0", net_worth_usd: "0", total_unrealized_pnl_idr: "0",
-    total_realized_pnl_idr: "0", xirr: null, positions: [], allocation: [],
+    total_realized_pnl_idr: "0",
+    total_unrealized_price_pnl_idr: "0", total_unrealized_fx_pnl_idr: "0",
+    total_realized_price_pnl_idr: "0", total_realized_fx_pnl_idr: "0",
+    fx_incomplete: false,
+    xirr: null, positions: [], allocation: [],
   });
   expect(parsed.xirr).toBeNull();
 });
