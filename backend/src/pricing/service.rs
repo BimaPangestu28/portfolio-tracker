@@ -29,6 +29,7 @@ pub async fn refresh_all(db: &Db) -> anyhow::Result<()> {
     let today = Utc::now().format("%Y-%m-%d").to_string();
     let cg = CoinGecko::new();
     let fx = FxClient::new();
+    let bibit = crate::pricing::bibit::BibitNav::new();
 
     // Keep the fresh rate around: the gold-derived source needs it below.
     // On fetch failure, fall back to the last stored rate.
@@ -57,6 +58,15 @@ pub async fn refresh_all(db: &Db) -> anyhow::Result<()> {
             match crate::pricing::yahoo::Yahoo::new().latest(ext).await {
                 Ok(q) => { let _ = prices::upsert_latest(db, ins.id, q.price, &q.currency, "yahoo", &today).await; }
                 Err(e) => tracing::warn!("yahoo price refresh failed for {}: {e}", ins.symbol),
+            }
+        }
+        // Indonesian mutual fund NAV scraped from Bibit's public product page.
+        // Store under the page's NAV date (T-1), not today — keeps staleness honest
+        // and avoids duplicating the same NAV under multiple dates.
+        if let Some(code) = ins.price_source.strip_prefix("bibit:") {
+            match bibit.latest(code).await {
+                Ok(q) => { let _ = prices::upsert_latest(db, ins.id, q.price, "IDR", "bibit", &q.as_of).await; }
+                Err(e) => tracing::warn!("bibit nav refresh failed for {}: {e}", ins.symbol),
             }
         }
         // Derived source: gold futures (USD/oz via Yahoo) × USD/IDR → IDR/gram.

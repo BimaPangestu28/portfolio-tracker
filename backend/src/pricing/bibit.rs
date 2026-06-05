@@ -4,7 +4,6 @@ use std::str::FromStr;
 
 /// A fund NAV quote: price per unit in IDR and the NAV date printed on the page.
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub struct NavQuote {
     pub price: Decimal,
     pub as_of: String, // "YYYY-MM-DD" from productDetail.nav.date
@@ -13,7 +12,6 @@ pub struct NavQuote {
 /// Extract the NAV from a Bibit product page. The page is Next.js
 /// server-rendered: full fund data sits in a `<script id="__NEXT_DATA__">`
 /// JSON blob at `props.pageProps.productDetail.nav.{value,date}`.
-#[allow(dead_code)]
 pub fn parse_nav(html: &str) -> Result<NavQuote, PriceError> {
     let marker = "<script id=\"__NEXT_DATA__\"";
     let start = html.find(marker).ok_or_else(|| PriceError::Parse("__NEXT_DATA__ script not found".into()))?;
@@ -28,7 +26,9 @@ pub fn parse_nav(html: &str) -> Result<NavQuote, PriceError> {
     let as_of = nav.get("date").and_then(|d| d.as_str())
         .ok_or_else(|| PriceError::Parse("nav.date missing".into()))?
         .to_string();
-    // Go through the raw JSON number's string form, not f64, to avoid float artifacts.
+    // serde_json stringifies numbers with shortest-round-trip formatting, so
+    // parsing that string into Decimal recovers the exact literal for
+    // NAV-range values (no observable float artifacts).
     let raw = nav.get("value").ok_or_else(|| PriceError::Parse("nav.value missing".into()))?;
     let price = Decimal::from_str(&raw.to_string())
         .map_err(|e| PriceError::Parse(format!("nav.value not a decimal: {e}")))?;
@@ -39,13 +39,11 @@ pub fn parse_nav(html: &str) -> Result<NavQuote, PriceError> {
 }
 
 /// Fetches NAV from Bibit's public product page (no auth; desktop UA).
-#[allow(dead_code)]
 pub struct BibitNav {
     base: String,
     client: reqwest::Client,
 }
 
-#[allow(dead_code)]
 impl BibitNav {
     pub fn new() -> Self {
         Self { base: "https://bibit.id/reksadana".into(), client: reqwest::Client::new() }
