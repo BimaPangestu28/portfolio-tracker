@@ -128,6 +128,8 @@ pub async fn build_summary(db: &Db) -> anyhow::Result<PortfolioSummary> {
     let fx_incomplete = positions.iter().any(|p| p.fx_incomplete);
 
     // XIRR from cashflows: buys/deposits negative, sells/dividends positive, plus current net worth as terminal inflow.
+    // Intentionally reads the original txns (not the gap-filled per-instrument clones):
+    // XIRR is valued via fx_to_usd, which resolve_fx_gaps does not touch.
     let mut flows: Vec<CashFlow> = Vec::new();
     for t in &all_txns {
         let amount_usd = ((t.quantity * t.price_native + t.fee_native) * t.fx_to_usd).to_string().parse::<f64>().unwrap_or(0.0);
@@ -215,6 +217,11 @@ mod tests {
         assert_eq!(s.total_unrealized_pnl_idr, dec("950000").unwrap());
         assert_eq!(s.total_unrealized_price_pnl_idr, dec("850000").unwrap());
         assert_eq!(s.total_unrealized_fx_pnl_idr, dec("100000").unwrap());
+        // Aggregate invariant: decomposition sums to the total exactly.
+        assert_eq!(
+            s.total_unrealized_pnl_idr,
+            s.total_unrealized_price_pnl_idr + s.total_unrealized_fx_pnl_idr
+        );
         let p = &s.positions[0];
         assert!(!p.fx_incomplete);
         assert_eq!(p.unrealized_fx_pnl_idr, dec("100000").unwrap());
