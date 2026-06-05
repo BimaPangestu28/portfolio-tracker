@@ -15,12 +15,14 @@ mod wa_state;
 
 use db::Db;
 use std::sync::{Arc, Mutex};
+use telegram::state::{SharedTgState, TgState};
 use wa_state::{SharedWaState, WaState};
 
 #[derive(Clone)]
 pub struct AppState {
     pub db: Db,
     pub wa: SharedWaState,
+    pub tg: SharedTgState,
 }
 
 #[tokio::main]
@@ -34,7 +36,9 @@ async fn main() -> anyhow::Result<()> {
     let state = AppState {
         db: db.clone(),
         wa: Arc::new(Mutex::new(WaState::default())),
+        tg: Arc::new(Mutex::new(TgState::default())),
     };
+    telegram::spawn(db.clone(), state.tg.clone());
     scheduler::spawn(db, std::time::Duration::from_secs(3600));
     let app = api::router(state);
     let bind_addr = std::env::var("BIND_ADDR").unwrap_or_else(|_| "127.0.0.1:8080".into());
