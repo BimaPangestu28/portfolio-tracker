@@ -45,6 +45,12 @@ spec:
               value: "claude-haiku-4-5-20251001"
             - name: GRAPHITI_TELEMETRY_ENABLED
               value: "false"
+          resources:
+            requests:
+              memory: 128Mi
+              cpu: 100m
+            limits:
+              memory: 512Mi
           readinessProbe:
             httpGet:
               path: /health

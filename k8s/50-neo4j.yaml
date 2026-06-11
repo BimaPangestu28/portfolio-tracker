@@ -40,6 +40,20 @@ spec:
                 secretKeyRef:
                   name: portfolio-secrets
                   key: NEO4J_AUTH
+            # Cap the JVM explicitly: without these Neo4j sizes its heap from
+            # host memory and can starve the rest of the node.
+            - name: NEO4J_server_memory_heap_initial__size
+              value: "512m"
+            - name: NEO4J_server_memory_heap_max__size
+              value: "512m"
+            - name: NEO4J_server_memory_pagecache_size
+              value: "256m"
+          resources:
+            requests:
+              memory: 768Mi
+              cpu: 250m
+            limits:
+              memory: 1536Mi
           volumeMounts:
             - name: data
               mountPath: /data
@@ -51,7 +65,8 @@ spec:
           livenessProbe:
             tcpSocket:
               port: 7687
-            initialDelaySeconds: 60
+            # Generous: first boot on a slow PVC creates the initial database.
+            initialDelaySeconds: 120
             periodSeconds: 20
       volumes:
         - name: data
