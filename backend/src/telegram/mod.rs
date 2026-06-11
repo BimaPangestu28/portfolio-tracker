@@ -220,7 +220,7 @@ pub fn pick_attachment(message: &TgMessage) -> AttachmentPick {
 }
 
 const LINK_OK_REPLY: &str =
-    "✅ Telegram tertaut. Silakan tanya apa saja tentang portofoliomu.";
+    "✅ Telegram tertaut. Aku bisa bantu catat todo, pasang pengingat, dan jawab pertanyaan soal portofoliomu.";
 const LINK_HINT_REPLY: &str =
     "Kode tidak valid atau kedaluwarsa. Buka halaman Telegram di web UI untuk membuat kode tautan.";
 const ANSWER_FAILED_REPLY: &str =
