@@ -152,12 +152,20 @@ pub struct ClaudeClient {
     client: reqwest::Client,
 }
 
+/// Per-request deadline. Without one, a hung connection blocks every caller
+/// that awaits the LLM — including the Telegram poller running the agent loop.
+const REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
+
 impl ClaudeClient {
     /// Reads ANTHROPIC_API_KEY and optional INGEST_MODEL from the environment.
     pub fn from_env() -> Result<Self, LlmError> {
         let api_key = std::env::var("ANTHROPIC_API_KEY").map_err(|_| LlmError::NoKey)?;
         let model = std::env::var("INGEST_MODEL").unwrap_or_else(|_| "claude-sonnet-4-6".into());
-        Ok(Self { api_key, model, client: reqwest::Client::new() })
+        let client = reqwest::Client::builder()
+            .timeout(REQUEST_TIMEOUT)
+            .build()
+            .map_err(|e| LlmError::Http(e.to_string()))?;
+        Ok(Self { api_key, model, client })
     }
 
     /// Send a single user message (system + parts) and return the concatenated text output.
