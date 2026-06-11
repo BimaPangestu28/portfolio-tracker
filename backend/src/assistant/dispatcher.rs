@@ -15,6 +15,8 @@ pub async fn dispatch(db: &Db, name: &str, input: &serde_json::Value) -> Result<
         "list_reminders" => list_reminders(db).await,
         "cancel_reminder" => cancel_reminder(db, input).await,
         "get_portfolio_summary" => portfolio_summary(db).await,
+        "search_memory" => search_memory(input).await,
+        "remember" => remember(input).await,
         _ => Err(format!("unknown tool: {name}")),
     }
 }
@@ -149,6 +151,45 @@ async fn portfolio_summary(db: &Db) -> Result<String, String> {
     Ok(crate::service::chat::build_context(&summary, &instruments))
 }
 
+/// How many facts an explicit memory search returns to the model — larger
+/// than the auto-inject limit because the user asked for recall.
+const TOOL_SEARCH_LIMIT: u32 = 15;
+
+async fn search_memory(input: &serde_json::Value) -> Result<String, String> {
+    let query = str_arg(input, "query").ok_or("missing required argument 'query'")?;
+    let Some(memory) = super::memory::MemoryClient::from_env() else {
+        return Err("long-term memory is not configured".into());
+    };
+    let facts = memory
+        .try_search(query, TOOL_SEARCH_LIMIT)
+        .await
+        .map_err(|e| format!("long-term memory is temporarily unreachable: {e}"))?;
+    if facts.is_empty() {
+        return Ok("no memories found for that query".into());
+    }
+    let mut out = String::new();
+    for f in facts {
+        out.push_str(&format!("- {}", f.fact));
+        if let Some(valid_at) = &f.valid_at {
+            out.push_str(&format!(" (as of {valid_at})"));
+        }
+        out.push('\n');
+    }
+    Ok(out)
+}
+
+async fn remember(input: &serde_json::Value) -> Result<String, String> {
+    let note = str_arg(input, "note").ok_or("missing required argument 'note'")?;
+    let Some(memory) = super::memory::MemoryClient::from_env() else {
+        return Err("long-term memory is not configured".into());
+    };
+    memory
+        .add_episode(note, "manual")
+        .await
+        .map_err(|e| format!("could not save the note: {e}"))?;
+    Ok("noted — saved to long-term memory".into())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -269,6 +310,29 @@ mod tests {
         let db = mem_db().await;
         let err = dispatch(&db, "fly_to_moon", &serde_json::json!({})).await.unwrap_err();
         assert!(err.contains("fly_to_moon"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn search_memory_requires_query_and_errors_when_unconfigured() {
+        let db = mem_db().await;
+        let err = dispatch(&db, "search_memory", &serde_json::json!({})).await.unwrap_err();
+        assert!(err.contains("query"), "{err}");
+        // Tests never set MEMORY_SERVICE_URL, so memory is unconfigured here.
+        let err = dispatch(&db, "search_memory", &serde_json::json!({ "query": "anak" }))
+            .await
+            .unwrap_err();
+        assert!(err.contains("not configured"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn remember_requires_note_and_errors_when_unconfigured() {
+        let db = mem_db().await;
+        let err = dispatch(&db, "remember", &serde_json::json!({})).await.unwrap_err();
+        assert!(err.contains("note"), "{err}");
+        let err = dispatch(&db, "remember", &serde_json::json!({ "note": "paspor di laci" }))
+            .await
+            .unwrap_err();
+        assert!(err.contains("not configured"), "{err}");
     }
 
     #[tokio::test]

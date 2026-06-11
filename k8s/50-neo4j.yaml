@@ -1,0 +1,86 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: neo4j-data
+  namespace: portfolio
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: neo4j
+  namespace: portfolio
+spec:
+  replicas: 1
+  # Single-writer graph store on a ReadWriteOnce volume.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: neo4j
+  template:
+    metadata:
+      labels:
+        app: neo4j
+    spec:
+      containers:
+        - name: neo4j
+          image: neo4j:5.26-community
+          ports:
+            - containerPort: 7687
+          env:
+            # Format: "neo4j/<password>" — must match NEO4J_PASSWORD used by
+            # the memory-service.
+            - name: NEO4J_AUTH
+              valueFrom:
+                secretKeyRef:
+                  name: portfolio-secrets
+                  key: NEO4J_AUTH
+            # Cap the JVM explicitly: without these Neo4j sizes its heap from
+            # host memory and can starve the rest of the node.
+            - name: NEO4J_server_memory_heap_initial__size
+              value: "512m"
+            - name: NEO4J_server_memory_heap_max__size
+              value: "512m"
+            - name: NEO4J_server_memory_pagecache_size
+              value: "256m"
+          resources:
+            requests:
+              memory: 768Mi
+              cpu: 250m
+            limits:
+              memory: 1536Mi
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          readinessProbe:
+            tcpSocket:
+              port: 7687
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 7687
+            # Generous: first boot on a slow PVC creates the initial database.
+            initialDelaySeconds: 120
+            periodSeconds: 20
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: neo4j-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: neo4j
+  namespace: portfolio
+spec:
+  selector:
+    app: neo4j
+  ports:
+    - port: 7687
+      targetPort: 7687

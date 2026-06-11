@@ -22,7 +22,10 @@ Execute todo/reminder actions immediately without asking for confirmation, then 
 you did, including ids and times (times in WIB). All datetimes in tool arguments must be RFC3339 \
 with the +07:00 offset — the user's timezone is WIB (Asia/Jakarta). You are replying inside a \
 plain-text messenger: do NOT use any Markdown (no tables, no headers, no **bold**). Write short \
-lines; for lists use simple dashes or emoji.";
+lines; for lists use simple dashes or emoji. You have long-term memory: relevant known facts about the owner may be listed \
+below — treat them as context, not unquestionable truth. Use the search_memory \
+tool for explicit recall questions, and the remember tool when the user asks \
+you to remember a fact.";
 
 /// The slice of the LLM client the agent loop needs — a seam for test doubles.
 #[async_trait::async_trait]
@@ -53,6 +56,14 @@ fn system_prompt(now_wib: &str) -> String {
     format!("{SYSTEM}\n\nCurrent datetime: {now_wib}")
 }
 
+/// How many facts are auto-injected into the system prompt per message.
+const INJECT_FACT_LIMIT: u32 = 8;
+
+/// Full system prompt: persona + current time + any long-term-memory facts.
+fn compose_system(now_wib: &str, facts: &[super::memory::MemoryFact]) -> String {
+    format!("{}{}", system_prompt(now_wib), super::memory::render_facts_block(facts))
+}
+
 /// Prior turns as plain-text messages, then the new user message. Leading
 /// assistant turns are dropped (API requires the first message to be a user's).
 fn build_messages(history: &[(String, String)], user_msg: &str) -> Vec<serde_json::Value> {
@@ -77,6 +88,28 @@ fn tool_result_block(id: &str, outcome: &Result<String, String>) -> serde_json::
     }
 }
 
+/// Persist the finished turn and (when memory is configured) ingest it as an
+/// episode, fire-and-forget — ingestion must never delay or fail the reply.
+async fn store_and_ingest(
+    db: &Db,
+    memory: Option<super::memory::MemoryClient>,
+    channel: &str,
+    user_msg: &str,
+    reply: &str,
+) -> anyhow::Result<()> {
+    crate::repo::chat::add(db, "user", user_msg, channel).await?;
+    crate::repo::chat::add(db, "assistant", reply, channel).await?;
+    if let Some(client) = memory {
+        let episode = format!("User: {user_msg}\nAssistant: {reply}");
+        tokio::spawn(async move {
+            if let Err(e) = client.add_episode(&episode, "chat").await {
+                tracing::warn!("memory ingest failed: {e}");
+            }
+        });
+    }
+    Ok(())
+}
+
 /// Run the agent loop for one inbound message. Stores the user message and
 /// the final reply in chat history only on success (no orphaned rows).
 pub async fn handle_message<M: ToolModel + Sync>(
@@ -86,7 +119,12 @@ pub async fn handle_message<M: ToolModel + Sync>(
     user_msg: &str,
 ) -> anyhow::Result<String> {
     let now_wib = chrono::Utc::now().with_timezone(&super::time::wib()).to_rfc3339();
-    let system = system_prompt(&now_wib);
+    let memory = super::memory::MemoryClient::from_env();
+    let facts = match &memory {
+        Some(client) => client.search(user_msg, INJECT_FACT_LIMIT).await,
+        None => Vec::new(),
+    };
+    let system = compose_system(&now_wib, &facts);
     let tools = super::tools::definitions();
     let history: Vec<(String, String)> =
         crate::repo::chat::recent_by_channel(db, channel, HISTORY_LIMIT)
@@ -112,8 +150,7 @@ pub async fn handle_message<M: ToolModel + Sync>(
             Ok(blocks) => blocks,
             Err(e) => {
                 tracing::warn!("assistant: unusable model response ({e}); using fallback reply");
-                crate::repo::chat::add(db, "user", user_msg, channel).await?;
-                crate::repo::chat::add(db, "assistant", NO_TEXT_REPLY, channel).await?;
+                store_and_ingest(db, memory.clone(), channel, user_msg, NO_TEXT_REPLY).await?;
                 return Ok(NO_TEXT_REPLY.to_string());
             }
         };
@@ -138,8 +175,7 @@ pub async fn handle_message<M: ToolModel + Sync>(
             if reply.trim().is_empty() {
                 reply = NO_TEXT_REPLY.to_string();
             }
-            crate::repo::chat::add(db, "user", user_msg, channel).await?;
-            crate::repo::chat::add(db, "assistant", &reply, channel).await?;
+            store_and_ingest(db, memory.clone(), channel, user_msg, &reply).await?;
             return Ok(reply);
         }
 
@@ -157,8 +193,7 @@ pub async fn handle_message<M: ToolModel + Sync>(
         messages.push(serde_json::json!({ "role": "user", "content": results }));
     }
 
-    crate::repo::chat::add(db, "user", user_msg, channel).await?;
-    crate::repo::chat::add(db, "assistant", ITERATION_CAP_REPLY, channel).await?;
+    store_and_ingest(db, memory, channel, user_msg, ITERATION_CAP_REPLY).await?;
     Ok(ITERATION_CAP_REPLY.to_string())
 }
 
@@ -326,5 +361,31 @@ mod tests {
         let prompt = system_prompt("2026-06-11T15:00:00+07:00");
         assert!(prompt.contains("2026-06-11T15:00:00+07:00"));
         assert!(prompt.contains("+07:00"));
+    }
+
+    #[test]
+    fn compose_system_without_facts_is_just_the_prompt() {
+        let system = compose_system("2026-06-11T15:00:00+07:00", &[]);
+        assert_eq!(system, system_prompt("2026-06-11T15:00:00+07:00"));
+    }
+
+    #[test]
+    fn compose_system_appends_the_facts_block() {
+        let facts = vec![crate::assistant::memory::MemoryFact {
+            fact: "Noah is the owner's son".into(),
+            valid_at: None,
+            name: "IS_SON_OF".into(),
+        }];
+        let system = compose_system("2026-06-11T15:00:00+07:00", &facts);
+        assert!(system.starts_with(&system_prompt("2026-06-11T15:00:00+07:00")), "{system}");
+        assert!(system.contains("Known facts about the owner"), "{system}");
+        assert!(system.contains("- Noah is the owner's son"), "{system}");
+    }
+
+    #[test]
+    fn system_prompt_mentions_the_memory_tools() {
+        let prompt = system_prompt("2026-06-11T15:00:00+07:00");
+        assert!(prompt.contains("search_memory"), "{prompt}");
+        assert!(prompt.contains("remember"), "{prompt}");
     }
 }

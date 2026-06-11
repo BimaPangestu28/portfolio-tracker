@@ -1,6 +1,6 @@
 //! JSON-schema tool definitions for the assistant agent (Messages API format).
 
-/// All Phase 1 tools in Messages-API `tools` format.
+/// All assistant tools in Messages-API `tools` format.
 pub fn definitions() -> serde_json::Value {
     serde_json::json!([
         {
@@ -62,6 +62,28 @@ pub fn definitions() -> serde_json::Value {
             "name": "get_portfolio_summary",
             "description": "Get the user's current investment portfolio snapshot: net worth, P&L, XIRR, allocation, holdings. Use for any finance/portfolio question.",
             "input_schema": { "type": "object", "properties": {} }
+        },
+        {
+            "name": "search_memory",
+            "description": "Search the owner's long-term memory (facts learned from past conversations and notes). Use for recall questions like 'kapan aku bilang soal X?' or when past context would change the answer.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "query": { "type": "string", "description": "What to look for, in natural language" }
+                },
+                "required": ["query"]
+            }
+        },
+        {
+            "name": "remember",
+            "description": "Save an explicit note to the owner's long-term memory. Use when the user asks you to remember something ('ingat ya ...', 'catat: ...' when it is a fact rather than a task).",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "note": { "type": "string", "description": "The fact to remember, as a standalone sentence" }
+                },
+                "required": ["note"]
+            }
         }
     ])
 }
@@ -71,7 +93,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn defines_all_phase1_tools_with_schemas() {
+    fn defines_all_tools_with_schemas() {
         let defs = definitions();
         let names: Vec<&str> = defs
             .as_array()
@@ -84,7 +106,7 @@ mod tests {
             vec![
                 "create_todo", "list_todos", "complete_todo",
                 "create_reminder", "list_reminders", "cancel_reminder",
-                "get_portfolio_summary",
+                "get_portfolio_summary", "search_memory", "remember",
             ]
         );
         for tool in defs.as_array().unwrap() {
@@ -107,5 +129,7 @@ mod tests {
         );
         assert_eq!(find("complete_todo")["input_schema"]["required"], serde_json::json!(["id"]));
         assert_eq!(find("cancel_reminder")["input_schema"]["required"], serde_json::json!(["id"]));
+        assert_eq!(find("search_memory")["input_schema"]["required"], serde_json::json!(["query"]));
+        assert_eq!(find("remember")["input_schema"]["required"], serde_json::json!(["note"]));
     }
 }

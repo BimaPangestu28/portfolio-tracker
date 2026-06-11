@@ -72,6 +72,9 @@ spec:
                   name: portfolio-secrets
                   key: TELEGRAM_BOT_TOKEN
                   optional: true
+            # Optional: enables long-term memory when the memory-service is deployed.
+            - name: MEMORY_SERVICE_URL
+              value: "http://memory-service:8000"
           volumeMounts:
             - name: data
               mountPath: /data
