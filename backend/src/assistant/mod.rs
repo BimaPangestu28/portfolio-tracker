@@ -3,6 +3,7 @@
 
 pub mod agent;
 pub mod dispatcher;
+pub mod memory;
 pub mod recurrence;
 pub mod reminder_tick;
 pub mod time;
