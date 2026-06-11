@@ -43,8 +43,9 @@ impl MemoryClient {
         Some(Self { base_url: base_url.trim_end_matches('/').to_string(), client })
     }
 
-    /// Search the graph; any failure degrades to "no facts" with a warning.
-    pub async fn search(&self, query: &str, limit: u32) -> Vec<MemoryFact> {
+    /// Search the graph, surfacing failures — the explicit search_memory tool
+    /// must distinguish "nothing found" from "memory unreachable".
+    pub async fn try_search(&self, query: &str, limit: u32) -> Result<Vec<MemoryFact>, String> {
         let url = format!("{}/search", self.base_url);
         let result = self
             .client
@@ -53,17 +54,21 @@ impl MemoryClient {
             .send()
             .await;
         match result {
-            Ok(resp) if resp.status().is_success() => match resp.json::<SearchResponse>().await {
-                Ok(body) => body.facts,
-                Err(e) => {
-                    tracing::warn!("memory search: unreadable response: {e}");
-                    Vec::new()
-                }
-            },
-            Ok(resp) => {
-                tracing::warn!("memory search: status {}", resp.status());
-                Vec::new()
-            }
+            Ok(resp) if resp.status().is_success() => resp
+                .json::<SearchResponse>()
+                .await
+                .map(|body| body.facts)
+                .map_err(|e| format!("unreadable response: {e}")),
+            Ok(resp) => Err(format!("status {}", resp.status())),
+            Err(e) => Err(format!("request failed: {e}")),
+        }
+    }
+
+    /// Degrading variant for auto-injection: any failure becomes "no facts"
+    /// with a warning — chat must never wait on or fail with sick memory.
+    pub async fn search(&self, query: &str, limit: u32) -> Vec<MemoryFact> {
+        match self.try_search(query, limit).await {
+            Ok(facts) => facts,
             Err(e) => {
                 tracing::warn!("memory search failed: {e}");
                 Vec::new()
