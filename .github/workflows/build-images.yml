@@ -1,6 +1,6 @@
 name: Build and push images
 
-# Build all three service images on amd64 and push them to GHCR. The built-in
+# Build the service images on amd64 and push them to GHCR. The built-in
 # GITHUB_TOKEN has packages:write for this repo, so no PAT is required.
 on:
   push:
@@ -9,6 +9,7 @@ on:
       - "backend/**"
       - "frontend/**"
       - "whatsapp-gateway/**"
+      - "memory-service/**"
       - ".github/workflows/build-images.yml"
   workflow_dispatch:
 
@@ -29,6 +30,8 @@ jobs:
             context: ./frontend
           - name: gateway
             context: ./whatsapp-gateway
+          - name: memory
+            context: ./memory-service
     steps:
       - uses: actions/checkout@v4
 
@@ -77,6 +80,12 @@ jobs:
             kubectl -n portfolio set image deploy/backend  backend=ghcr.io/bimapangestu28/portfolio-backend:$GITHUB_SHA
             kubectl -n portfolio set image deploy/frontend frontend=ghcr.io/bimapangestu28/portfolio-frontend:$GITHUB_SHA
             kubectl -n portfolio set image deploy/gateway  gateway=ghcr.io/bimapangestu28/portfolio-gateway:$GITHUB_SHA
+            # memory-service is optional until its manifests are applied
+            # manually; skip the pin instead of failing the whole deploy.
+            if kubectl -n portfolio get deploy/memory-service >/dev/null 2>&1; then
+              kubectl -n portfolio set image deploy/memory-service memory-service=ghcr.io/bimapangestu28/portfolio-memory:$GITHUB_SHA
+              kubectl -n portfolio rollout status deploy/memory-service --timeout=180s
+            fi
             kubectl -n portfolio rollout status deploy/backend  --timeout=180s
             kubectl -n portfolio rollout status deploy/frontend --timeout=180s
             kubectl -n portfolio rollout status deploy/gateway  --timeout=180s
