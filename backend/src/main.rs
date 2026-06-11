@@ -1,4 +1,5 @@
 mod api;
+mod assistant;
 mod auth;
 mod connectors;
 mod db;
@@ -39,6 +40,7 @@ async fn main() -> anyhow::Result<()> {
         tg: Arc::new(Mutex::new(TgState::default())),
     };
     telegram::spawn(db.clone(), state.tg.clone());
+    assistant::reminder_tick::spawn(db.clone());
     scheduler::spawn(db, std::time::Duration::from_secs(3600));
     let app = api::router(state);
     let bind_addr = std::env::var("BIND_ADDR").unwrap_or_else(|_| "127.0.0.1:8080".into());

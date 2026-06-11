@@ -2,8 +2,8 @@
 //!
 //! The poller is spawned from main() only when TELEGRAM_BOT_TOKEN is set. It
 //! long-polls getUpdates and answers messages from the linked owner chat via
-//! the shared chat service. Messages from unlinked chats are only ever used
-//! for the one-time link-code handshake.
+//! the assistant agent (tool-use loop). Messages from unlinked chats are only
+//! ever used for the one-time link-code handshake.
 
 pub mod client;
 pub mod state;
@@ -60,15 +60,19 @@ pub enum AttachmentPick {
 pub enum CallbackAction {
     Confirm(i64),
     Reject(i64),
+    /// "✅ Selesai" on a reminder notification: mark its todo done.
+    TodoDone(i64),
 }
 
-/// Parse callback_data ("confirm:<review_id>" / "reject:<review_id>").
+/// Parse callback_data ("confirm:<review_id>" / "reject:<review_id>" /
+/// "tododone:<todo_id>").
 pub fn parse_callback(data: &str) -> Option<CallbackAction> {
     let (action, id) = data.split_once(':')?;
     let id: i64 = id.parse().ok()?;
     match action {
         "confirm" => Some(CallbackAction::Confirm(id)),
         "reject" => Some(CallbackAction::Reject(id)),
+        "tododone" => Some(CallbackAction::TodoDone(id)),
         _ => None,
     }
 }
@@ -216,7 +220,7 @@ pub fn pick_attachment(message: &TgMessage) -> AttachmentPick {
 }
 
 const LINK_OK_REPLY: &str =
-    "✅ Telegram tertaut. Silakan tanya apa saja tentang portofoliomu.";
+    "✅ Telegram tertaut. Aku bisa bantu catat todo, pasang pengingat, dan jawab pertanyaan soal portofoliomu.";
 const LINK_HINT_REPLY: &str =
     "Kode tidak valid atau kedaluwarsa. Buka halaman Telegram di web UI untuk membuat kode tautan.";
 const ANSWER_FAILED_REPLY: &str =
@@ -339,11 +343,11 @@ async fn handle_update(client: &TelegramClient, db: &Db, tg: &SharedTgState, upd
     }
 }
 
-/// Answer a linked owner message via the shared chat service.
+/// Answer a linked owner message via the assistant agent (tool-use loop).
 async fn answer(db: &Db, text: &str) -> anyhow::Result<String> {
     let llm = crate::llm::claude::ClaudeClient::from_env()
         .map_err(|e| anyhow::anyhow!("chat unavailable: {e}"))?;
-    crate::service::chat::answer(db, &llm, "telegram", text).await
+    crate::assistant::agent::handle_message(db, &llm, "telegram", text).await
 }
 
 /// Download an attachment and run it through the shared ingestion pipeline
@@ -446,12 +450,15 @@ async fn handle_callback(client: &TelegramClient, db: &Db, callback: TgCallbackQ
         return;
     }
     let Some(action) = callback.data.as_deref().and_then(parse_callback) else { return };
-    let (item_id, outcome) = match action {
-        CallbackAction::Confirm(item_id) => (item_id, confirm_item(db, item_id).await),
-        CallbackAction::Reject(item_id) => (item_id, reject_item(db, item_id).await),
+    let text = match action {
+        CallbackAction::Confirm(item_id) => {
+            review_callback_text(item_id, confirm_item(db, item_id).await)
+        }
+        CallbackAction::Reject(item_id) => {
+            review_callback_text(item_id, reject_item(db, item_id).await)
+        }
+        CallbackAction::TodoDone(todo_id) => todo_done_text(db, todo_id).await,
     };
-    let status = outcome.unwrap_or_else(|e| format!("⚠️ {e:#}"));
-    let text = format!("🧾 Review #{item_id} — {status}");
     if let Err(e) = client.edit_message_text(chat_id, message.message_id, &text).await {
         tracing::error!("telegram: editMessageText failed: {e:#}");
     }
@@ -469,6 +476,21 @@ async fn confirm_item(db: &Db, item_id: i64) -> anyhow::Result<String> {
 async fn reject_item(db: &Db, item_id: i64) -> anyhow::Result<String> {
     crate::ingestion::review::reject(db, item_id).await?;
     Ok("❌ Ditolak.".to_string())
+}
+
+/// Result line for review confirm/reject button presses.
+fn review_callback_text(item_id: i64, outcome: anyhow::Result<String>) -> String {
+    let status = outcome.unwrap_or_else(|e| format!("⚠️ {e:#}"));
+    format!("🧾 Review #{item_id} — {status}")
+}
+
+/// Result line for the "✅ Selesai" button on a reminder notification.
+async fn todo_done_text(db: &Db, todo_id: i64) -> String {
+    match crate::repo::todos::complete(db, todo_id).await {
+        Ok(true) => format!("✅ Todo #{todo_id} selesai."),
+        Ok(false) => format!("Todo #{todo_id} sudah selesai atau tidak ditemukan."),
+        Err(e) => format!("⚠️ {e:#}"),
+    }
 }
 
 async fn send_or_log(client: &TelegramClient, chat_id: i64, text: &str) {
@@ -554,9 +576,20 @@ mod tests {
     fn parses_confirm_and_reject_callbacks() {
         assert_eq!(parse_callback("confirm:42"), Some(CallbackAction::Confirm(42)));
         assert_eq!(parse_callback("reject:7"), Some(CallbackAction::Reject(7)));
+        assert_eq!(parse_callback("tododone:9"), Some(CallbackAction::TodoDone(9)));
         assert_eq!(parse_callback("nope:1"), None);
         assert_eq!(parse_callback("confirm:abc"), None);
         assert_eq!(parse_callback("confirm"), None);
+    }
+
+    #[tokio::test]
+    async fn todo_done_text_completes_open_todos_once() {
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        let todo = crate::repo::todos::create(&db, "bayar listrik", None, None).await.unwrap();
+        let first = todo_done_text(&db, todo.id).await;
+        assert!(first.contains("selesai"), "{first}");
+        let again = todo_done_text(&db, todo.id).await;
+        assert!(again.contains("sudah") || again.contains("tidak ditemukan"), "{again}");
     }
 
     #[test]
