@@ -1,4 +1,5 @@
 mod api;
+mod assistant;
 mod auth;
 mod connectors;
 mod db;
