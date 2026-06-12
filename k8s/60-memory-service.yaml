@@ -47,8 +47,10 @@ spec:
                 secretKeyRef:
                   name: portfolio-secrets
                   key: OPENAI_API_KEY
+            - name: LLM_BASE_URL
+              value: "https://api.deepseek.com/anthropic"
             - name: MEMORY_LLM_MODEL
-              value: "claude-haiku-4-5-20251001"
+              value: "deepseek-v4-flash"
             - name: GRAPHITI_TELEMETRY_ENABLED
               value: "false"
           resources:

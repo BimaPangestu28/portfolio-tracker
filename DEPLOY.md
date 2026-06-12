@@ -38,7 +38,7 @@ cd portfolio-tracker
 # 3. Create the env file and fill in secrets:
 cp .env.production.example .env
 #    - DOMAIN is preset to portfolio.catalystlabs.id
-#    - ANTHROPIC_API_KEY: your key
+#    - ANTHROPIC_API_KEY: your DeepSeek API key (name kept for compatibility)
 #    - GATEWAY_TOKEN: openssl rand -hex 32
 nano .env
 

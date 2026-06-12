@@ -3,7 +3,7 @@ use crate::ingestion::csv::{parse_csv_rows, ColumnMapping};
 use crate::ingestion::ingest::{ingest_batch, needs_attention, UploadFile};
 use crate::ingestion::matching::{suggest_account, suggest_instrument_for_entry};
 use crate::ingestion::review::{confirm, reject, ConfirmPayload};
-use crate::llm::claude::ClaudeClient;
+use crate::llm::native::NativeLlmClient;
 use crate::repo::review_items::{self, NewReviewItem};
 use crate::AppState;
 use axum::{extract::{Path, Query, State}, Json};
@@ -26,7 +26,7 @@ fn new_batch_id() -> String {
 
 pub async fn ingest(State(s): State<AppState>, Json(b): Json<IngestIn>) -> Result<Json<IngestOut>, AppError> {
     if b.files.is_empty() { return Err(AppError::BadRequest("no files".into())); }
-    let client = ClaudeClient::from_env().map_err(|e| AppError::Other(anyhow::anyhow!("llm config: {e}")))?;
+    let client = NativeLlmClient::from_env().map_err(|e| AppError::Other(anyhow::anyhow!("llm config: {e}")))?;
     let files: Vec<UploadFile> = b.files.into_iter()
         .map(|f| UploadFile { filename: f.filename, media_type: f.media_type, data_base64: f.data_base64 })
         .collect();
