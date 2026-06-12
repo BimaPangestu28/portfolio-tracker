@@ -347,6 +347,11 @@ mod tests {
             start_at: "2026-06-12T07:00:00Z".into(), // 14:00 WIB
             status: "scheduled".into(),
             created_at: String::new(),
+            source: "local".into(),
+            google_event_id: None,
+            google_etag: None,
+            synced_at: None,
+            updated_at: None,
         }];
         let block = render_data_block(&d);
         assert!(block.contains("Agenda hari ini:"), "{block}");

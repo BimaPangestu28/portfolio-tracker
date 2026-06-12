@@ -12,6 +12,11 @@ pub struct EventRow {
     pub start_at: String,
     pub status: String,
     pub created_at: String,
+    pub source: String,
+    pub google_event_id: Option<String>,
+    pub google_etag: Option<String>,
+    pub synced_at: Option<String>,
+    pub updated_at: Option<String>,
 }
 
 pub async fn create(
