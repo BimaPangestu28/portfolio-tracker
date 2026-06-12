@@ -221,5 +221,11 @@ mod tests {
             serde_json::json!(["title", "start_at"])
         );
         assert_eq!(find("cancel_event")["input_schema"]["required"], serde_json::json!(["id"]));
+        assert_eq!(find("reject_review")["input_schema"]["required"], serde_json::json!(["review_id"]));
+        assert_eq!(find("confirm_review")["input_schema"]["required"], serde_json::json!(["review_id"]));
+        assert_eq!(
+            find("create_account")["input_schema"]["required"],
+            serde_json::json!(["name", "account_type", "native_currency"])
+        );
     }
 }
