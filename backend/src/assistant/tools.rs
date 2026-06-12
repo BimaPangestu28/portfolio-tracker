@@ -128,6 +128,26 @@ pub fn definitions() -> serde_json::Value {
                 "properties": { "review_id": { "type": "integer", "description": "Review item id" } },
                 "required": ["review_id"]
             }
+        },
+        {
+            "name": "list_accounts",
+            "description": "List the owner's investment accounts (id, name, type). Use before create_account to reuse an existing account, and to find an account_id for confirm_review.",
+            "input_schema": { "type": "object", "properties": {} }
+        },
+        {
+            "name": "create_account",
+            "description": "Create a new investment account (e.g. a broker like Nanovest the owner doesn't have yet). Always ask the user to confirm before calling — this writes data.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "name": { "type": "string", "description": "Account name, e.g. Nanovest" },
+                    "account_type": { "type": "string", "description": "Type, e.g. broker, exchange, bank" },
+                    "native_currency": { "type": "string", "description": "ISO currency code, e.g. IDR or USD" },
+                    "institution": { "type": "string", "description": "Optional institution name" },
+                    "note": { "type": "string", "description": "Optional note" }
+                },
+                "required": ["name", "account_type", "native_currency"]
+            }
         }
     ])
 }
@@ -152,7 +172,7 @@ mod tests {
                 "create_reminder", "list_reminders", "cancel_reminder",
                 "get_portfolio_summary", "search_memory", "remember",
                 "create_event", "list_events", "cancel_event",
-                "reject_review",
+                "reject_review", "list_accounts", "create_account",
             ]
         );
         for tool in defs.as_array().unwrap() {

@@ -21,6 +21,8 @@ pub async fn dispatch(db: &Db, name: &str, input: &serde_json::Value) -> Result<
         "list_events" => list_events(db, input).await,
         "cancel_event" => cancel_event(db, input).await,
         "reject_review" => reject_review(db, input).await,
+        "list_accounts" => list_accounts(db).await,
+        "create_account" => create_account(db, input).await,
         _ => Err(format!("unknown tool: {name}")),
     }
 }
@@ -340,6 +342,36 @@ async fn reject_review(db: &Db, input: &serde_json::Value) -> Result<String, Str
         .await
         .map_err(|e| format!("{e}"))?;
     Ok(format!("review #{review_id} ditolak"))
+}
+
+async fn list_accounts(db: &Db) -> Result<String, String> {
+    let accounts = crate::repo::accounts::list(db).await.map_err(|e| format!("db error: {e}"))?;
+    if accounts.is_empty() {
+        return Ok("no accounts yet".into());
+    }
+    let mut out = String::new();
+    for a in accounts {
+        out.push_str(&format!("#{} {} ({})\n", a.id, a.name, a.account_type));
+    }
+    Ok(out)
+}
+
+async fn create_account(db: &Db, input: &serde_json::Value) -> Result<String, String> {
+    let name = str_arg(input, "name").ok_or("missing required argument 'name'")?;
+    let account_type =
+        str_arg(input, "account_type").ok_or("missing required argument 'account_type'")?;
+    let native_currency =
+        str_arg(input, "native_currency").ok_or("missing required argument 'native_currency'")?;
+    let account = crate::repo::accounts::create(db, &crate::repo::accounts::NewAccount {
+        name: name.to_string(),
+        account_type: account_type.to_string(),
+        institution: str_arg(input, "institution").map(str::to_string),
+        native_currency: native_currency.to_string(),
+        note: str_arg(input, "note").map(str::to_string),
+    })
+    .await
+    .map_err(|e| format!("db error: {e}"))?;
+    Ok(format!("created account #{} '{}'", account.id, account.name))
 }
 
 #[cfg(test)]
@@ -665,5 +697,27 @@ mod tests {
             .await.unwrap();
         assert!(out.contains("cancelled"), "{out}");
         assert!(!out.contains("reminder"), "{out}");
+    }
+
+    #[tokio::test]
+    async fn create_account_then_list_shows_it() {
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        let out = dispatch(&db, "create_account", &serde_json::json!({
+            "name": "Nanovest", "account_type": "broker", "native_currency": "IDR"
+        })).await.unwrap();
+        assert!(out.contains("Nanovest"), "{out}");
+
+        let listed = dispatch(&db, "list_accounts", &serde_json::json!({})).await.unwrap();
+        assert!(listed.contains("Nanovest"), "{listed}");
+        assert!(listed.contains("broker"), "{listed}");
+    }
+
+    #[tokio::test]
+    async fn create_account_requires_name() {
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        let err = dispatch(&db, "create_account", &serde_json::json!({
+            "account_type": "broker", "native_currency": "IDR"
+        })).await.unwrap_err();
+        assert!(err.contains("name"), "{err}");
     }
 }
