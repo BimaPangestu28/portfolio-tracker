@@ -661,27 +661,25 @@ pub async fn evaluate(
                 }
                 Err(e) => tracing::warn!("alerts: instruments unavailable: {e:#}"),
             }
-            // Milestones: previous snapshot total vs current net worth.
+            // Milestones: yesterday's snapshot (NOT today's hourly-overwritten
+            // one — see super::snapshot_before) vs current net worth.
             match crate::repo::snapshots::history(db).await {
-                Ok(rows) if !rows.is_empty() => {
-                    use std::str::FromStr;
-                    let prev_idr = rust_decimal::Decimal::from_str(&rows[rows.len() - 1].total_idr)
-                        .unwrap_or_default()
-                        .trunc()
-                        .to_string()
-                        .parse::<i64>()
-                        .unwrap_or(0);
-                    let curr_idr = summary
-                        .net_worth_idr
-                        .trunc()
-                        .to_string()
-                        .parse::<i64>()
-                        .unwrap_or(0);
-                    for milestone in milestones_crossed(prev_idr, curr_idr, milestone_step_idr) {
-                        alerts.push(milestone_alert(milestone));
+                Ok(rows) => {
+                    if let Some(prev) = super::snapshot_before(&rows, today_wib) {
+                        let prev_idr = prev.trunc().to_string().parse::<i64>().unwrap_or(0);
+                        let curr_idr = summary
+                            .net_worth_idr
+                            .trunc()
+                            .to_string()
+                            .parse::<i64>()
+                            .unwrap_or(0);
+                        for milestone in
+                            milestones_crossed(prev_idr, curr_idr, milestone_step_idr)
+                        {
+                            alerts.push(milestone_alert(milestone));
+                        }
                     }
                 }
-                Ok(_) => {}
                 Err(e) => tracing::warn!("alerts: snapshots unavailable: {e:#}"),
             }
         }
@@ -872,14 +870,13 @@ pub async fn gather(db: &Db) -> anyhow::Result<BriefingData> {
     let (net_worth_idr, delta_vs_yesterday_idr) =
         match crate::service::portfolio::build_summary(db).await {
             Ok(summary) => {
+                // Baseline = yesterday's snapshot, NOT the latest row (the
+                // hourly scheduler overwrites today's). Shared helper added
+                // by the milestone-baseline fix.
                 let delta = match crate::repo::snapshots::history(db).await {
-                    Ok(rows) if !rows.is_empty() => {
-                        use std::str::FromStr;
-                        Decimal::from_str(&rows[rows.len() - 1].total_idr)
-                            .ok()
-                            .map(|prev| summary.net_worth_idr - prev)
-                    }
-                    _ => None,
+                    Ok(rows) => super::snapshot_before(&rows, &today)
+                        .map(|prev| summary.net_worth_idr - prev),
+                    Err(_) => None,
                 };
                 (summary.net_worth_idr, delta)
             }
