@@ -4,6 +4,7 @@ pub mod chat;
 pub mod connectors;
 pub mod crud;
 pub mod goals;
+pub mod google;
 pub mod ingest;
 pub mod portfolio;
 pub mod telegram;
@@ -21,7 +22,8 @@ pub fn router(state: AppState) -> Router {
     // Open to anyone — no token required.
     let public = Router::new()
         .route("/health", get(|| async { "ok" }))
-        .route("/auth/login", post(auth::login));
+        .route("/auth/login", post(auth::login))
+        .route("/google/oauth/callback", get(google::callback));
 
     // Authenticated by the shared x-gateway-token (checked inside the handlers).
     let gateway = Router::new()
@@ -40,6 +42,9 @@ pub fn router(state: AppState) -> Router {
         .route("/telegram/status", get(telegram::status))
         .route("/telegram/link-code", post(telegram::link_code))
         .route("/telegram/unlink", post(telegram::unlink))
+        .route("/google/oauth/start", get(google::start))
+        .route("/google/status", get(google::status))
+        .route("/google/disconnect", post(google::disconnect))
         .route(
             "/accounts",
             get(crud::list_accounts).post(crud::create_account),
@@ -151,6 +156,27 @@ mod router_tests {
             .await
             .unwrap();
         assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+
+        std::env::remove_var("AUTH_PASSWORD");
+        std::env::remove_var("JWT_SECRET");
+    }
+
+    #[serial]
+    #[tokio::test]
+    async fn google_start_is_protected_but_callback_is_public() {
+        std::env::set_var("AUTH_PASSWORD", "pw");
+        std::env::set_var("JWT_SECRET", "router-test-google");
+
+        let app = router(test_state().await);
+        let res = app.clone().oneshot(
+            Request::builder().uri("/google/oauth/start").body(Body::empty()).unwrap()
+        ).await.unwrap();
+        assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+
+        let res = app.oneshot(
+            Request::builder().uri("/google/oauth/callback").body(Body::empty()).unwrap()
+        ).await.unwrap();
+        assert_ne!(res.status(), StatusCode::UNAUTHORIZED);
 
         std::env::remove_var("AUTH_PASSWORD");
         std::env::remove_var("JWT_SECRET");
