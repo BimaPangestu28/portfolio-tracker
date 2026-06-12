@@ -13,7 +13,11 @@ services:
       BIND_ADDR: 0.0.0.0:8080
       DATABASE_URL: sqlite:///data/portfolio.db
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:?ANTHROPIC_API_KEY is required}
-      INGEST_MODEL: ${INGEST_MODEL:-claude-sonnet-4-6}
+      LLM_MODEL: ${LLM_MODEL:-deepseek-v4-flash}
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://api.deepseek.com/anthropic}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:?OPENAI_API_KEY is required}
+      INGEST_MODEL: ${INGEST_MODEL:-gpt-4o}
+      INGEST_BASE_URL: ${INGEST_BASE_URL:-https://api.openai.com}
       GATEWAY_TOKEN: ${GATEWAY_TOKEN:?GATEWAY_TOKEN is required}
       # Optional: enables the Telegram chatbot channel when set.
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
@@ -83,7 +87,8 @@ services:
       NEO4J_PASSWORD: ${NEO4J_PASSWORD:?NEO4J_PASSWORD is required}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:?ANTHROPIC_API_KEY is required}
       OPENAI_API_KEY: ${OPENAI_API_KEY:?OPENAI_API_KEY is required}
-      MEMORY_LLM_MODEL: ${MEMORY_LLM_MODEL:-claude-haiku-4-5-20251001}
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://api.deepseek.com/anthropic}
+      MEMORY_LLM_MODEL: ${MEMORY_LLM_MODEL:-deepseek-v4-flash}
     expose:
       - "8000"
     healthcheck:

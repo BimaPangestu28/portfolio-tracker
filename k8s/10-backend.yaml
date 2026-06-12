@@ -41,8 +41,14 @@ spec:
               value: "0.0.0.0:8080"
             - name: DATABASE_URL
               value: "sqlite:///data/portfolio.db"
+            - name: LLM_MODEL
+              value: "deepseek-v4-flash"
+            - name: LLM_BASE_URL
+              value: "https://api.deepseek.com/anthropic"
             - name: INGEST_MODEL
-              value: "claude-sonnet-4-6"
+              value: "gpt-4o"
+            - name: INGEST_BASE_URL
+              value: "https://api.openai.com"
             - name: RUST_LOG
               value: "info"
             - name: ANTHROPIC_API_KEY
@@ -50,6 +56,11 @@ spec:
                 secretKeyRef:
                   name: portfolio-secrets
                   key: ANTHROPIC_API_KEY
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: portfolio-secrets
+                  key: OPENAI_API_KEY
             - name: GATEWAY_TOKEN
               valueFrom:
                 secretKeyRef:

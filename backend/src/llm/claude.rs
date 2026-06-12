@@ -10,6 +10,8 @@ pub enum LlmError {
     Api { status: u16, body: String },
     #[error("unexpected response shape: {0}")]
     Shape(String),
+    #[error("unsupported input: {0}")]
+    Unsupported(String),
 }
 
 #[derive(Debug, Clone)]
@@ -17,7 +19,11 @@ pub enum Part {
     Text(String),
     /// (media_type, base64 data) — e.g. ("image/png", "...")
     Image(String, String),
-    /// base64 PDF data
+    /// base64 PDF data. Currently unconstructed: ingestion routes PDFs to manual
+    /// review upstream because the OpenAI-format vision client extracts from
+    /// images only. Kept in the input model so the Anthropic/Claude document
+    /// path stays available and the vision client can defensively reject it.
+    #[allow(dead_code)]
     Pdf(String),
 }
 
@@ -146,9 +152,18 @@ pub fn extract_text(resp: &serde_json::Value) -> Result<String, LlmError> {
     Ok(out)
 }
 
+/// Client for text/tool conversations over the Anthropic Messages API shape.
+///
+/// The endpoint is configurable: it defaults to DeepSeek's Anthropic-compatible
+/// endpoint (`https://api.deepseek.com/anthropic`) with the `deepseek-v4-flash`
+/// model, and can be pointed back at `https://api.anthropic.com` to use Claude.
+/// The request/response shape is identical across both providers, so only the
+/// base URL, model, and key differ. Image/PDF input is NOT supported on
+/// DeepSeek's Anthropic endpoint — multimodal ingestion uses `NativeLlmClient`.
 pub struct ClaudeClient {
     api_key: String,
     model: String,
+    base_url: String,
     client: reqwest::Client,
 }
 
@@ -157,15 +172,23 @@ pub struct ClaudeClient {
 const REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
 
 impl ClaudeClient {
-    /// Reads ANTHROPIC_API_KEY and optional INGEST_MODEL from the environment.
+    /// Reads provider config from the environment:
+    /// - `ANTHROPIC_API_KEY` — required (holds the DeepSeek API key by default).
+    /// - `LLM_MODEL` — text model, default `deepseek-v4-flash`.
+    /// - `LLM_BASE_URL` — Anthropic-Messages-compatible base URL, default
+    ///   `https://api.deepseek.com/anthropic`. `/v1/messages` is appended.
     pub fn from_env() -> Result<Self, LlmError> {
         let api_key = std::env::var("ANTHROPIC_API_KEY").map_err(|_| LlmError::NoKey)?;
-        let model = std::env::var("INGEST_MODEL").unwrap_or_else(|_| "claude-sonnet-4-6".into());
+        let model = std::env::var("LLM_MODEL").unwrap_or_else(|_| "deepseek-v4-flash".into());
+        let base_url = std::env::var("LLM_BASE_URL")
+            .unwrap_or_else(|_| "https://api.deepseek.com/anthropic".into())
+            .trim_end_matches('/')
+            .to_string();
         let client = reqwest::Client::builder()
             .timeout(REQUEST_TIMEOUT)
             .build()
             .map_err(|e| LlmError::Http(e.to_string()))?;
-        Ok(Self { api_key, model, client })
+        Ok(Self { api_key, model, base_url, client })
     }
 
     /// Send a single user message (system + parts) and return the concatenated text output.
@@ -203,8 +226,9 @@ impl ClaudeClient {
 
     /// POST to the Messages API and return the raw success-response JSON.
     async fn post_json(&self, body: serde_json::Value) -> Result<serde_json::Value, LlmError> {
+        let url = format!("{}/v1/messages", self.base_url);
         let resp = self.client
-            .post("https://api.anthropic.com/v1/messages")
+            .post(&url)
             .header("x-api-key", &self.api_key)
             .header("anthropic-version", "2023-06-01")
             .header("content-type", "application/json")

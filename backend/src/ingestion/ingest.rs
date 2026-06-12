@@ -1,7 +1,8 @@
 use crate::db::Db;
 use crate::ingestion::extract::{parse_extraction, ExtractedEntry};
 use crate::ingestion::matching::{suggest_account, suggest_instrument_for_entry};
-use crate::llm::claude::{ClaudeClient, Part};
+use crate::llm::claude::Part;
+use crate::llm::native::NativeLlmClient;
 use crate::repo::review_items::{self, NewReviewItem};
 use base64::Engine;
 
@@ -65,21 +66,38 @@ fn save_file(batch_id: &str, f: &UploadFile) -> anyhow::Result<(String, String)>
     Ok((kind.to_string(), path))
 }
 
-fn to_part(f: &UploadFile) -> Part {
-    if f.media_type == "application/pdf" {
-        Part::Pdf(f.data_base64.clone())
-    } else {
-        Part::Image(f.media_type.clone(), f.data_base64.clone())
-    }
-}
+/// Review payload staged when a PDF is uploaded: the vision client extracts
+/// from images only, so the file is kept for the user to re-upload as an image.
+const PDF_UNSUPPORTED_PAYLOAD: &str =
+    "{\"note\":\"PDF belum didukung — unggah ulang sebagai gambar (PNG/JPG).\"}";
 
-/// Full pipeline for one upload batch: save files, call Claude once per file, parse, stage items.
-/// `batch_id` is supplied by the caller (the API layer) so it is deterministic/testable.
-pub async fn ingest_batch(db: &Db, client: &ClaudeClient, batch_id: &str, files: &[UploadFile]) -> anyhow::Result<IngestResult> {
+/// Full pipeline for one upload batch: save files, call the vision model once per
+/// image, parse, stage items. `batch_id` is supplied by the caller (the API
+/// layer) so it is deterministic/testable.
+pub async fn ingest_batch(db: &Db, client: &NativeLlmClient, batch_id: &str, files: &[UploadFile]) -> anyhow::Result<IngestResult> {
     let mut items = Vec::new();
     for f in files {
         let (kind, path) = save_file(batch_id, f)?;
-        let parts = vec![Part::Text("Extract per the system instructions.".into()), to_part(f)];
+        if f.media_type == "application/pdf" {
+            let row = review_items::create(db, &NewReviewItem {
+                batch_id,
+                source_kind: &kind,
+                source_filename: &f.filename,
+                source_path: &path,
+                doc_type: "unknown",
+                needs_attention: true,
+                payload_json: PDF_UNSUPPORTED_PAYLOAD,
+                raw_llm_json: "{}",
+                suggested_instrument_id: None,
+                suggested_account_id: None,
+            }).await?;
+            items.push(row);
+            continue;
+        }
+        let parts = vec![
+            Part::Text("Extract per the system instructions.".into()),
+            Part::Image(f.media_type.clone(), f.data_base64.clone()),
+        ];
         let raw = client.complete(SYSTEM_PROMPT, &parts).await
             .map_err(|e| anyhow::anyhow!("llm error: {e}"))?;
         let extraction = parse_extraction(&raw)
@@ -181,12 +199,23 @@ mod tests {
         assert!(super::safe_filename("").is_err());
     }
 
+    /// Live end-to-end check against the configured vision provider. Skips
+    /// unless both the client env (OPENAI_API_KEY etc.) and INGEST_SMOKE_IMAGE
+    /// (a path to a real image — OpenAI's parser rejects 1x1 placeholders) are
+    /// set. Run with:
+    ///   INGEST_SMOKE_IMAGE=/path/to/broker.png cargo test live_extract_smoke -- --ignored
     #[tokio::test]
     #[ignore]
     async fn live_extract_smoke() {
-        let client = match crate::llm::claude::ClaudeClient::from_env() { Ok(c) => c, Err(_) => return };
-        let png_1x1 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
-        let parts = vec![ Part::Text("Extract per instructions.".into()), Part::Image("image/png".into(), png_1x1.into()) ];
+        let client = match crate::llm::native::NativeLlmClient::from_env() { Ok(c) => c, Err(_) => return };
+        let img_path = match std::env::var("INGEST_SMOKE_IMAGE") { Ok(p) if !p.is_empty() => p, _ => return };
+        let bytes = std::fs::read(&img_path).expect("read INGEST_SMOKE_IMAGE");
+        let media_type = if img_path.ends_with(".png") { "image/png" } else { "image/jpeg" };
+        let data_base64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+        let parts = vec![
+            Part::Text("Extract per the system instructions.".into()),
+            Part::Image(media_type.into(), data_base64),
+        ];
         let out = client.complete(SYSTEM_PROMPT, &parts).await.unwrap();
         let parsed = crate::ingestion::extract::parse_extraction(&out).unwrap();
         assert!(["holdings_snapshot","txn_history","bank_statement","trade_confirmation"].contains(&parsed.doc_type.as_str()));

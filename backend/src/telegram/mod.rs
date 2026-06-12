@@ -361,7 +361,7 @@ async fn ingest_attachment(
     let file_path = client.get_file_path(&attachment.file_id).await?;
     let bytes = client.download_file(&file_path).await?;
     let data_base64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
-    let llm = crate::llm::claude::ClaudeClient::from_env()
+    let llm = crate::llm::native::NativeLlmClient::from_env()
         .map_err(|e| anyhow::anyhow!("ingest unavailable: {e}"))?;
     let batch_id = format!("tg-{}", chrono::Utc::now().timestamp_millis());
     let upload = crate::ingestion::ingest::UploadFile {

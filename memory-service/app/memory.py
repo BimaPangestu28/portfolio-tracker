@@ -19,13 +19,18 @@ GROUP_ID = "owner"
 
 
 def build_graphiti() -> Graphiti:
-    """Production wiring: Claude for extraction, OpenAI for embeddings."""
+    """Production wiring: DeepSeek for extraction, OpenAI for embeddings.
+
+    Extraction runs over DeepSeek's Anthropic-Messages-compatible endpoint, so
+    Graphiti's AnthropicClient is reused unchanged — only the base URL, model,
+    and key differ. DeepSeek has no embedding model, so embeddings stay on
+    OpenAI. To revert to Claude, set LLM_BASE_URL=https://api.anthropic.com and
+    MEMORY_LLM_MODEL to a claude-* id.
+    """
     llm_config = LLMConfig(
         api_key=os.environ["ANTHROPIC_API_KEY"],
-        # Date-suffixed ID on purpose (stable, unlike -latest aliases). It is
-        # absent from graphiti's max-tokens table, so responses cap at the
-        # 8192-token default — plenty for extraction output.
-        model=os.environ.get("MEMORY_LLM_MODEL", "claude-haiku-4-5-20251001"),
+        base_url=os.environ.get("LLM_BASE_URL", "https://api.deepseek.com/anthropic"),
+        model=os.environ.get("MEMORY_LLM_MODEL", "deepseek-v4-flash"),
     )
     return Graphiti(
         os.environ["NEO4J_URI"],
