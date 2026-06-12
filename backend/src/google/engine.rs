@@ -193,4 +193,18 @@ mod tests {
         assert_eq!(row.source, "google");
         assert_eq!(row.title, "dokter");
     }
+
+    /// Live round-trip against a real Google account. Requires GOOGLE_CLIENT_ID,
+    /// GOOGLE_CLIENT_SECRET, GOOGLE_REDIRECT_URI, GOOGLE_TOKEN_ENC_KEY, and an
+    /// already-connected google_integration row in a file DB at GOOGLE_SMOKE_DB.
+    /// Run: GOOGLE_SMOKE_DB=sqlite:///tmp/smoke.db cargo test google::engine::tests::live_cycle -- --ignored --nocapture
+    #[tokio::test]
+    #[ignore]
+    async fn live_cycle() {
+        let url = match std::env::var("GOOGLE_SMOKE_DB") { Ok(u) => u, Err(_) => return };
+        let db = crate::db::connect(&url).await.unwrap();
+        run_cycle(&db).await.unwrap();
+        let row = crate::repo::google_integration::get(&db).await.unwrap().unwrap();
+        assert_eq!(row.status, "connected", "last_error={:?}", row.last_error);
+    }
 }
