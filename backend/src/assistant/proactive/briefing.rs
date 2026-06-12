@@ -14,6 +14,7 @@ pub struct BriefingData {
     pub todos_due_today: Vec<TodoRow>,
     pub todos_overdue: Vec<TodoRow>,
     pub reminders_today: Vec<ReminderRow>,
+    pub events_today: Vec<crate::repo::events::EventRow>,
     pub net_worth_idr: Decimal,
     pub delta_vs_yesterday_idr: Option<Decimal>,
     pub movers: Vec<Mover>,
@@ -79,6 +80,22 @@ pub async fn gather(db: &Db) -> anyhow::Result<BriefingData> {
         })
         .collect();
 
+    // Today's WIB calendar day expressed as a UTC range.
+    let day_start = now_wib
+        .date_naive()
+        .and_hms_opt(0, 0, 0)
+        .expect("midnight is valid")
+        .and_local_timezone(crate::assistant::time::wib())
+        .single()
+        .expect("WIB has no DST gaps")
+        .with_timezone(&chrono::Utc);
+    let events_today = crate::repo::events::list_between(
+        db,
+        &crate::assistant::time::to_db_utc(day_start),
+        &crate::assistant::time::to_db_utc(day_start + chrono::Duration::days(1)),
+    )
+    .await?;
+
     let pending_reviews = crate::repo::review_items::list_by_status(db, "pending")
         .await
         .map(|items| items.len())
@@ -129,6 +146,7 @@ pub async fn gather(db: &Db) -> anyhow::Result<BriefingData> {
         todos_due_today,
         todos_overdue,
         reminders_today,
+        events_today,
         net_worth_idr,
         delta_vs_yesterday_idr,
         movers,
@@ -173,6 +191,23 @@ pub fn render_data_block(d: &BriefingData) -> String {
                 crate::assistant::time::to_wib_display(&r.remind_at),
                 r.message
             ));
+        }
+    }
+
+    out.push_str("Agenda hari ini:\n");
+    if d.events_today.is_empty() {
+        out.push_str("(tidak ada)\n");
+    } else {
+        for e in &d.events_today {
+            out.push_str(&format!(
+                "- {}: {}",
+                crate::assistant::time::to_wib_display(&e.start_at),
+                e.title
+            ));
+            if let Some(location) = &e.location {
+                out.push_str(&format!(" ({location})"));
+            }
+            out.push('\n');
         }
     }
 
@@ -243,6 +278,7 @@ mod tests {
             todos_due_today: vec![],
             todos_overdue: vec![],
             reminders_today: vec![],
+            events_today: vec![],
             net_worth_idr: dec!(91960083),
             delta_vs_yesterday_idr: Some(dec!(1200000)),
             movers: vec![],
@@ -298,6 +334,24 @@ mod tests {
         assert!(d.todos_due_today.is_empty());
         assert!(d.reminders_today.is_empty());
         assert_eq!(d.pending_reviews, 0);
+    }
+
+    #[test]
+    fn agenda_section_renders_events_with_wib_time_and_location() {
+        let mut d = data();
+        d.events_today = vec![crate::repo::events::EventRow {
+            id: 1,
+            title: "meeting vendor".into(),
+            location: Some("kantor".into()),
+            notes: None,
+            start_at: "2026-06-12T07:00:00Z".into(), // 14:00 WIB
+            status: "scheduled".into(),
+            created_at: String::new(),
+        }];
+        let block = render_data_block(&d);
+        assert!(block.contains("Agenda hari ini:"), "{block}");
+        assert!(block.contains("meeting vendor (kantor)"), "{block}");
+        assert!(block.contains("14:00 WIB"), "{block}");
     }
 
     fn todo_due(id: i64, due_at: &str) -> TodoRow {
