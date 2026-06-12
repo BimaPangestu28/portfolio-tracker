@@ -26,6 +26,10 @@ pub async fn dispatch(db: &Db, name: &str, input: &serde_json::Value) -> Result<
         "list_pending_reviews" => list_pending_reviews(db).await,
         "confirm_review" => confirm_review(db, input).await,
         "list_instruments" => list_instruments(db).await,
+        "list_projects" => match crate::clickup::ClickUpClient::from_env() {
+            Ok(api) => clickup_list_projects(&api).await,
+            Err(e) => Err(format!("clickup belum dikonfigurasi: {e}")),
+        },
         _ => Err(format!("unknown tool: {name}")),
     }
 }
@@ -353,6 +357,18 @@ async fn list_accounts(db: &Db) -> Result<String, String> {
     let mut out = String::new();
     for a in accounts {
         out.push_str(&format!("#{} {} ({})\n", a.id, a.name, a.account_type));
+    }
+    Ok(out)
+}
+
+async fn clickup_list_projects(api: &dyn crate::clickup::ClickUpApi) -> Result<String, String> {
+    let projects = api.list_projects().await.map_err(|e| format!("{e}"))?;
+    if projects.is_empty() {
+        return Ok("belum ada project di ClickUp".into());
+    }
+    let mut out = String::new();
+    for p in projects {
+        out.push_str(&format!("#{} {}\n", p.id, p.name));
     }
     Ok(out)
 }
@@ -909,6 +925,48 @@ mod tests {
         let item = crate::repo::review_items::get(&db, id).await.unwrap();
         assert_eq!(item.status, "confirmed");
         assert!(item.created_txn_id.is_some());
+    }
+
+    // ── ClickUp fake ─────────────────────────────────────────────────────────
+
+    use crate::clickup::{ClickUpApi, ClickUpError, NewTask, Project};
+    use std::sync::Mutex;
+
+    #[derive(Default)]
+    struct FakeClickUp {
+        projects: Mutex<Vec<Project>>,
+        created_tasks: Mutex<Vec<(String, String)>>, // (list_id, title)
+    }
+
+    #[async_trait::async_trait]
+    impl ClickUpApi for FakeClickUp {
+        async fn list_projects(&self) -> Result<Vec<Project>, ClickUpError> {
+            Ok(self.projects.lock().unwrap().clone())
+        }
+        async fn create_project(&self, name: &str) -> Result<Project, ClickUpError> {
+            let project = Project { id: format!("list_{name}"), name: name.to_string() };
+            self.projects.lock().unwrap().push(project.clone());
+            Ok(project)
+        }
+        async fn create_task(&self, list_id: &str, task: &NewTask) -> Result<String, ClickUpError> {
+            self.created_tasks.lock().unwrap().push((list_id.to_string(), task.name.clone()));
+            Ok(format!("task_{}", task.name))
+        }
+    }
+
+    #[tokio::test]
+    async fn list_projects_formats_known_projects() {
+        let fake = FakeClickUp::default();
+        fake.projects.lock().unwrap().push(Project { id: "l1".into(), name: "PT AIS".into() });
+        let out = clickup_list_projects(&fake).await.unwrap();
+        assert!(out.contains("PT AIS"), "{out}");
+    }
+
+    #[tokio::test]
+    async fn list_projects_empty_is_explicit() {
+        let fake = FakeClickUp::default();
+        let out = clickup_list_projects(&fake).await.unwrap();
+        assert!(out.contains("belum ada project"), "{out}");
     }
 
     #[tokio::test]
