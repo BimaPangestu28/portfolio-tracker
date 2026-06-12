@@ -1,3 +1,6 @@
+# OPTIONAL — self-hosted Neo4j. Not applied in the current production setup,
+# which uses Neo4j Aura via the NEO4J_URI secret instead. Apply this (and set
+# NEO4J_URI=bolt://neo4j:7687 + NEO4J_AUTH in the secret) to self-host.
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
