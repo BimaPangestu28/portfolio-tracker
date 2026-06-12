@@ -43,7 +43,7 @@ mod tests {
         let row = ReminderRow {
             id: 1, todo_id: None, message: "bayar listrik".into(),
             remind_at: "2026-06-10T00:00:00Z".into(), recurrence: "none".into(),
-            status: "pending".into(), sent_at: None,
+            status: "pending".into(), sent_at: None, event_id: None,
         };
         assert_eq!(reminder_text(&row), "⏰ bayar listrik");
     }

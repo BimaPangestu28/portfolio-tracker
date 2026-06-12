@@ -12,6 +12,9 @@ pub struct ReminderRow {
     pub recurrence: String,
     pub status: String,
     pub sent_at: Option<String>,
+    /// Set when this reminder is the automatic pre-event reminder of an
+    /// agenda event; cancelled together with the event.
+    pub event_id: Option<i64>,
 }
 
 pub async fn create(
@@ -106,6 +109,37 @@ pub async fn reschedule(db: &Db, id: i64, next_remind_at: &str, sent_at: &str) -
     Ok(())
 }
 
+/// A pre-event reminder: one-shot, linked to its event for cascade-cancel.
+pub async fn create_for_event(
+    db: &Db,
+    event_id: i64,
+    message: &str,
+    remind_at: &str,
+) -> anyhow::Result<ReminderRow> {
+    let id = sqlx::query(
+        "INSERT INTO reminders (todo_id, message, remind_at, recurrence, status, event_id)
+         VALUES (NULL, ?, ?, 'none', 'pending', ?)",
+    )
+    .bind(message)
+    .bind(remind_at)
+    .bind(event_id)
+    .execute(db)
+    .await?
+    .last_insert_rowid();
+    get(db, id).await
+}
+
+/// Cancel the pending reminder(s) linked to an event. False when none were.
+pub async fn cancel_by_event(db: &Db, event_id: i64) -> anyhow::Result<bool> {
+    let result = sqlx::query(
+        "UPDATE reminders SET status = 'cancelled' WHERE event_id = ? AND status = 'pending'",
+    )
+    .bind(event_id)
+    .execute(db)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -194,5 +228,37 @@ mod tests {
         create(&db, None, "pending", "2099-01-01T00:00:00Z", "none").await.unwrap();
         assert_eq!(sent_count_since(&db, "2026-06-09T00:00:00Z").await.unwrap(), 1);
         assert_eq!(sent_count_since(&db, "2026-06-11T00:00:00Z").await.unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn create_for_event_links_and_flows_through_due() {
+        let db = mem_db().await;
+        let event = crate::repo::events::create(&db, "meeting", None, None, "2026-06-13T07:00:00Z")
+            .await
+            .unwrap();
+        let r = create_for_event(&db, event.id, "📅 meeting — 30 menit lagi", "2026-06-13T06:30:00Z")
+            .await
+            .unwrap();
+        assert_eq!(r.event_id, Some(event.id));
+        assert!(r.todo_id.is_none());
+        assert_eq!(r.recurrence, "none");
+        let due_rows = due(&db, "2026-06-13T06:30:00Z").await.unwrap();
+        assert_eq!(due_rows.len(), 1);
+        assert_eq!(due_rows[0].event_id, Some(event.id));
+    }
+
+    #[tokio::test]
+    async fn cancel_by_event_cancels_only_pending_linked_reminders() {
+        let db = mem_db().await;
+        let event = crate::repo::events::create(&db, "m", None, None, "2026-06-13T07:00:00Z")
+            .await
+            .unwrap();
+        let linked = create_for_event(&db, event.id, "x", "2026-06-13T06:30:00Z").await.unwrap();
+        let unlinked = create(&db, None, "y", "2026-06-13T06:30:00Z", "none").await.unwrap();
+        assert!(cancel_by_event(&db, event.id).await.unwrap());
+        assert_eq!(get(&db, linked.id).await.unwrap().status, "cancelled");
+        assert_eq!(get(&db, unlinked.id).await.unwrap().status, "pending");
+        // Second cancel finds nothing pending.
+        assert!(!cancel_by_event(&db, event.id).await.unwrap());
     }
 }
