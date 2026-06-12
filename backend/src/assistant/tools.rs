@@ -148,6 +148,11 @@ pub fn definitions() -> serde_json::Value {
                 },
                 "required": ["name", "account_type", "native_currency"]
             }
+        },
+        {
+            "name": "list_pending_reviews",
+            "description": "List ingest review items awaiting confirmation (from photos/PDFs the owner sent). Each line shows the review id, type, instrument, account, amounts, date, and flags items whose account or instrument isn't recognized yet. Use when the user asks to enter/confirm a transaction they sent.",
+            "input_schema": { "type": "object", "properties": {} }
         }
     ])
 }
@@ -173,6 +178,7 @@ mod tests {
                 "get_portfolio_summary", "search_memory", "remember",
                 "create_event", "list_events", "cancel_event",
                 "reject_review", "list_accounts", "create_account",
+                "list_pending_reviews",
             ]
         );
         for tool in defs.as_array().unwrap() {

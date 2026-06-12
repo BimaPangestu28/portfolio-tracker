@@ -23,6 +23,7 @@ pub async fn dispatch(db: &Db, name: &str, input: &serde_json::Value) -> Result<
         "reject_review" => reject_review(db, input).await,
         "list_accounts" => list_accounts(db).await,
         "create_account" => create_account(db, input).await,
+        "list_pending_reviews" => list_pending_reviews(db).await,
         _ => Err(format!("unknown tool: {name}")),
     }
 }
@@ -374,6 +375,56 @@ async fn create_account(db: &Db, input: &serde_json::Value) -> Result<String, St
     Ok(format!("created account #{} '{}'", account.id, account.name))
 }
 
+async fn list_pending_reviews(db: &Db) -> Result<String, String> {
+    let items = crate::repo::review_items::list_by_status(db, "pending")
+        .await
+        .map_err(|e| format!("db error: {e}"))?;
+    if items.is_empty() {
+        return Ok("no pending review items".into());
+    }
+    let mut out = String::new();
+    for item in items {
+        let entry: Option<crate::ingestion::extract::ExtractedEntry> =
+            serde_json::from_str(&item.payload_json).ok();
+        let entry_type = entry.as_ref().map(|e| e.entry_type.as_str()).unwrap_or("?");
+        let instrument = match item.suggested_instrument_id {
+            Some(instrument_id) => crate::repo::instruments::get(db, instrument_id)
+                .await
+                .ok()
+                .map(|i| format!("{} ({})", i.symbol, i.name))
+                .unwrap_or_else(|| "❓ belum dikenali".into()),
+            None => "❓ belum dikenali".into(),
+        };
+        let account = match item.suggested_account_id {
+            Some(account_id) => crate::repo::accounts::get(db, account_id)
+                .await
+                .ok()
+                .map(|a| a.name)
+                .unwrap_or_else(|| "❓ belum dikenali".into()),
+            None => "❓ belum dikenali".into(),
+        };
+        out.push_str(&format!(
+            "#{} {} — instrumen: {instrument} — akun: {account}",
+            item.id, entry_type
+        ));
+        if let Some(e) = &entry {
+            if let (Some(quantity), Some(price)) = (&e.quantity, &e.price_native) {
+                out.push_str(&format!(" — {quantity} @ {price}"));
+            } else if let Some(amount) = &e.amount_native {
+                out.push_str(&format!(" — nominal {amount}"));
+            }
+            if let Some(date) = &e.executed_at {
+                out.push_str(&format!(" — {date}"));
+            }
+        }
+        if item.suggested_account_id.is_none() || item.suggested_instrument_id.is_none() {
+            out.push_str(" [perlu dilengkapi sebelum konfirmasi]");
+        }
+        out.push('\n');
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -719,5 +770,29 @@ mod tests {
             "account_type": "broker", "native_currency": "IDR"
         })).await.unwrap_err();
         assert!(err.contains("name"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn list_pending_reviews_flags_unknown_account() {
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        let instrument = crate::repo::instruments::create(&db, &crate::repo::instruments::NewInstrument {
+            symbol: "BTC".into(), name: "Bitcoin".into(), instrument_type: "crypto".into(),
+            native_currency: "USD".into(), category_id: None, price_source: "manual".into(),
+            decimals: Some(8), note: None,
+        }).await.unwrap();
+        let id = seed_pending_item(&db, None, Some(instrument.id)).await;
+
+        let out = dispatch(&db, "list_pending_reviews", &serde_json::json!({})).await.unwrap();
+        assert!(out.contains(&format!("#{id}")), "{out}");
+        assert!(out.contains("BTC"), "instrument shown: {out}");
+        assert!(out.contains("belum dikenali"), "unknown account flagged: {out}");
+        assert!(out.contains("perlu dilengkapi"), "blocker noted: {out}");
+    }
+
+    #[tokio::test]
+    async fn list_pending_reviews_empty_is_explicit() {
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        let out = dispatch(&db, "list_pending_reviews", &serde_json::json!({})).await.unwrap();
+        assert!(out.contains("no pending"), "{out}");
     }
 }
