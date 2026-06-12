@@ -66,6 +66,8 @@ pub fn milestone_alert(milestone_idr: i64) -> Alert {
 pub async fn review_backlog_alert(db: &Db, today_wib: &str) -> anyhow::Result<Option<Alert>> {
     let cutoff = (chrono::Utc::now() - chrono::Duration::hours(24)).to_rfc3339();
     let pending = crate::repo::review_items::list_by_status(db, "pending").await?;
+    // Both sides come from chrono's to_rfc3339() (fixed-width +00:00), so
+    // lexicographic comparison is chronological comparison.
     let old = pending.iter().filter(|item| item.created_at <= cutoff).count();
     if old == 0 {
         return Ok(None);
@@ -131,27 +133,25 @@ pub async fn evaluate(
                 }
                 Err(e) => tracing::warn!("alerts: instruments unavailable: {e:#}"),
             }
-            // Milestones: previous snapshot total vs current net worth.
+            // Milestones: yesterday's snapshot (NOT today's hourly-overwritten
+            // one) vs current net worth.
             match crate::repo::snapshots::history(db).await {
-                Ok(rows) if !rows.is_empty() => {
-                    use std::str::FromStr;
-                    let prev_idr = rust_decimal::Decimal::from_str(&rows[rows.len() - 1].total_idr)
-                        .unwrap_or_default()
-                        .trunc()
-                        .to_string()
-                        .parse::<i64>()
-                        .unwrap_or(0);
-                    let curr_idr = summary
-                        .net_worth_idr
-                        .trunc()
-                        .to_string()
-                        .parse::<i64>()
-                        .unwrap_or(0);
-                    for milestone in milestones_crossed(prev_idr, curr_idr, milestone_step_idr) {
-                        alerts.push(milestone_alert(milestone));
+                Ok(rows) => {
+                    if let Some(prev) = super::snapshot_before(&rows, today_wib) {
+                        let prev_idr = prev.trunc().to_string().parse::<i64>().unwrap_or(0);
+                        let curr_idr = summary
+                            .net_worth_idr
+                            .trunc()
+                            .to_string()
+                            .parse::<i64>()
+                            .unwrap_or(0);
+                        for milestone in
+                            milestones_crossed(prev_idr, curr_idr, milestone_step_idr)
+                        {
+                            alerts.push(milestone_alert(milestone));
+                        }
                     }
                 }
-                Ok(_) => {}
                 Err(e) => tracing::warn!("alerts: snapshots unavailable: {e:#}"),
             }
         }
