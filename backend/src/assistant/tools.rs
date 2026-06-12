@@ -87,7 +87,7 @@ pub fn definitions() -> serde_json::Value {
         },
         {
             "name": "create_event",
-            "description": "Create an agenda event. Use for appointments and meetings ('meeting vendor besok jam 2'). A reminder fires 30 minutes before by default.",
+            "description": "Create an agenda event — something the owner attends or that has a time and place (meeting, appointment, dinner). Prefer this over create_reminder even when phrased as 'ingetin aku meeting besok jam 2'; use create_reminder only for standalone nudges with no agenda entry. A reminder fires 30 minutes before by default.",
             "input_schema": {
                 "type": "object",
                 "properties": {
