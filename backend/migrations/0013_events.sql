@@ -13,3 +13,5 @@ CREATE TABLE events (
 
 -- Pre-event reminders are materialized reminder rows linked to their event.
 ALTER TABLE reminders ADD COLUMN event_id INTEGER REFERENCES events(id);
+
+CREATE INDEX idx_events_schedule ON events (status, start_at);
