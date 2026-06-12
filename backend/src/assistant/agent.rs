@@ -28,7 +28,17 @@ tool for explicit recall questions, and the remember tool when the user asks \
 you to remember a fact. \
  You also manage the owner's agenda: create_event (a pre-event reminder is \
 created automatically), list_events for schedule questions like 'besok ada \
-apa?', and cancel_event.";
+apa?', and cancel_event. \
+ You can also enter transactions the owner sent as photos/PDFs: when they ask \
+to 'masukin transaksi tadi' or to confirm one, call list_pending_reviews. If \
+the account shows 'belum dikenali', call list_accounts to find a match; if \
+none fits, ask the user before calling create_account. If the instrument shows \
+'belum dikenali', call list_instruments to find it (auto-matching only catches \
+exact names); if it isn't there, tell the user to add it in the web UI → Data \
+— instruments can't be created from chat. Then call confirm_review with the \
+account_id and/or instrument_id needed. Unlike todos/reminders, ALWAYS ask the \
+user to confirm before create_account or confirm_review — these write financial \
+data that can't be silently undone. Use reject_review to discard an item.";
 
 /// The slice of the LLM client the agent loop needs — a seam for test doubles.
 #[async_trait::async_trait]
@@ -397,5 +407,14 @@ mod tests {
         let prompt = system_prompt("2026-06-12T15:00:00+07:00");
         assert!(prompt.contains("create_event"), "{prompt}");
         assert!(prompt.contains("list_events"), "{prompt}");
+    }
+
+    #[test]
+    fn system_prompt_mentions_the_review_tools() {
+        let prompt = system_prompt("2026-06-12T10:00:00+07:00");
+        assert!(prompt.contains("list_pending_reviews"), "{prompt}");
+        assert!(prompt.contains("confirm_review"), "{prompt}");
+        assert!(prompt.contains("create_account"), "{prompt}");
+        assert!(prompt.contains("list_instruments"), "{prompt}");
     }
 }

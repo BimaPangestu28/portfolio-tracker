@@ -20,6 +20,12 @@ pub async fn dispatch(db: &Db, name: &str, input: &serde_json::Value) -> Result<
         "create_event" => create_event(db, input).await,
         "list_events" => list_events(db, input).await,
         "cancel_event" => cancel_event(db, input).await,
+        "reject_review" => reject_review(db, input).await,
+        "list_accounts" => list_accounts(db).await,
+        "create_account" => create_account(db, input).await,
+        "list_pending_reviews" => list_pending_reviews(db).await,
+        "confirm_review" => confirm_review(db, input).await,
+        "list_instruments" => list_instruments(db).await,
         _ => Err(format!("unknown tool: {name}")),
     }
 }
@@ -33,6 +39,18 @@ fn id_arg(input: &serde_json::Value, key: &str) -> Result<i64, String> {
         .get(key)
         .and_then(|v| v.as_i64())
         .ok_or_else(|| format!("missing integer argument '{key}'"))
+}
+
+/// Optional integer argument: absent/null → None; present-but-not-integer is
+/// an error so the model self-corrects instead of assuming a silent default.
+fn optional_id(input: &serde_json::Value, key: &str) -> Result<Option<i64>, String> {
+    match input.get(key) {
+        None | Some(serde_json::Value::Null) => Ok(None),
+        Some(v) => Ok(Some(
+            v.as_i64()
+                .ok_or_else(|| format!("{key} must be an integer, got {v}"))?,
+        )),
+    }
 }
 
 async fn create_todo(db: &Db, input: &serde_json::Value) -> Result<String, String> {
@@ -319,6 +337,125 @@ async fn cancel_event(db: &Db, input: &serde_json::Value) -> Result<String, Stri
     ))
 }
 
+async fn reject_review(db: &Db, input: &serde_json::Value) -> Result<String, String> {
+    let review_id = id_arg(input, "review_id")?;
+    crate::ingestion::review::reject(db, review_id)
+        .await
+        .map_err(|e| format!("{e}"))?;
+    Ok(format!("review #{review_id} ditolak"))
+}
+
+async fn list_accounts(db: &Db) -> Result<String, String> {
+    let accounts = crate::repo::accounts::list(db).await.map_err(|e| format!("db error: {e}"))?;
+    if accounts.is_empty() {
+        return Ok("no accounts yet".into());
+    }
+    let mut out = String::new();
+    for a in accounts {
+        out.push_str(&format!("#{} {} ({})\n", a.id, a.name, a.account_type));
+    }
+    Ok(out)
+}
+
+async fn list_instruments(db: &Db) -> Result<String, String> {
+    let instruments = crate::repo::instruments::list(db).await.map_err(|e| format!("db error: {e}"))?;
+    if instruments.is_empty() {
+        return Ok("no instruments yet".into());
+    }
+    let mut out = String::new();
+    for i in instruments {
+        out.push_str(&format!("#{} {} — {} ({})\n", i.id, i.symbol, i.name, i.instrument_type));
+    }
+    Ok(out)
+}
+
+async fn create_account(db: &Db, input: &serde_json::Value) -> Result<String, String> {
+    let name = str_arg(input, "name").ok_or("missing required argument 'name'")?;
+    let account_type =
+        str_arg(input, "account_type").ok_or("missing required argument 'account_type'")?;
+    let native_currency =
+        str_arg(input, "native_currency").ok_or("missing required argument 'native_currency'")?;
+    let account = crate::repo::accounts::create(db, &crate::repo::accounts::NewAccount {
+        name: name.to_string(),
+        account_type: account_type.to_string(),
+        institution: str_arg(input, "institution").map(str::to_string),
+        native_currency: native_currency.to_string(),
+        note: str_arg(input, "note").map(str::to_string),
+    })
+    .await
+    .map_err(|e| format!("db error: {e}"))?;
+    Ok(format!("created account #{} '{}'", account.id, account.name))
+}
+
+async fn list_pending_reviews(db: &Db) -> Result<String, String> {
+    let items = crate::repo::review_items::list_by_status(db, "pending")
+        .await
+        .map_err(|e| format!("db error: {e}"))?;
+    if items.is_empty() {
+        return Ok("no pending review items".into());
+    }
+    let mut out = String::new();
+    for item in items {
+        let entry: Option<crate::ingestion::extract::ExtractedEntry> =
+            serde_json::from_str(&item.payload_json).ok();
+        let entry_type = entry.as_ref().map(|e| e.entry_type.as_str()).unwrap_or("?");
+        let instrument = match item.suggested_instrument_id {
+            Some(instrument_id) => crate::repo::instruments::get(db, instrument_id)
+                .await
+                .ok()
+                .map(|i| format!("{} ({})", i.symbol, i.name))
+                .unwrap_or_else(|| "❓ belum dikenali".into()),
+            None => "❓ belum dikenali".into(),
+        };
+        let account = match item.suggested_account_id {
+            Some(account_id) => crate::repo::accounts::get(db, account_id)
+                .await
+                .ok()
+                .map(|a| a.name)
+                .unwrap_or_else(|| "❓ belum dikenali".into()),
+            None => "❓ belum dikenali".into(),
+        };
+        out.push_str(&format!(
+            "#{} {} — instrumen: {instrument} — akun: {account}",
+            item.id, entry_type
+        ));
+        if let Some(e) = &entry {
+            if let (Some(quantity), Some(price)) = (&e.quantity, &e.price_native) {
+                out.push_str(&format!(" — {quantity} @ {price}"));
+            } else if let Some(amount) = &e.amount_native {
+                out.push_str(&format!(" — nominal {amount}"));
+            }
+            if let Some(date) = &e.executed_at {
+                out.push_str(&format!(" — {date}"));
+            }
+        }
+        if item.suggested_account_id.is_none() || item.suggested_instrument_id.is_none() {
+            out.push_str(" [perlu dilengkapi sebelum konfirmasi]");
+        }
+        out.push('\n');
+    }
+    Ok(out)
+}
+
+async fn confirm_review(db: &Db, input: &serde_json::Value) -> Result<String, String> {
+    let review_id = id_arg(input, "review_id")?;
+    let account_id = optional_id(input, "account_id")?;
+    let instrument_id = optional_id(input, "instrument_id")?;
+    if account_id.is_some() || instrument_id.is_some() {
+        crate::repo::review_items::set_suggestions(db, review_id, account_id, instrument_id)
+            .await
+            .map_err(|e| format!("db error: {e}"))?;
+    }
+    let item = crate::repo::review_items::get(db, review_id)
+        .await
+        .map_err(|_| format!("review #{review_id} not found"))?;
+    let payload = crate::ingestion::review::build_confirm_payload(&item)?;
+    let txn_id = crate::ingestion::review::confirm(db, review_id, &payload)
+        .await
+        .map_err(|e| format!("{e}"))?;
+    Ok(format!("transaksi #{txn_id} dibuat dari review #{review_id}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -589,6 +726,88 @@ mod tests {
         assert!(err.contains("not found or already cancelled"), "{err}");
     }
 
+    /// Insert a bare `pending` review_item into `db`. When `account_id` or
+    /// `instrument_id` are `None` the FK columns are left NULL (safe because
+    /// `PRAGMA foreign_keys = ON` only rejects *non-NULL* values that don't
+    /// reference an existing row). Callers that need those FKs must create the
+    /// parent rows first and pass the resulting ids.
+    pub(super) async fn seed_pending_item(
+        db: &Db,
+        account_id: Option<i64>,
+        instrument_id: Option<i64>,
+    ) -> i64 {
+        crate::repo::review_items::create(db, &crate::repo::review_items::NewReviewItem {
+            batch_id: "b1",
+            source_kind: "image",
+            source_filename: "f.jpg",
+            source_path: "",
+            doc_type: "txn_history",
+            needs_attention: false,
+            payload_json: r#"{ "entry_type": "buy", "symbol": "BTC", "quantity": "1",
+                "price_native": "100", "fee_native": "0", "currency": "IDR",
+                "executed_at": "2026-06-04", "confidence": 0.95 }"#,
+            raw_llm_json: "{}",
+            suggested_instrument_id: instrument_id,
+            suggested_account_id: account_id,
+        })
+        .await
+        .unwrap()
+        .id
+    }
+
+    #[tokio::test]
+    async fn confirm_review_with_account_override_creates_txn() {
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        let instrument = crate::repo::instruments::create(&db, &crate::repo::instruments::NewInstrument {
+            symbol: "BTC".into(), name: "Bitcoin".into(), instrument_type: "crypto".into(),
+            native_currency: "USD".into(), category_id: None, price_source: "manual".into(),
+            decimals: Some(8), note: None,
+        }).await.unwrap();
+        let account = crate::repo::accounts::create(&db, &crate::repo::accounts::NewAccount {
+            name: "Nanovest".into(), account_type: "broker".into(), institution: None,
+            native_currency: "IDR".into(), note: None,
+        }).await.unwrap();
+        // Account unknown at ingest time; instrument matched.
+        let id = seed_pending_item(&db, None, Some(instrument.id)).await;
+
+        let out = dispatch(&db, "confirm_review", &serde_json::json!({
+            "review_id": id, "account_id": account.id
+        })).await.unwrap();
+        assert!(out.contains("dibuat"), "{out}");
+
+        let item = crate::repo::review_items::get(&db, id).await.unwrap();
+        assert_eq!(item.status, "confirmed");
+        assert!(item.created_txn_id.is_some());
+    }
+
+    #[tokio::test]
+    async fn confirm_review_still_incomplete_returns_reason() {
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        let instrument = crate::repo::instruments::create(&db, &crate::repo::instruments::NewInstrument {
+            symbol: "BTC".into(), name: "Bitcoin".into(), instrument_type: "crypto".into(),
+            native_currency: "USD".into(), category_id: None, price_source: "manual".into(),
+            decimals: Some(8), note: None,
+        }).await.unwrap();
+        // No account supplied and none seeded → not confirmable.
+        let id = seed_pending_item(&db, None, Some(instrument.id)).await;
+        let err = dispatch(&db, "confirm_review", &serde_json::json!({ "review_id": id })).await.unwrap_err();
+        assert!(err.contains("akun belum dikenali"), "{err}");
+        let item = crate::repo::review_items::get(&db, id).await.unwrap();
+        assert_eq!(item.status, "pending", "must not confirm");
+    }
+
+    #[tokio::test]
+    async fn reject_review_marks_item_rejected() {
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        let id = seed_pending_item(&db, None, None).await;
+        let out = dispatch(&db, "reject_review", &serde_json::json!({ "review_id": id }))
+            .await
+            .unwrap();
+        assert!(out.contains("ditolak"), "{out}");
+        let item = crate::repo::review_items::get(&db, id).await.unwrap();
+        assert_eq!(item.status, "rejected");
+    }
+
     #[tokio::test]
     async fn cancel_event_after_reminder_sent_omits_the_reminder_note() {
         let db = mem_db().await;
@@ -601,5 +820,118 @@ mod tests {
             .await.unwrap();
         assert!(out.contains("cancelled"), "{out}");
         assert!(!out.contains("reminder"), "{out}");
+    }
+
+    #[tokio::test]
+    async fn create_account_then_list_shows_it() {
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        let out = dispatch(&db, "create_account", &serde_json::json!({
+            "name": "Nanovest", "account_type": "broker", "native_currency": "IDR"
+        })).await.unwrap();
+        assert!(out.contains("Nanovest"), "{out}");
+
+        let listed = dispatch(&db, "list_accounts", &serde_json::json!({})).await.unwrap();
+        assert!(listed.contains("Nanovest"), "{listed}");
+        assert!(listed.contains("broker"), "{listed}");
+    }
+
+    #[tokio::test]
+    async fn create_account_requires_name() {
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        let err = dispatch(&db, "create_account", &serde_json::json!({
+            "account_type": "broker", "native_currency": "IDR"
+        })).await.unwrap_err();
+        assert!(err.contains("name"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn list_pending_reviews_flags_unknown_account() {
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        let instrument = crate::repo::instruments::create(&db, &crate::repo::instruments::NewInstrument {
+            symbol: "BTC".into(), name: "Bitcoin".into(), instrument_type: "crypto".into(),
+            native_currency: "USD".into(), category_id: None, price_source: "manual".into(),
+            decimals: Some(8), note: None,
+        }).await.unwrap();
+        let id = seed_pending_item(&db, None, Some(instrument.id)).await;
+
+        let out = dispatch(&db, "list_pending_reviews", &serde_json::json!({})).await.unwrap();
+        assert!(out.contains(&format!("#{id}")), "{out}");
+        assert!(out.contains("BTC"), "instrument shown: {out}");
+        assert!(out.contains("belum dikenali"), "unknown account flagged: {out}");
+        assert!(out.contains("perlu dilengkapi"), "blocker noted: {out}");
+    }
+
+    #[tokio::test]
+    async fn list_pending_reviews_empty_is_explicit() {
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        let out = dispatch(&db, "list_pending_reviews", &serde_json::json!({})).await.unwrap();
+        assert!(out.contains("no pending"), "{out}");
+    }
+
+    #[tokio::test]
+    async fn list_instruments_shows_existing() {
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        crate::repo::instruments::create(&db, &crate::repo::instruments::NewInstrument {
+            symbol: "BTC".into(), name: "Bitcoin".into(), instrument_type: "crypto".into(),
+            native_currency: "USD".into(), category_id: None, price_source: "manual".into(),
+            decimals: Some(8), note: None,
+        }).await.unwrap();
+        let out = dispatch(&db, "list_instruments", &serde_json::json!({})).await.unwrap();
+        assert!(out.contains("BTC"), "{out}");
+        assert!(out.contains("Bitcoin"), "{out}");
+    }
+
+    #[tokio::test]
+    async fn list_instruments_empty_is_explicit() {
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        let out = dispatch(&db, "list_instruments", &serde_json::json!({})).await.unwrap();
+        assert!(out.contains("no instruments"), "{out}");
+    }
+
+    #[tokio::test]
+    async fn confirm_review_with_instrument_override_creates_txn() {
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        let instrument = crate::repo::instruments::create(&db, &crate::repo::instruments::NewInstrument {
+            symbol: "BTC".into(), name: "Bitcoin".into(), instrument_type: "crypto".into(),
+            native_currency: "USD".into(), category_id: None, price_source: "manual".into(),
+            decimals: Some(8), note: None,
+        }).await.unwrap();
+        let account = crate::repo::accounts::create(&db, &crate::repo::accounts::NewAccount {
+            name: "Nanovest".into(), account_type: "broker".into(), institution: None,
+            native_currency: "IDR".into(), note: None,
+        }).await.unwrap();
+        // Instrument unknown at ingest; account matched.
+        let id = seed_pending_item(&db, Some(account.id), None).await;
+        let out = dispatch(&db, "confirm_review", &serde_json::json!({
+            "review_id": id, "instrument_id": instrument.id
+        })).await.unwrap();
+        assert!(out.contains("dibuat"), "{out}");
+        let item = crate::repo::review_items::get(&db, id).await.unwrap();
+        assert_eq!(item.status, "confirmed");
+        assert!(item.created_txn_id.is_some());
+    }
+
+    #[tokio::test]
+    async fn list_pending_reviews_shows_amount_only_nominal() {
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        let instrument = crate::repo::instruments::create(&db, &crate::repo::instruments::NewInstrument {
+            symbol: "SBF".into(), name: "Sucorinvest Bond Fund".into(), instrument_type: "mutual_fund".into(),
+            native_currency: "IDR".into(), category_id: None, price_source: "manual".into(),
+            decimals: Some(4), note: None,
+        }).await.unwrap();
+        let account = crate::repo::accounts::create(&db, &crate::repo::accounts::NewAccount {
+            name: "Bibit".into(), account_type: "broker".into(), institution: None,
+            native_currency: "IDR".into(), note: None,
+        }).await.unwrap();
+        crate::repo::review_items::create(&db, &crate::repo::review_items::NewReviewItem {
+            batch_id: "b9", source_kind: "image", source_filename: "f.jpg",
+            source_path: "", doc_type: "txn_history", needs_attention: false,
+            payload_json: r#"{ "entry_type": "buy", "instrument_name": "Sucorinvest Bond Fund",
+                "amount_native": "13000000", "currency": "IDR", "confidence": 0.72 }"#,
+            raw_llm_json: "{}",
+            suggested_instrument_id: Some(instrument.id), suggested_account_id: Some(account.id),
+        }).await.unwrap();
+        let out = dispatch(&db, "list_pending_reviews", &serde_json::json!({})).await.unwrap();
+        assert!(out.contains("nominal 13000000"), "{out}");
     }
 }

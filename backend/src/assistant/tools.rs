@@ -119,6 +119,58 @@ pub fn definitions() -> serde_json::Value {
                 "properties": { "id": { "type": "integer", "description": "Event id" } },
                 "required": ["id"]
             }
+        },
+        {
+            "name": "reject_review",
+            "description": "Reject (discard) a pending ingest review item so it is not turned into a transaction. Get the id from list_pending_reviews.",
+            "input_schema": {
+                "type": "object",
+                "properties": { "review_id": { "type": "integer", "description": "Review item id" } },
+                "required": ["review_id"]
+            }
+        },
+        {
+            "name": "list_accounts",
+            "description": "List the owner's investment accounts (id, name, type). Use before create_account to reuse an existing account, and to find an account_id for confirm_review.",
+            "input_schema": { "type": "object", "properties": {} }
+        },
+        {
+            "name": "create_account",
+            "description": "Create a new investment account (e.g. a broker like Nanovest the owner doesn't have yet). Always ask the user to confirm before calling — this writes data.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "name": { "type": "string", "description": "Account name, e.g. Nanovest" },
+                    "account_type": { "type": "string", "description": "Type, e.g. broker, exchange, bank" },
+                    "native_currency": { "type": "string", "description": "ISO currency code, e.g. IDR or USD" },
+                    "institution": { "type": "string", "description": "Optional institution name" },
+                    "note": { "type": "string", "description": "Optional note" }
+                },
+                "required": ["name", "account_type", "native_currency"]
+            }
+        },
+        {
+            "name": "list_pending_reviews",
+            "description": "List ingest review items awaiting confirmation (from photos/PDFs the owner sent). Each line shows the review id, type, instrument, account, amounts, date, and flags items whose account or instrument isn't recognized yet. Use when the user asks to enter/confirm a transaction they sent.",
+            "input_schema": { "type": "object", "properties": {} }
+        },
+        {
+            "name": "confirm_review",
+            "description": "Confirm a pending review item, turning it into a transaction. Pass account_id and/or instrument_id to fill in anything flagged 'belum dikenali' (create the account first with create_account if needed). Always ask the user to confirm before calling — this writes a transaction.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "review_id": { "type": "integer", "description": "Review item id from list_pending_reviews" },
+                    "account_id": { "type": "integer", "description": "Optional account id to set when the item's account is unknown" },
+                    "instrument_id": { "type": "integer", "description": "Optional instrument id to set when the item's instrument is unknown" }
+                },
+                "required": ["review_id"]
+            }
+        },
+        {
+            "name": "list_instruments",
+            "description": "List the owner's known instruments (id, symbol, name, type). Use to find an instrument_id for confirm_review when a review item's instrument shows 'belum dikenali' but the instrument may already exist under a slightly different name. If it genuinely doesn't exist, tell the user to add it in the web UI → Data (instruments can't be created from chat).",
+            "input_schema": { "type": "object", "properties": {} }
         }
     ])
 }
@@ -143,6 +195,8 @@ mod tests {
                 "create_reminder", "list_reminders", "cancel_reminder",
                 "get_portfolio_summary", "search_memory", "remember",
                 "create_event", "list_events", "cancel_event",
+                "reject_review", "list_accounts", "create_account",
+                "list_pending_reviews", "confirm_review", "list_instruments",
             ]
         );
         for tool in defs.as_array().unwrap() {
@@ -172,5 +226,11 @@ mod tests {
             serde_json::json!(["title", "start_at"])
         );
         assert_eq!(find("cancel_event")["input_schema"]["required"], serde_json::json!(["id"]));
+        assert_eq!(find("reject_review")["input_schema"]["required"], serde_json::json!(["review_id"]));
+        assert_eq!(find("confirm_review")["input_schema"]["required"], serde_json::json!(["review_id"]));
+        assert_eq!(
+            find("create_account")["input_schema"]["required"],
+            serde_json::json!(["name", "account_type", "native_currency"])
+        );
     }
 }

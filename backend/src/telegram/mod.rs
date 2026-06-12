@@ -30,7 +30,6 @@ pub fn plan_action(linked_chat_id: Option<i64>, from_chat_id: i64) -> Action {
 
 use crate::db::Db;
 use crate::ingestion::extract::ExtractedEntry;
-use crate::ingestion::review::ConfirmPayload;
 use crate::repo::review_items::ReviewItemRow;
 use client::{TelegramClient, TgCallbackQuery, TgError, TgMessage, TgUpdate};
 use state::SharedTgState;
@@ -75,68 +74,6 @@ pub fn parse_callback(data: &str) -> Option<CallbackAction> {
         "tododone" => Some(CallbackAction::TodoDone(id)),
         _ => None,
     }
-}
-
-/// Coerce a payload date into RFC3339: full RFC3339 passes through,
-/// "YYYY-MM-DDTHH:MM" and date-only values are assumed UTC.
-fn to_rfc3339(s: &str) -> Option<String> {
-    if chrono::DateTime::parse_from_rfc3339(s).is_ok() {
-        return Some(s.to_string());
-    }
-    if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M") {
-        return Some(format!("{}Z", dt.format("%Y-%m-%dT%H:%M:%S")));
-    }
-    if let Ok(d) = chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d") {
-        return Some(format!("{d}T00:00:00Z"));
-    }
-    None
-}
-
-/// Build the ConfirmPayload for one-tap confirmation, or explain (in user
-/// language) why the item must be completed in the web UI instead.
-pub fn build_confirm_payload(item: &ReviewItemRow) -> Result<ConfirmPayload, String> {
-    if item.needs_attention != 0 {
-        return Err("item ini perlu dicek manual".into());
-    }
-    let account_id = item.suggested_account_id.ok_or("akun belum dikenali")?;
-    let instrument_id = item.suggested_instrument_id.ok_or("instrumen belum dikenali")?;
-    let entry: ExtractedEntry = serde_json::from_str(&item.payload_json)
-        .map_err(|e| format!("payload tidak terbaca: {e}"))?;
-    // Amount-only fund entries (an IDR amount, no units/NAV — e.g. Bibit) are
-    // one-tap confirmable: confirm() derives NAV units when a stored bibit
-    // quote exists, else records quantity = amount at price 1, for buy/sell.
-    let amount_only = entry.quantity.is_none()
-        && entry.price_native.is_none()
-        && entry.amount_native.is_some()
-        && matches!(entry.entry_type.as_str(), "buy" | "sell");
-    let (quantity, price_native) = if amount_only {
-        (String::new(), String::new())
-    } else {
-        (
-            entry.quantity.ok_or("jumlah tidak ada")?,
-            entry.price_native.ok_or("harga tidak ada")?,
-        )
-    };
-    let currency = entry.currency.ok_or("mata uang tidak ada")?;
-    let executed_at = match &entry.executed_at {
-        Some(raw) => to_rfc3339(raw).ok_or_else(|| format!("tanggal tidak terbaca: {raw}"))?,
-        // Mirrors the web UI, which defaults the executed-at field to now.
-        None => chrono::Utc::now().to_rfc3339(),
-    };
-    Ok(ConfirmPayload {
-        account_id,
-        instrument_id,
-        entry_type: entry.entry_type,
-        executed_at,
-        quantity,
-        price_native,
-        fee_native: entry.fee_native,
-        currency,
-        fx_to_idr: None,
-        fx_to_usd: None,
-        note: entry.note,
-        amount_native: entry.amount_native,
-    })
 }
 
 /// Format a payload number with Indonesian separators, falling back to the
@@ -406,7 +343,7 @@ async fn send_review_prompts(
         );
         let confirm_data = format!("confirm:{}", item.id);
         let reject_data = format!("reject:{}", item.id);
-        let send_result = match build_confirm_payload(item) {
+        let send_result = match crate::ingestion::review::build_confirm_payload(item) {
             Ok(_) => {
                 client
                     .send_message_with_buttons(
@@ -467,7 +404,7 @@ async fn handle_callback(client: &TelegramClient, db: &Db, callback: TgCallbackQ
 /// Confirm a staged item using its suggested account/instrument.
 async fn confirm_item(db: &Db, item_id: i64) -> anyhow::Result<String> {
     let item = crate::repo::review_items::get(db, item_id).await?;
-    let payload = build_confirm_payload(&item)
+    let payload = crate::ingestion::review::build_confirm_payload(&item)
         .map_err(|reason| anyhow::anyhow!("{reason} — lengkapi di web UI → Data"))?;
     let txn_id = crate::ingestion::review::confirm(db, item_id, &payload).await?;
     Ok(format!("✅ Transaksi #{txn_id} dibuat."))
@@ -592,14 +529,8 @@ mod tests {
         assert!(again.contains("sudah") || again.contains("tidak ditemukan"), "{again}");
     }
 
-    #[test]
-    fn coerces_dates_to_rfc3339() {
-        assert_eq!(to_rfc3339("2026-06-04T11:32:00Z").as_deref(), Some("2026-06-04T11:32:00Z"));
-        assert_eq!(to_rfc3339("2026-06-04T11:32").as_deref(), Some("2026-06-04T11:32:00Z"));
-        assert_eq!(to_rfc3339("2026-06-04").as_deref(), Some("2026-06-04T00:00:00Z"));
-        assert_eq!(to_rfc3339("kemarin"), None);
-    }
-
+    // Helpers for the item_summary tests below (private copies; the authoritative
+    // build_confirm_payload tests live in ingestion::review).
     fn review_item(payload_json: &str) -> crate::repo::review_items::ReviewItemRow {
         crate::repo::review_items::ReviewItemRow {
             id: 42,
@@ -626,63 +557,10 @@ mod tests {
         "executed_at": "2026-06-04", "confidence": 0.95
     }"#;
 
-    #[test]
-    fn full_items_build_a_confirm_payload() {
-        let payload = build_confirm_payload(&review_item(FULL_PAYLOAD)).expect("confirmable");
-        assert_eq!(payload.account_id, 2);
-        assert_eq!(payload.instrument_id, 9);
-        assert_eq!(payload.entry_type, "buy");
-        assert_eq!(payload.quantity, "0.00128248");
-        assert_eq!(payload.executed_at, "2026-06-04T00:00:00Z");
-        assert_eq!(payload.currency, "IDR");
-    }
-
-    #[test]
-    fn attention_items_are_not_confirmable() {
-        let mut item = review_item(FULL_PAYLOAD);
-        item.needs_attention = 1;
-        assert!(build_confirm_payload(&item).is_err());
-    }
-
-    #[test]
-    fn items_without_suggestions_are_not_confirmable() {
-        let mut item = review_item(FULL_PAYLOAD);
-        item.suggested_account_id = None;
-        assert!(build_confirm_payload(&item).is_err());
-
-        let mut item = review_item(FULL_PAYLOAD);
-        item.suggested_instrument_id = None;
-        assert!(build_confirm_payload(&item).is_err());
-    }
-
-    #[test]
-    fn items_missing_core_fields_are_not_confirmable() {
-        let payload = r#"{ "entry_type": "buy", "symbol": "BTC", "confidence": 0.95 }"#;
-        assert!(build_confirm_payload(&review_item(payload)).is_err());
-    }
-
     const AMOUNT_ONLY_PAYLOAD: &str = r#"{
         "entry_type": "buy", "instrument_name": "Sucorinvest Bond Fund",
         "amount_native": "13000000", "currency": "IDR", "confidence": 0.72
     }"#;
-
-    #[test]
-    fn amount_only_fund_items_build_a_confirm_payload() {
-        // Bibit-style: nominal only, no units/NAV. confirm() maps the amount to
-        // quantity = amount at price 1, so empty qty/price are intentional here.
-        let payload =
-            build_confirm_payload(&review_item(AMOUNT_ONLY_PAYLOAD)).expect("confirmable");
-        assert_eq!(payload.quantity, "");
-        assert_eq!(payload.price_native, "");
-        assert_eq!(payload.amount_native.as_deref(), Some("13000000"));
-        assert_eq!(payload.currency, "IDR");
-    }
-
-    #[test]
-    fn amount_only_dividend_is_not_confirmable() {
-        let payload = r#"{ "entry_type": "dividend", "amount_native": "100000", "currency": "IDR", "confidence": 0.9 }"#;
-        assert!(build_confirm_payload(&review_item(payload)).is_err());
-    }
 
     #[test]
     fn amount_only_summary_shows_the_nominal() {
