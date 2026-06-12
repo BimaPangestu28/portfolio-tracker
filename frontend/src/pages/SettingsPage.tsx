@@ -20,6 +20,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import WhatsAppPage from "./WhatsAppPage";
 import TelegramPage from "./TelegramPage";
+import GoogleCalendarCard from "../components/GoogleCalendarCard";
 
 const today = () => new Date().toISOString().slice(0, 10);
 const ACCOUNT_TYPES = ["manual", "exchange", "broker", "bank", "wallet"];
@@ -113,16 +114,28 @@ export default function SettingsPage() {
         >
           Telegram
         </button>
+        <button
+          type="button"
+          className={`ptab${tab === "google" ? " active" : ""}`}
+          onClick={() => setTab("google")}
+        >
+          Google Calendar
+        </button>
       </div>
 
       {tab === "general" && <GeneralSettings />}
       {tab === "whatsapp" && <WhatsAppPage />}
       {tab === "telegram" && <TelegramPage />}
+      {tab === "google" && (
+        <div className="space-y-4 pt-4">
+          <GoogleCalendarCard />
+        </div>
+      )}
     </div>
   );
 }
 
-type Tab = "general" | "whatsapp" | "telegram";
+type Tab = "general" | "whatsapp" | "telegram" | "google";
 
 function GeneralSettings() {
   const accounts = useAccounts();

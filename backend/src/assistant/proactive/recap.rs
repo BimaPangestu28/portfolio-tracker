@@ -315,6 +315,11 @@ mod tests {
             start_at: "2026-06-17T02:00:00Z".into(),
             status: "scheduled".into(),
             created_at: String::new(),
+            source: "local".into(),
+            google_event_id: None,
+            google_etag: None,
+            synced_at: None,
+            updated_at: None,
         }];
         let block = render_data_block(&d);
         assert!(block.contains("- event: kontrol gigi"), "{block}");

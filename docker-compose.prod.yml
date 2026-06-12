@@ -23,6 +23,11 @@ services:
       # Optional: enables the Telegram chatbot channel when set.
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       RUST_LOG: ${RUST_LOG:-info}
+      # Optional: Google Calendar sync. Leave unset to disable.
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-}
+      GOOGLE_TOKEN_ENC_KEY: ${GOOGLE_TOKEN_ENC_KEY:-}
     volumes:
       - backend_data:/data
     expose:

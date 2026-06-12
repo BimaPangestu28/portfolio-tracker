@@ -27,6 +27,17 @@ async function request<T>(path: string, schema: z.ZodType<T>, init?: RequestInit
   return schema.parse(json);
 }
 
+// ── Google Calendar schemas ──────────────────────────────────────────────────
+
+const googleStatusSchema = z.object({
+  status: z.enum(["connected", "disconnected", "error"]),
+  last_error: z.string().nullable(),
+});
+
+const googleStartSchema = z.object({ consent_url: z.string() });
+
+// ── API client ───────────────────────────────────────────────────────────────
+
 export const api = {
   get: <T>(path: string, schema: z.ZodType<T>) => request(path, schema, { method: "GET" }),
   post: <T>(path: string, schema: z.ZodType<T>, body: unknown) =>
@@ -34,4 +45,9 @@ export const api = {
   patch: <T>(path: string, schema: z.ZodType<T>, body: unknown) =>
     request(path, schema, { method: "PATCH", body: JSON.stringify(body) }),
   del: (path: string) => request(path, z.unknown(), { method: "DELETE" }),
+
+  // Google Calendar integration
+  googleStatus: () => request("/google/status", googleStatusSchema),
+  googleStart: () => request("/google/oauth/start", googleStartSchema),
+  googleDisconnect: () => request("/google/disconnect", googleStatusSchema, { method: "POST" }),
 };
