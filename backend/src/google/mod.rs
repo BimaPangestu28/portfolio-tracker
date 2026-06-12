@@ -4,3 +4,4 @@
 pub mod calendar;
 pub mod crypto;
 pub mod oauth;
+pub mod sync;
