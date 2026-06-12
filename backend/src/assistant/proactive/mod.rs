@@ -2,6 +2,7 @@
 //! Deterministic gathering → LLM composition (with fallback) → Telegram.
 
 pub mod alerts;
+pub mod briefing;
 pub mod compose;
 pub mod tick;
 
