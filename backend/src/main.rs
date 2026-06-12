@@ -2,6 +2,7 @@ mod api;
 mod assistant;
 mod auth;
 mod connectors;
+mod google;
 mod db;
 mod domain;
 mod error;
