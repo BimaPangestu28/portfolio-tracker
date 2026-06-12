@@ -665,7 +665,11 @@ pub async fn evaluate(
             // one — see super::snapshot_before) vs current net worth.
             match crate::repo::snapshots::history(db).await {
                 Ok(rows) => {
-                    if let Some(prev) = super::snapshot_before(&rows, today_wib) {
+                    // ~24h baseline (see snapshot_before doc): yesterday WIB.
+                    let yesterday = chrono::NaiveDate::parse_from_str(today_wib, "%Y-%m-%d")
+                        .map(|d| (d - chrono::Duration::days(1)).format("%Y-%m-%d").to_string())
+                        .unwrap_or_else(|_| today_wib.to_string());
+                    if let Some(prev) = super::snapshot_before(&rows, &yesterday) {
                         let prev_idr = prev.trunc().to_string().parse::<i64>().unwrap_or(0);
                         let curr_idr = summary
                             .net_worth_idr
@@ -870,11 +874,13 @@ pub async fn gather(db: &Db) -> anyhow::Result<BriefingData> {
     let (net_worth_idr, delta_vs_yesterday_idr) =
         match crate::service::portfolio::build_summary(db).await {
             Ok(summary) => {
-                // Baseline = yesterday's snapshot, NOT the latest row (the
-                // hourly scheduler overwrites today's). Shared helper added
-                // by the milestone-baseline fix.
+                // ~24h baseline: see snapshot_before's doc for why yesterday
+                // (snapshot rows are UTC-keyed; "before today" would be a
+                // one-hour-old value).
+                let yesterday =
+                    (now_wib - chrono::Duration::days(1)).format("%Y-%m-%d").to_string();
                 let delta = match crate::repo::snapshots::history(db).await {
-                    Ok(rows) => super::snapshot_before(&rows, &today)
+                    Ok(rows) => super::snapshot_before(&rows, &yesterday)
                         .map(|prev| summary.net_worth_idr - prev),
                     Err(_) => None,
                 };
