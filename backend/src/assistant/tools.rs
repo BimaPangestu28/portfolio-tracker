@@ -84,6 +84,41 @@ pub fn definitions() -> serde_json::Value {
                 },
                 "required": ["note"]
             }
+        },
+        {
+            "name": "create_event",
+            "description": "Create an agenda event. Use for appointments and meetings ('meeting vendor besok jam 2'). A reminder fires 30 minutes before by default.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "title": { "type": "string", "description": "What the event is" },
+                    "start_at": { "type": "string", "description": "Start time, RFC3339 with +07:00 offset, must be in the future, e.g. 2026-06-13T14:00:00+07:00" },
+                    "location": { "type": "string", "description": "Optional place" },
+                    "notes": { "type": "string", "description": "Optional extra detail" },
+                    "remind_minutes_before": { "type": "integer", "description": "Minutes before start to remind; default 30; 0 disables the reminder" }
+                },
+                "required": ["title", "start_at"]
+            }
+        },
+        {
+            "name": "list_events",
+            "description": "List scheduled agenda events in a time range. Default: the next 7 days. Use for 'besok ada apa?', 'jadwal minggu ini'.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "from": { "type": "string", "description": "Range start, RFC3339 with +07:00; default now" },
+                    "to": { "type": "string", "description": "Range end (exclusive), RFC3339 with +07:00; default from + 7 days" }
+                }
+            }
+        },
+        {
+            "name": "cancel_event",
+            "description": "Cancel a scheduled agenda event (its pre-event reminder is cancelled too). Look up the id with list_events first if unsure.",
+            "input_schema": {
+                "type": "object",
+                "properties": { "id": { "type": "integer", "description": "Event id" } },
+                "required": ["id"]
+            }
         }
     ])
 }
@@ -107,6 +142,7 @@ mod tests {
                 "create_todo", "list_todos", "complete_todo",
                 "create_reminder", "list_reminders", "cancel_reminder",
                 "get_portfolio_summary", "search_memory", "remember",
+                "create_event", "list_events", "cancel_event",
             ]
         );
         for tool in defs.as_array().unwrap() {
@@ -131,5 +167,10 @@ mod tests {
         assert_eq!(find("cancel_reminder")["input_schema"]["required"], serde_json::json!(["id"]));
         assert_eq!(find("search_memory")["input_schema"]["required"], serde_json::json!(["query"]));
         assert_eq!(find("remember")["input_schema"]["required"], serde_json::json!(["note"]));
+        assert_eq!(
+            find("create_event")["input_schema"]["required"],
+            serde_json::json!(["title", "start_at"])
+        );
+        assert_eq!(find("cancel_event")["input_schema"]["required"], serde_json::json!(["id"]));
     }
 }
