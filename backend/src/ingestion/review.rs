@@ -1,4 +1,6 @@
 use crate::db::Db;
+use crate::ingestion::extract::ExtractedEntry;
+use crate::repo::review_items::ReviewItemRow;
 use serde::Deserialize;
 
 /// The confirm payload the API hands to the service: resolved ids + the (edited) fields.
@@ -23,6 +25,67 @@ pub struct ConfirmPayload {
     /// amount). Used when quantity/price are absent: quantity = amount, price = 1.
     #[serde(default)]
     pub amount_native: Option<String>,
+}
+
+/// Coerce a payload date into RFC3339: full RFC3339 passes through,
+/// "YYYY-MM-DDTHH:MM" and date-only values are assumed UTC.
+pub fn to_rfc3339(s: &str) -> Option<String> {
+    if chrono::DateTime::parse_from_rfc3339(s).is_ok() {
+        return Some(s.to_string());
+    }
+    if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M") {
+        return Some(format!("{}Z", dt.format("%Y-%m-%dT%H:%M:%S")));
+    }
+    if let Ok(d) = chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d") {
+        return Some(format!("{d}T00:00:00Z"));
+    }
+    None
+}
+
+/// Build the ConfirmPayload for one-tap confirmation, or explain (in user
+/// language) why the item must be completed in the web UI instead.
+pub fn build_confirm_payload(item: &ReviewItemRow) -> Result<ConfirmPayload, String> {
+    if item.needs_attention != 0 {
+        return Err("item ini perlu dicek manual".into());
+    }
+    let account_id = item.suggested_account_id.ok_or("akun belum dikenali")?;
+    let instrument_id = item.suggested_instrument_id.ok_or("instrumen belum dikenali")?;
+    let entry: ExtractedEntry = serde_json::from_str(&item.payload_json)
+        .map_err(|e| format!("payload tidak terbaca: {e}"))?;
+    // Amount-only fund entries (an IDR amount, no units/NAV — e.g. Bibit) are
+    // one-tap confirmable: confirm() derives NAV units when a stored bibit
+    // quote exists, else records quantity = amount at price 1, for buy/sell.
+    let amount_only = entry.quantity.is_none()
+        && entry.price_native.is_none()
+        && entry.amount_native.is_some()
+        && matches!(entry.entry_type.as_str(), "buy" | "sell");
+    let (quantity, price_native) = if amount_only {
+        (String::new(), String::new())
+    } else {
+        (
+            entry.quantity.ok_or("jumlah tidak ada")?,
+            entry.price_native.ok_or("harga tidak ada")?,
+        )
+    };
+    let currency = entry.currency.ok_or("mata uang tidak ada")?;
+    let executed_at = match &entry.executed_at {
+        Some(raw) => to_rfc3339(raw).ok_or_else(|| format!("tanggal tidak terbaca: {raw}"))?,
+        None => chrono::Utc::now().to_rfc3339(),
+    };
+    Ok(ConfirmPayload {
+        account_id,
+        instrument_id,
+        entry_type: entry.entry_type,
+        executed_at,
+        quantity,
+        price_native,
+        fee_native: entry.fee_native,
+        currency,
+        fx_to_idr: None,
+        fx_to_usd: None,
+        note: entry.note,
+        amount_native: entry.amount_native,
+    })
 }
 
 use crate::repo::{instruments::InstrumentRow, prices, review_items, transactions};
@@ -141,6 +204,96 @@ mod tests {
     use super::*;
     use crate::repo::{accounts, instruments, review_items, transactions};
     use rust_decimal_macros::dec;
+
+    fn review_item(payload_json: &str) -> crate::repo::review_items::ReviewItemRow {
+        crate::repo::review_items::ReviewItemRow {
+            id: 42,
+            batch_id: "tg-1".into(),
+            source_kind: "image".into(),
+            source_filename: "telegram-photo.jpg".into(),
+            source_path: "".into(),
+            doc_type: "txn_history".into(),
+            status: "pending".into(),
+            needs_attention: 0,
+            payload_json: payload_json.into(),
+            raw_llm_json: "{}".into(),
+            suggested_instrument_id: Some(9),
+            suggested_account_id: Some(2),
+            created_txn_id: None,
+            created_at: "2026-06-05T00:00:00Z".into(),
+            confirmed_at: None,
+        }
+    }
+
+    const FULL_PAYLOAD: &str = r#"{
+        "entry_type": "buy", "symbol": "BTC", "quantity": "0.00128248",
+        "price_native": "1169608882", "fee_native": "0", "currency": "IDR",
+        "executed_at": "2026-06-04", "confidence": 0.95
+    }"#;
+
+    const AMOUNT_ONLY_PAYLOAD: &str = r#"{
+        "entry_type": "buy", "instrument_name": "Sucorinvest Bond Fund",
+        "amount_native": "13000000", "currency": "IDR", "confidence": 0.72
+    }"#;
+
+    #[test]
+    fn coerces_dates_to_rfc3339() {
+        assert_eq!(to_rfc3339("2026-06-04T11:32:00Z").as_deref(), Some("2026-06-04T11:32:00Z"));
+        assert_eq!(to_rfc3339("2026-06-04T11:32").as_deref(), Some("2026-06-04T11:32:00Z"));
+        assert_eq!(to_rfc3339("2026-06-04").as_deref(), Some("2026-06-04T00:00:00Z"));
+        assert_eq!(to_rfc3339("kemarin"), None);
+    }
+
+    #[test]
+    fn full_items_build_a_confirm_payload() {
+        let payload = build_confirm_payload(&review_item(FULL_PAYLOAD)).expect("confirmable");
+        assert_eq!(payload.account_id, 2);
+        assert_eq!(payload.instrument_id, 9);
+        assert_eq!(payload.entry_type, "buy");
+        assert_eq!(payload.quantity, "0.00128248");
+        assert_eq!(payload.executed_at, "2026-06-04T00:00:00Z");
+        assert_eq!(payload.currency, "IDR");
+    }
+
+    #[test]
+    fn attention_items_are_not_confirmable() {
+        let mut item = review_item(FULL_PAYLOAD);
+        item.needs_attention = 1;
+        assert!(build_confirm_payload(&item).is_err());
+    }
+
+    #[test]
+    fn items_without_suggestions_are_not_confirmable() {
+        let mut item = review_item(FULL_PAYLOAD);
+        item.suggested_account_id = None;
+        assert!(build_confirm_payload(&item).is_err());
+
+        let mut item = review_item(FULL_PAYLOAD);
+        item.suggested_instrument_id = None;
+        assert!(build_confirm_payload(&item).is_err());
+    }
+
+    #[test]
+    fn items_missing_core_fields_are_not_confirmable() {
+        let payload = r#"{ "entry_type": "buy", "symbol": "BTC", "confidence": 0.95 }"#;
+        assert!(build_confirm_payload(&review_item(payload)).is_err());
+    }
+
+    #[test]
+    fn amount_only_fund_items_build_a_confirm_payload() {
+        let payload =
+            build_confirm_payload(&review_item(AMOUNT_ONLY_PAYLOAD)).expect("confirmable");
+        assert_eq!(payload.quantity, "");
+        assert_eq!(payload.price_native, "");
+        assert_eq!(payload.amount_native.as_deref(), Some("13000000"));
+        assert_eq!(payload.currency, "IDR");
+    }
+
+    #[test]
+    fn amount_only_dividend_is_not_confirmable() {
+        let payload = r#"{ "entry_type": "dividend", "amount_native": "100000", "currency": "IDR", "confidence": 0.9 }"#;
+        assert!(build_confirm_payload(&review_item(payload)).is_err());
+    }
 
     async fn seed(db: &Db) -> (i64, i64) {
         let a = accounts::create(db, &accounts::NewAccount { name:"M".into(), account_type:"manual".into(), institution:None, native_currency:"USD".into(), note:None }).await.unwrap();
