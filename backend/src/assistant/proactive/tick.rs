@@ -63,6 +63,69 @@ pub fn briefing_due(now_wib: DateTime<FixedOffset>, briefing_hour: Option<u32>) 
     }
 }
 
+const TICK: std::time::Duration = std::time::Duration::from_secs(300);
+
+/// Spawn the proactive loop when TELEGRAM_BOT_TOKEN is configured.
+pub fn spawn(db: Db) {
+    let Ok(token) = std::env::var("TELEGRAM_BOT_TOKEN") else {
+        tracing::info!("TELEGRAM_BOT_TOKEN not set; proactive sends disabled");
+        return;
+    };
+    tokio::spawn(async move {
+        let client = TelegramClient::new(token);
+        let config = ProactiveConfig::from_env();
+        loop {
+            if let Err(e) = run_once(&db, &client, &config).await {
+                tracing::warn!("proactive tick failed: {e:#}");
+            }
+            tokio::time::sleep(TICK).await;
+        }
+    });
+}
+
+/// One pass: claim-then-send for whatever is due. Claiming BEFORE sending
+/// makes every send at-most-once (a duplicate briefing annoys more than a
+/// missing one — the inverse of the reminder loop's trade-off).
+pub async fn run_once(
+    db: &Db,
+    client: &TelegramClient,
+    config: &ProactiveConfig,
+) -> anyhow::Result<()> {
+    let Some(link) = crate::repo::telegram_link::get(db).await? else {
+        return Ok(());
+    };
+    let now_wib = chrono::Utc::now().with_timezone(&crate::assistant::time::wib());
+    let today = now_wib.format("%Y-%m-%d").to_string();
+
+    if let Some(key) = briefing_due(now_wib, config.briefing_hour) {
+        if crate::repo::proactive_log::try_claim(db, "briefing", &key).await? {
+            if let Err(e) = super::briefing::run(db, client, link.chat_id).await {
+                tracing::warn!("briefing for {key} forfeited: {e:#}");
+            }
+        }
+    }
+
+    if let Some(key) = recap_due(now_wib, config.recap_hour) {
+        if crate::repo::proactive_log::try_claim(db, "recap", &key).await? {
+            if let Err(e) = super::recap::run(db, client, link.chat_id).await {
+                tracing::warn!("recap for {key} forfeited: {e:#}");
+            }
+        }
+    }
+
+    for alert in
+        super::alerts::evaluate(db, config.mover_alert_pct, config.milestone_step_idr, &today).await
+    {
+        if crate::repo::proactive_log::try_claim(db, "alert", &alert.dedup_key).await? {
+            if let Err(e) = client.send_message(link.chat_id, &alert.message).await {
+                tracing::warn!("alert {} forfeited: {e:#}", alert.dedup_key);
+            }
+        }
+    }
+
+    Ok(())
+}
+
 /// Dedup key when the weekly recap is due: Sunday from the configured hour,
 /// with grace until Monday 09:00 (keyed to the week that ended on Sunday).
 pub fn recap_due(now_wib: DateTime<FixedOffset>, recap_hour: Option<u32>) -> Option<String> {
@@ -154,5 +217,26 @@ mod tests {
         // Garbage and out-of-range fall back to the default.
         assert_eq!(parse_hour(Some("banana".into()), 7), Some(7));
         assert_eq!(parse_hour(Some("25".into()), 7), Some(7));
+    }
+
+    #[tokio::test]
+    async fn run_once_claims_and_survives_an_empty_db_without_a_client() {
+        // With no telegram link, run_once must be a clean no-op.
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        let config = ProactiveConfig {
+            briefing_hour: Some(0), // "always due" for this test
+            recap_hour: Some(0),
+            mover_alert_pct: 5.0,
+            milestone_step_idr: 50_000_000,
+        };
+        let client = TelegramClient::new("dummy-token".into());
+        run_once(&db, &client, &config).await.unwrap();
+        // No link -> nothing claimed.
+        assert!(crate::repo::proactive_log::try_claim(&db, "briefing", &format!(
+            "briefing:{}",
+            chrono::Utc::now().with_timezone(&crate::assistant::time::wib()).format("%Y-%m-%d")
+        ))
+        .await
+        .unwrap());
     }
 }
