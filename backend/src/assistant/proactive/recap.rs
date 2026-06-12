@@ -46,6 +46,7 @@ pub async fn gather(db: &Db) -> anyhow::Result<RecapData> {
     let now = chrono::Utc::now();
     let now_wib = now.with_timezone(&crate::assistant::time::wib());
     let week = now_wib.iso_week();
+    // Two formats on purpose: each column is compared in the format its writer uses.
     let week_ago_rfc3339 = (now - chrono::Duration::days(7)).to_rfc3339();
     let week_ago_z = crate::assistant::time::to_db_utc(now - chrono::Duration::days(7));
     let week_ago_date = (now_wib - chrono::Duration::days(7)).format("%Y-%m-%d").to_string();
@@ -86,7 +87,10 @@ pub async fn gather(db: &Db) -> anyhow::Result<RecapData> {
         }
     };
 
-    let movers = crate::service::movers::daily_movers(db, 3).await.unwrap_or_default();
+    let movers = crate::service::movers::daily_movers(db, 3).await.unwrap_or_else(|e| {
+        tracing::warn!("recap: movers unavailable: {e:#}");
+        Vec::new()
+    });
 
     let todos_next_week = crate::repo::todos::list_open(db)
         .await?
@@ -101,7 +105,7 @@ pub async fn gather(db: &Db) -> anyhow::Result<RecapData> {
     let reminders_next_week = crate::repo::reminders::list_pending(db)
         .await?
         .into_iter()
-        .filter(|r| r.remind_at.as_str() <= next_week_end.as_str())
+        .filter(|r| r.remind_at.as_str() >= now_z.as_str() && r.remind_at.as_str() <= next_week_end.as_str())
         .collect();
 
     Ok(RecapData {

@@ -34,14 +34,9 @@ fn weekday_id(day: chrono::Weekday) -> &'static str {
     }
 }
 
-/// Gather everything deterministically. Each finance source degrades
-/// independently; todo/reminder/review failures propagate (they're local DB).
-pub async fn gather(db: &Db) -> anyhow::Result<BriefingData> {
-    let now_wib = chrono::Utc::now().with_timezone(&crate::assistant::time::wib());
-    let today = now_wib.format("%Y-%m-%d").to_string();
-
-    let open_todos = crate::repo::todos::list_open(db).await?;
-    let (mut todos_due_today, mut todos_overdue) = (Vec::new(), Vec::new());
+/// Split open todos into due-today and overdue by their WIB calendar date.
+fn classify_todos(open_todos: Vec<TodoRow>, today_wib: &str) -> (Vec<TodoRow>, Vec<TodoRow>) {
+    let (mut due_today, mut overdue) = (Vec::new(), Vec::new());
     for todo in open_todos {
         let Some(due_at) = &todo.due_at else { continue };
         let due_date_wib = match chrono::DateTime::parse_from_rfc3339(due_at) {
@@ -51,12 +46,23 @@ pub async fn gather(db: &Db) -> anyhow::Result<BriefingData> {
                 .to_string(),
             Err(_) => continue,
         };
-        if due_date_wib == today {
-            todos_due_today.push(todo);
-        } else if due_date_wib < today {
-            todos_overdue.push(todo);
+        if due_date_wib == today_wib {
+            due_today.push(todo);
+        } else if due_date_wib.as_str() < today_wib {
+            overdue.push(todo);
         }
     }
+    (due_today, overdue)
+}
+
+/// Gather everything deterministically. Each finance source degrades
+/// independently; todo/reminder/review failures propagate (they're local DB).
+pub async fn gather(db: &Db) -> anyhow::Result<BriefingData> {
+    let now_wib = chrono::Utc::now().with_timezone(&crate::assistant::time::wib());
+    let today = now_wib.format("%Y-%m-%d").to_string();
+
+    let open_todos = crate::repo::todos::list_open(db).await?;
+    let (todos_due_today, todos_overdue) = classify_todos(open_todos, &today);
 
     let reminders_today = crate::repo::reminders::list_pending(db)
         .await?
@@ -81,10 +87,13 @@ pub async fn gather(db: &Db) -> anyhow::Result<BriefingData> {
     let (net_worth_idr, delta_vs_yesterday_idr) =
         match crate::service::portfolio::build_summary(db).await {
             Ok(summary) => {
+                // ~24h baseline: see snapshot_before's doc for why yesterday.
+                let yesterday =
+                    (now_wib - chrono::Duration::days(1)).format("%Y-%m-%d").to_string();
                 let delta = match crate::repo::snapshots::history(db).await {
-                    Ok(rows) => super::snapshot_before(&rows, &today)
+                    Ok(rows) => super::snapshot_before(&rows, &yesterday)
                         .map(|prev| summary.net_worth_idr - prev),
-                    _ => None,
+                    Err(_) => None,
                 };
                 (summary.net_worth_idr, delta)
             }
@@ -289,5 +298,35 @@ mod tests {
         assert!(d.todos_due_today.is_empty());
         assert!(d.reminders_today.is_empty());
         assert_eq!(d.pending_reviews, 0);
+    }
+
+    fn todo_due(id: i64, due_at: &str) -> TodoRow {
+        TodoRow {
+            id,
+            title: format!("t{id}"),
+            notes: None,
+            due_at: Some(due_at.into()),
+            status: "open".into(),
+            created_at: String::new(),
+            completed_at: None,
+        }
+    }
+
+    #[test]
+    fn classification_respects_the_wib_date_boundary() {
+        // 16:30Z = 23:30 WIB the SAME day; 17:30Z = 00:30 WIB the NEXT day.
+        let (due, overdue) = classify_todos(
+            vec![todo_due(1, "2026-06-12T16:30:00Z"), todo_due(2, "2026-06-12T17:30:00Z")],
+            "2026-06-12",
+        );
+        assert_eq!(due.iter().map(|t| t.id).collect::<Vec<_>>(), vec![1]);
+        assert!(overdue.is_empty());
+        // The next WIB day, the 17:30Z todo is due and the 16:30Z one overdue.
+        let (due, overdue) = classify_todos(
+            vec![todo_due(1, "2026-06-12T16:30:00Z"), todo_due(2, "2026-06-12T17:30:00Z")],
+            "2026-06-13",
+        );
+        assert_eq!(due.iter().map(|t| t.id).collect::<Vec<_>>(), vec![2]);
+        assert_eq!(overdue.iter().map(|t| t.id).collect::<Vec<_>>(), vec![1]);
     }
 }

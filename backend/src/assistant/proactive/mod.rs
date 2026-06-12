@@ -10,9 +10,11 @@ pub mod tick;
 use crate::repo::snapshots::SnapshotRow;
 use rust_decimal::Decimal;
 
-/// Net worth from the latest snapshot strictly BEFORE `today_wib`
-/// (YYYY-MM-DD). The hourly scheduler overwrites today's row, so "the last
-/// row" is today's value, not a usable baseline for day-over-day deltas.
+/// Net worth from the latest snapshot strictly BEFORE the given WIB date
+/// (YYYY-MM-DD). Callers wanting a ~24h baseline must pass YESTERDAY's WIB
+/// date: snapshot rows are keyed by UTC date, and the row labeled with
+/// yesterday's UTC date gets its final hourly value at ~07:00 WIB today —
+/// passing today's date would yield a one-hour-old "baseline".
 pub fn snapshot_before(rows: &[SnapshotRow], today_wib: &str) -> Option<Decimal> {
     use std::str::FromStr;
     rows.iter()
@@ -52,5 +54,16 @@ mod tests {
     #[test]
     fn none_when_empty() {
         assert_eq!(snapshot_before(&[], "2026-06-12"), None);
+    }
+
+    #[test]
+    fn day_over_day_baseline_skips_the_utc_labeled_yesterday_row() {
+        // Callers pass yesterday's WIB date; the row labeled with yesterday's
+        // UTC date (finalized ~07:00 WIB today) must NOT be the baseline.
+        let rows = vec![
+            snap("2026-06-10", "1490000000"), // ~07:00 WIB Jun 11 value
+            snap("2026-06-11", "1555000000"), // ~07:00 WIB Jun 12 value (1h old)
+        ];
+        assert_eq!(snapshot_before(&rows, "2026-06-11"), Some(dec!(1490000000)));
     }
 }

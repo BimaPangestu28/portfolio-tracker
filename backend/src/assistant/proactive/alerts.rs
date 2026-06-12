@@ -137,7 +137,11 @@ pub async fn evaluate(
             // one) vs current net worth.
             match crate::repo::snapshots::history(db).await {
                 Ok(rows) => {
-                    if let Some(prev) = super::snapshot_before(&rows, today_wib) {
+                    // ~24h baseline (see snapshot_before doc): yesterday WIB.
+                    let yesterday = chrono::NaiveDate::parse_from_str(today_wib, "%Y-%m-%d")
+                        .map(|d| (d - chrono::Duration::days(1)).format("%Y-%m-%d").to_string())
+                        .unwrap_or_else(|_| today_wib.to_string());
+                    if let Some(prev) = super::snapshot_before(&rows, &yesterday) {
                         let prev_idr = prev.trunc().to_string().parse::<i64>().unwrap_or(0);
                         let curr_idr = summary
                             .net_worth_idr
