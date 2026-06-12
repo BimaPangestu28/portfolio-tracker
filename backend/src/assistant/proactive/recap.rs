@@ -17,6 +17,7 @@ pub struct RecapData {
     pub movers: Vec<crate::service::movers::Mover>,
     pub todos_next_week: Vec<crate::repo::todos::TodoRow>,
     pub reminders_next_week: Vec<crate::repo::reminders::ReminderRow>,
+    pub events_next_week: Vec<crate::repo::events::EventRow>,
 }
 
 /// Sum IDR outflows whose occurred_on is at/after `since_date` (YYYY-MM-DD).
@@ -107,6 +108,8 @@ pub async fn gather(db: &Db) -> anyhow::Result<RecapData> {
         .into_iter()
         .filter(|r| r.remind_at.as_str() >= now_z.as_str() && r.remind_at.as_str() <= next_week_end.as_str())
         .collect();
+    let events_next_week =
+        crate::repo::events::list_between(db, &now_z, &next_week_end).await?;
 
     Ok(RecapData {
         week_label: format!("{}-W{:02}", week.year(), week.week()),
@@ -120,6 +123,7 @@ pub async fn gather(db: &Db) -> anyhow::Result<RecapData> {
         movers,
         todos_next_week,
         reminders_next_week,
+        events_next_week,
     })
 }
 
@@ -165,9 +169,19 @@ pub fn render_data_block(d: &RecapData) -> String {
         }
     }
     out.push_str("Minggu depan:\n");
-    if d.todos_next_week.is_empty() && d.reminders_next_week.is_empty() {
+    if d.todos_next_week.is_empty()
+        && d.reminders_next_week.is_empty()
+        && d.events_next_week.is_empty()
+    {
         out.push_str("(tidak ada jadwal tercatat)\n");
     } else {
+        for e in &d.events_next_week {
+            out.push_str(&format!(
+                "- event: {} ({})\n",
+                e.title,
+                crate::assistant::time::to_wib_display(&e.start_at)
+            ));
+        }
         for t in &d.todos_next_week {
             out.push_str(&format!("- todo #{} {}", t.id, t.title));
             if let Some(due) = &t.due_at {
@@ -257,6 +271,7 @@ mod tests {
             movers: vec![],
             todos_next_week: vec![],
             reminders_next_week: vec![],
+            events_next_week: vec![],
         };
         let block = render_data_block(&d);
         assert!(block.contains("Todo selesai: 4 (dibuat: 6)"), "{block}");
@@ -274,5 +289,35 @@ mod tests {
         assert_eq!(d.todos_completed, 0);
         assert_eq!(d.reminders_sent, 0);
         assert_eq!(d.spending_idr, Decimal::ZERO);
+    }
+
+    #[test]
+    fn next_week_section_includes_events() {
+        let mut d = RecapData {
+            week_label: "2026-W24".into(),
+            todos_completed: 0,
+            todos_created: 0,
+            reminders_sent: 0,
+            net_worth_idr: dec!(0),
+            week_delta_idr: None,
+            spending_idr: dec!(0),
+            spending_skipped_non_idr: 0,
+            movers: vec![],
+            todos_next_week: vec![],
+            reminders_next_week: vec![],
+            events_next_week: vec![],
+        };
+        d.events_next_week = vec![crate::repo::events::EventRow {
+            id: 1,
+            title: "kontrol gigi".into(),
+            location: None,
+            notes: None,
+            start_at: "2026-06-17T02:00:00Z".into(),
+            status: "scheduled".into(),
+            created_at: String::new(),
+        }];
+        let block = render_data_block(&d);
+        assert!(block.contains("- event: kontrol gigi"), "{block}");
+        assert!(!block.contains("(tidak ada jadwal tercatat)"), "{block}");
     }
 }

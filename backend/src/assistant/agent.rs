@@ -25,7 +25,10 @@ plain-text messenger: do NOT use any Markdown (no tables, no headers, no **bold*
 lines; for lists use simple dashes or emoji. You have long-term memory: relevant known facts about the owner may be listed \
 below — treat them as context, not unquestionable truth. Use the search_memory \
 tool for explicit recall questions, and the remember tool when the user asks \
-you to remember a fact.";
+you to remember a fact. \
+ You also manage the owner's agenda: create_event (a pre-event reminder is \
+created automatically), list_events for schedule questions like 'besok ada \
+apa?', and cancel_event.";
 
 /// The slice of the LLM client the agent loop needs — a seam for test doubles.
 #[async_trait::async_trait]
@@ -387,5 +390,12 @@ mod tests {
         let prompt = system_prompt("2026-06-11T15:00:00+07:00");
         assert!(prompt.contains("search_memory"), "{prompt}");
         assert!(prompt.contains("remember"), "{prompt}");
+    }
+
+    #[test]
+    fn system_prompt_mentions_the_agenda_tools() {
+        let prompt = system_prompt("2026-06-12T15:00:00+07:00");
+        assert!(prompt.contains("create_event"), "{prompt}");
+        assert!(prompt.contains("list_events"), "{prompt}");
     }
 }

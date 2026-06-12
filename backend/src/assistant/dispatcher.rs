@@ -17,6 +17,9 @@ pub async fn dispatch(db: &Db, name: &str, input: &serde_json::Value) -> Result<
         "get_portfolio_summary" => portfolio_summary(db).await,
         "search_memory" => search_memory(input).await,
         "remember" => remember(input).await,
+        "create_event" => create_event(db, input).await,
+        "list_events" => list_events(db, input).await,
+        "cancel_event" => cancel_event(db, input).await,
         _ => Err(format!("unknown tool: {name}")),
     }
 }
@@ -190,6 +193,132 @@ async fn remember(input: &serde_json::Value) -> Result<String, String> {
     Ok("noted — saved to long-term memory".into())
 }
 
+/// Default lead time for the automatic pre-event reminder.
+const DEFAULT_EVENT_REMIND_MINUTES: i64 = 30;
+/// Ceiling for the pre-event reminder offset (one week) — also guards the
+/// chrono Duration arithmetic against overflow panics from absurd values.
+const MAX_EVENT_REMIND_MINUTES: i64 = 7 * 24 * 60;
+/// Default lookahead for list_events.
+const DEFAULT_EVENT_RANGE_DAYS: i64 = 7;
+
+async fn create_event(db: &Db, input: &serde_json::Value) -> Result<String, String> {
+    let title = str_arg(input, "title").ok_or("missing required argument 'title'")?;
+    let raw = str_arg(input, "start_at").ok_or("missing required argument 'start_at'")?;
+    let start = parse_tool_datetime(raw)
+        .ok_or_else(|| format!("unparseable start_at '{raw}' — use RFC3339 with +07:00"))?;
+    if start <= chrono::Utc::now() {
+        return Err(format!("start_at '{raw}' is in the past — ask the user for a future time"));
+    }
+    let remind_minutes = match input.get("remind_minutes_before") {
+        None | Some(serde_json::Value::Null) => DEFAULT_EVENT_REMIND_MINUTES,
+        Some(v) => v
+            .as_i64()
+            .filter(|m| (0..=MAX_EVENT_REMIND_MINUTES).contains(m))
+            .ok_or_else(|| {
+                format!(
+                    "remind_minutes_before must be an integer between 0 and {MAX_EVENT_REMIND_MINUTES}, got {v}"
+                )
+            })?,
+    };
+    let event = crate::repo::events::create(
+        db,
+        title,
+        str_arg(input, "location"),
+        str_arg(input, "notes"),
+        &to_db_utc(start),
+    )
+    .await
+    .map_err(|e| format!("db error: {e}"))?;
+
+    let reminder_note = if remind_minutes == 0 {
+        String::new()
+    } else {
+        let remind_at = start - chrono::Duration::minutes(remind_minutes);
+        if remind_at <= chrono::Utc::now() {
+            " (terlalu dekat untuk reminder otomatis)".to_string()
+        } else {
+            let location_part = event
+                .location
+                .as_deref()
+                .map(|l| format!(" di {l}"))
+                .unwrap_or_default();
+            let message =
+                format!("📅 {}{} — {} menit lagi", event.title, location_part, remind_minutes);
+            crate::repo::reminders::create_for_event(db, event.id, &message, &to_db_utc(remind_at))
+                .await
+                .map_err(|e| format!("event created but reminder failed: {e}"))?;
+            format!(" (reminder {remind_minutes} menit sebelumnya dibuat)")
+        }
+    };
+    Ok(format!(
+        "created event #{} '{}' at {}{}",
+        event.id,
+        event.title,
+        to_wib_display(&event.start_at),
+        reminder_note,
+    ))
+}
+
+async fn list_events(db: &Db, input: &serde_json::Value) -> Result<String, String> {
+    let now = chrono::Utc::now();
+    let from = match str_arg(input, "from") {
+        Some(raw) => parse_tool_datetime(raw)
+            .ok_or_else(|| format!("unparseable from '{raw}' — use RFC3339 with +07:00"))?,
+        None => now,
+    };
+    let to = match str_arg(input, "to") {
+        Some(raw) => parse_tool_datetime(raw)
+            .ok_or_else(|| format!("unparseable to '{raw}' — use RFC3339 with +07:00"))?,
+        None => from + chrono::Duration::days(DEFAULT_EVENT_RANGE_DAYS),
+    };
+    if to <= from {
+        return Err("'to' must be after 'from'".into());
+    }
+    let events = crate::repo::events::list_between(db, &to_db_utc(from), &to_db_utc(to))
+        .await
+        .map_err(|e| format!("db error: {e}"))?;
+    if events.is_empty() {
+        return Ok("no events in that range".into());
+    }
+    let mut out = String::new();
+    for e in events {
+        out.push_str(&format!("- #{} {}: {}", e.id, to_wib_display(&e.start_at), e.title));
+        if let Some(location) = &e.location {
+            out.push_str(&format!(" ({location})"));
+        }
+        if let Some(notes) = &e.notes {
+            out.push_str(&format!(" — {notes}"));
+        }
+        out.push('\n');
+    }
+    Ok(out)
+}
+
+async fn cancel_event(db: &Db, input: &serde_json::Value) -> Result<String, String> {
+    let id = id_arg(input, "id")?;
+    // Verify the event exists and is scheduled BEFORE touching its reminder.
+    let event = crate::repo::events::get(db, id)
+        .await
+        .map_err(|_| format!("event #{id} not found or already cancelled"))?;
+    if event.status != "scheduled" {
+        return Err(format!("event #{id} not found or already cancelled"));
+    }
+    // Reminder first: a failure here leaves a still-scheduled event with no
+    // reminder — the recoverable failure mode.
+    let reminder_cancelled = crate::repo::reminders::cancel_by_event(db, id)
+        .await
+        .map_err(|e| format!("db error: {e}"))?;
+    let cancelled =
+        crate::repo::events::cancel(db, id).await.map_err(|e| format!("db error: {e}"))?;
+    if !cancelled {
+        return Err(format!("event #{id} not found or already cancelled"));
+    }
+    Ok(format!(
+        "event #{id} cancelled{}",
+        if reminder_cancelled { " (its reminder too)" } else { "" }
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -340,5 +469,137 @@ mod tests {
         let db = mem_db().await;
         let out = dispatch(&db, "get_portfolio_summary", &serde_json::json!({})).await.unwrap();
         assert!(out.contains("Net worth"), "{out}");
+    }
+
+    #[tokio::test]
+    async fn create_event_makes_event_and_default_linked_reminder() {
+        let db = mem_db().await;
+        let start = (chrono::Utc::now() + chrono::Duration::hours(3)).to_rfc3339();
+        let out = dispatch(&db, "create_event", &serde_json::json!({
+            "title": "meeting vendor", "start_at": start, "location": "kantor"
+        })).await.unwrap();
+        assert!(out.contains("meeting vendor"), "{out}");
+        let events = crate::repo::events::list_between(&db, "2000-01-01T00:00:00Z", "2099-01-01T00:00:00Z")
+            .await.unwrap();
+        assert_eq!(events.len(), 1);
+        let reminders = crate::repo::reminders::list_pending(&db).await.unwrap();
+        assert_eq!(reminders.len(), 1);
+        assert_eq!(reminders[0].event_id, Some(events[0].id));
+        assert!(reminders[0].message.contains("meeting vendor"), "{}", reminders[0].message);
+        assert!(reminders[0].message.contains("kantor"), "{}", reminders[0].message);
+        assert!(reminders[0].message.contains("30 menit"), "{}", reminders[0].message);
+        // remind_at = start - 30 minutes (Z format, second precision).
+        let start_dt = chrono::DateTime::parse_from_rfc3339(&start).unwrap();
+        let expected = crate::assistant::time::to_db_utc(
+            (start_dt - chrono::Duration::minutes(30)).with_timezone(&chrono::Utc),
+        );
+        assert_eq!(reminders[0].remind_at, expected);
+    }
+
+    #[tokio::test]
+    async fn create_event_zero_minutes_skips_the_reminder() {
+        let db = mem_db().await;
+        let start = (chrono::Utc::now() + chrono::Duration::hours(3)).to_rfc3339();
+        dispatch(&db, "create_event", &serde_json::json!({
+            "title": "x", "start_at": start, "remind_minutes_before": 0
+        })).await.unwrap();
+        assert!(crate::repo::reminders::list_pending(&db).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn create_event_too_soon_for_the_offset_skips_the_reminder() {
+        let db = mem_db().await;
+        // Starts in 10 minutes; the default 30-minute reminder would be in the past.
+        let start = (chrono::Utc::now() + chrono::Duration::minutes(10)).to_rfc3339();
+        let out = dispatch(&db, "create_event", &serde_json::json!({
+            "title": "x", "start_at": start
+        })).await.unwrap();
+        assert!(crate::repo::reminders::list_pending(&db).await.unwrap().is_empty());
+        assert!(out.contains("terlalu dekat"), "{out}");
+    }
+
+    #[tokio::test]
+    async fn create_event_rejects_past_and_bad_input() {
+        let db = mem_db().await;
+        let past = (chrono::Utc::now() - chrono::Duration::hours(1)).to_rfc3339();
+        let err = dispatch(&db, "create_event", &serde_json::json!({
+            "title": "x", "start_at": past
+        })).await.unwrap_err();
+        assert!(err.contains("past"), "{err}");
+        let err = dispatch(&db, "create_event", &serde_json::json!({ "title": "x" }))
+            .await.unwrap_err();
+        assert!(err.contains("start_at"), "{err}");
+        let start = (chrono::Utc::now() + chrono::Duration::hours(3)).to_rfc3339();
+        let err = dispatch(&db, "create_event", &serde_json::json!({
+            "title": "x", "start_at": start, "remind_minutes_before": -5
+        })).await.unwrap_err();
+        assert!(err.contains("between 0 and"), "{err}");
+        let err = dispatch(&db, "create_event", &serde_json::json!({
+            "title": "x", "start_at": start, "remind_minutes_before": 9_000_000_000_000i64
+        })).await.unwrap_err();
+        assert!(err.contains("between 0 and"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn list_events_defaults_to_a_week_and_renders_wib() {
+        let db = mem_db().await;
+        assert_eq!(
+            dispatch(&db, "list_events", &serde_json::json!({})).await.unwrap(),
+            "no events in that range"
+        );
+        crate::repo::events::create(
+            &db, "meeting", Some("kantor"), None,
+            &crate::assistant::time::to_db_utc(chrono::Utc::now() + chrono::Duration::days(2)),
+        ).await.unwrap();
+        // 9 days out: outside the default window.
+        crate::repo::events::create(
+            &db, "far away", None, None,
+            &crate::assistant::time::to_db_utc(chrono::Utc::now() + chrono::Duration::days(9)),
+        ).await.unwrap();
+        let out = dispatch(&db, "list_events", &serde_json::json!({})).await.unwrap();
+        assert!(out.contains("meeting"), "{out}");
+        assert!(out.contains("kantor"), "{out}");
+        assert!(out.contains("WIB"), "{out}");
+        assert!(!out.contains("far away"), "{out}");
+    }
+
+    #[tokio::test]
+    async fn list_events_rejects_inverted_ranges() {
+        let db = mem_db().await;
+        let err = dispatch(&db, "list_events", &serde_json::json!({
+            "from": "2026-06-20T00:00:00+07:00", "to": "2026-06-13T00:00:00+07:00"
+        })).await.unwrap_err();
+        assert!(err.contains("after"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn cancel_event_cascades_to_its_reminder() {
+        let db = mem_db().await;
+        let start = (chrono::Utc::now() + chrono::Duration::hours(3)).to_rfc3339();
+        dispatch(&db, "create_event", &serde_json::json!({ "title": "m", "start_at": start }))
+            .await.unwrap();
+        let event_id = crate::repo::events::list_between(&db, "2000-01-01T00:00:00Z", "2099-01-01T00:00:00Z")
+            .await.unwrap()[0].id;
+        let out = dispatch(&db, "cancel_event", &serde_json::json!({ "id": event_id }))
+            .await.unwrap();
+        assert!(out.contains("cancelled"), "{out}");
+        assert!(crate::repo::reminders::list_pending(&db).await.unwrap().is_empty());
+        let err = dispatch(&db, "cancel_event", &serde_json::json!({ "id": event_id }))
+            .await.unwrap_err();
+        assert!(err.contains("not found or already cancelled"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn cancel_event_after_reminder_sent_omits_the_reminder_note() {
+        let db = mem_db().await;
+        let event = crate::repo::events::create(&db, "m", None, None, "2099-01-01T00:00:00Z")
+            .await.unwrap();
+        let r = crate::repo::reminders::create_for_event(&db, event.id, "x", "2099-01-01T00:00:00Z")
+            .await.unwrap();
+        crate::repo::reminders::mark_sent(&db, r.id, "2026-06-12T00:00:00Z").await.unwrap();
+        let out = dispatch(&db, "cancel_event", &serde_json::json!({ "id": event.id }))
+            .await.unwrap();
+        assert!(out.contains("cancelled"), "{out}");
+        assert!(!out.contains("reminder"), "{out}");
     }
 }

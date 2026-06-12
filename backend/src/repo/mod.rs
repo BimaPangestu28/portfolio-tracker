@@ -1,4 +1,5 @@
 pub mod accounts;
+pub mod events;
 pub mod proactive_log;
 pub mod cashflow;
 pub mod cashflow_categories;
