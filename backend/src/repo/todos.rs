@@ -52,6 +52,27 @@ pub async fn list_open(db: &Db) -> anyhow::Result<Vec<TodoRow>> {
     Ok(rows)
 }
 
+/// Done todos whose completion is at/after `since` (RFC3339 +00:00 format,
+/// the same format `complete` writes).
+pub async fn completed_since(db: &Db, since_rfc3339: &str) -> anyhow::Result<Vec<TodoRow>> {
+    let rows = sqlx::query_as::<_, TodoRow>(
+        "SELECT * FROM todos WHERE status = 'done' AND completed_at >= ? ORDER BY completed_at",
+    )
+    .bind(since_rfc3339)
+    .fetch_all(db)
+    .await?;
+    Ok(rows)
+}
+
+/// How many todos were created at/after `since` (RFC3339 +00:00 format).
+pub async fn created_count_since(db: &Db, since_rfc3339: &str) -> anyhow::Result<i64> {
+    let row: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM todos WHERE created_at >= ?")
+        .bind(since_rfc3339)
+        .fetch_one(db)
+        .await?;
+    Ok(row.0)
+}
+
 /// Mark a todo done. Returns false when the id doesn't exist or is already done.
 pub async fn complete(db: &Db, id: i64) -> anyhow::Result<bool> {
     let now = chrono::Utc::now().to_rfc3339();
@@ -119,5 +140,22 @@ mod tests {
     async fn complete_unknown_id_returns_false() {
         let db = mem_db().await;
         assert!(!complete(&db, 999).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn completed_since_and_created_count() {
+        let db = mem_db().await;
+        let a = create(&db, "old done", None, None).await.unwrap();
+        complete(&db, a.id).await.unwrap();
+        let b = create(&db, "new open", None, None).await.unwrap();
+        let _ = b;
+        // Everything above happened "now", so a since-bound in the past
+        // includes them and a future bound excludes them.
+        let past = (chrono::Utc::now() - chrono::Duration::days(7)).to_rfc3339();
+        let future = (chrono::Utc::now() + chrono::Duration::days(1)).to_rfc3339();
+        assert_eq!(completed_since(&db, &past).await.unwrap().len(), 1);
+        assert_eq!(completed_since(&db, &future).await.unwrap().len(), 0);
+        assert_eq!(created_count_since(&db, &past).await.unwrap(), 2);
+        assert_eq!(created_count_since(&db, &future).await.unwrap(), 0);
     }
 }

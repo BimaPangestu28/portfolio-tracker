@@ -84,6 +84,17 @@ pub async fn mark_sent(db: &Db, id: i64, sent_at: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// How many reminders were delivered at/after `since` ("%Y-%m-%dT%H:%M:%SZ",
+/// the format the delivery tick writes to sent_at).
+pub async fn sent_count_since(db: &Db, since_z: &str) -> anyhow::Result<i64> {
+    let row: (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM reminders WHERE sent_at IS NOT NULL AND sent_at >= ?")
+            .bind(since_z)
+            .fetch_one(db)
+            .await?;
+    Ok(row.0)
+}
+
 /// Recurring delivery: stay pending, advance remind_at, record sent_at.
 pub async fn reschedule(db: &Db, id: i64, next_remind_at: &str, sent_at: &str) -> anyhow::Result<()> {
     sqlx::query("UPDATE reminders SET remind_at = ?, sent_at = ? WHERE id = ?")
@@ -173,5 +184,15 @@ mod tests {
         let pending = list_pending(&db).await.unwrap();
         let ids: Vec<i64> = pending.iter().map(|r| r.id).collect();
         assert_eq!(ids, vec![sooner.id, later.id]);
+    }
+
+    #[tokio::test]
+    async fn sent_count_since_counts_delivered_reminders() {
+        let db = mem_db().await;
+        let r = create(&db, None, "x", "2026-06-10T00:00:00Z", "none").await.unwrap();
+        mark_sent(&db, r.id, "2026-06-10T08:00:00Z").await.unwrap();
+        create(&db, None, "pending", "2099-01-01T00:00:00Z", "none").await.unwrap();
+        assert_eq!(sent_count_since(&db, "2026-06-09T00:00:00Z").await.unwrap(), 1);
+        assert_eq!(sent_count_since(&db, "2026-06-11T00:00:00Z").await.unwrap(), 0);
     }
 }
