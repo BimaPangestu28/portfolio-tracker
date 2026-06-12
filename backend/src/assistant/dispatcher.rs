@@ -20,6 +20,7 @@ pub async fn dispatch(db: &Db, name: &str, input: &serde_json::Value) -> Result<
         "create_event" => create_event(db, input).await,
         "list_events" => list_events(db, input).await,
         "cancel_event" => cancel_event(db, input).await,
+        "reject_review" => reject_review(db, input).await,
         _ => Err(format!("unknown tool: {name}")),
     }
 }
@@ -33,6 +34,20 @@ fn id_arg(input: &serde_json::Value, key: &str) -> Result<i64, String> {
         .get(key)
         .and_then(|v| v.as_i64())
         .ok_or_else(|| format!("missing integer argument '{key}'"))
+}
+
+/// Optional integer argument: absent/null → None; present-but-not-integer is
+/// an error so the model self-corrects instead of assuming a silent default.
+// used by confirm_review (Task 6)
+#[allow(dead_code)]
+fn optional_id(input: &serde_json::Value, key: &str) -> Result<Option<i64>, String> {
+    match input.get(key) {
+        None | Some(serde_json::Value::Null) => Ok(None),
+        Some(v) => Ok(Some(
+            v.as_i64()
+                .ok_or_else(|| format!("{key} must be an integer, got {v}"))?,
+        )),
+    }
 }
 
 async fn create_todo(db: &Db, input: &serde_json::Value) -> Result<String, String> {
@@ -319,6 +334,14 @@ async fn cancel_event(db: &Db, input: &serde_json::Value) -> Result<String, Stri
     ))
 }
 
+async fn reject_review(db: &Db, input: &serde_json::Value) -> Result<String, String> {
+    let review_id = id_arg(input, "review_id")?;
+    crate::ingestion::review::reject(db, review_id)
+        .await
+        .map_err(|e| format!("{e}"))?;
+    Ok(format!("review #{review_id} ditolak"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -587,6 +610,47 @@ mod tests {
         let err = dispatch(&db, "cancel_event", &serde_json::json!({ "id": event_id }))
             .await.unwrap_err();
         assert!(err.contains("not found or already cancelled"), "{err}");
+    }
+
+    /// Insert a bare `pending` review_item into `db`. When `account_id` or
+    /// `instrument_id` are `None` the FK columns are left NULL (safe because
+    /// `PRAGMA foreign_keys = ON` only rejects *non-NULL* values that don't
+    /// reference an existing row). Callers that need those FKs must create the
+    /// parent rows first and pass the resulting ids.
+    pub(super) async fn seed_pending_item(
+        db: &Db,
+        account_id: Option<i64>,
+        instrument_id: Option<i64>,
+    ) -> i64 {
+        crate::repo::review_items::create(db, &crate::repo::review_items::NewReviewItem {
+            batch_id: "b1",
+            source_kind: "image",
+            source_filename: "f.jpg",
+            source_path: "",
+            doc_type: "txn_history",
+            needs_attention: false,
+            payload_json: r#"{ "entry_type": "buy", "symbol": "BTC", "quantity": "1",
+                "price_native": "100", "fee_native": "0", "currency": "IDR",
+                "executed_at": "2026-06-04", "confidence": 0.95 }"#,
+            raw_llm_json: "{}",
+            suggested_instrument_id: instrument_id,
+            suggested_account_id: account_id,
+        })
+        .await
+        .unwrap()
+        .id
+    }
+
+    #[tokio::test]
+    async fn reject_review_marks_item_rejected() {
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        let id = seed_pending_item(&db, None, None).await;
+        let out = dispatch(&db, "reject_review", &serde_json::json!({ "review_id": id }))
+            .await
+            .unwrap();
+        assert!(out.contains("ditolak"), "{out}");
+        let item = crate::repo::review_items::get(&db, id).await.unwrap();
+        assert_eq!(item.status, "rejected");
     }
 
     #[tokio::test]

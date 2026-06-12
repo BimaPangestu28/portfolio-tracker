@@ -119,6 +119,15 @@ pub fn definitions() -> serde_json::Value {
                 "properties": { "id": { "type": "integer", "description": "Event id" } },
                 "required": ["id"]
             }
+        },
+        {
+            "name": "reject_review",
+            "description": "Reject (discard) a pending ingest review item so it is not turned into a transaction. Get the id from list_pending_reviews.",
+            "input_schema": {
+                "type": "object",
+                "properties": { "review_id": { "type": "integer", "description": "Review item id" } },
+                "required": ["review_id"]
+            }
         }
     ])
 }
@@ -143,6 +152,7 @@ mod tests {
                 "create_reminder", "list_reminders", "cancel_reminder",
                 "get_portfolio_summary", "search_memory", "remember",
                 "create_event", "list_events", "cancel_event",
+                "reject_review",
             ]
         );
         for tool in defs.as_array().unwrap() {
