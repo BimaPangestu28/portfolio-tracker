@@ -30,6 +30,10 @@ pub async fn dispatch(db: &Db, name: &str, input: &serde_json::Value) -> Result<
             Ok(api) => clickup_list_projects(&api).await,
             Err(e) => Err(format!("clickup belum dikonfigurasi: {e}")),
         },
+        "create_project" => match crate::clickup::ClickUpClient::from_env() {
+            Ok(api) => clickup_create_project(&api, input).await,
+            Err(e) => Err(format!("clickup belum dikonfigurasi: {e}")),
+        },
         _ => Err(format!("unknown tool: {name}")),
     }
 }
@@ -359,6 +363,15 @@ async fn list_accounts(db: &Db) -> Result<String, String> {
         out.push_str(&format!("#{} {} ({})\n", a.id, a.name, a.account_type));
     }
     Ok(out)
+}
+
+async fn clickup_create_project(
+    api: &dyn crate::clickup::ClickUpApi,
+    input: &serde_json::Value,
+) -> Result<String, String> {
+    let name = str_arg(input, "name").ok_or("missing required argument 'name'")?;
+    let project = api.create_project(name).await.map_err(|e| format!("{e}"))?;
+    Ok(format!("project '{}' dibuat di ClickUp", project.name))
 }
 
 async fn clickup_list_projects(api: &dyn crate::clickup::ClickUpApi) -> Result<String, String> {
@@ -967,6 +980,21 @@ mod tests {
         let fake = FakeClickUp::default();
         let out = clickup_list_projects(&fake).await.unwrap();
         assert!(out.contains("belum ada project"), "{out}");
+    }
+
+    #[tokio::test]
+    async fn create_project_creates_and_reports() {
+        let fake = FakeClickUp::default();
+        let out = clickup_create_project(&fake, &serde_json::json!({ "name": "Klien Baru" })).await.unwrap();
+        assert!(out.contains("Klien Baru"), "{out}");
+        assert!(fake.projects.lock().unwrap().iter().any(|p| p.name == "Klien Baru"));
+    }
+
+    #[tokio::test]
+    async fn create_project_requires_name() {
+        let fake = FakeClickUp::default();
+        let err = clickup_create_project(&fake, &serde_json::json!({})).await.unwrap_err();
+        assert!(err.contains("name"), "{err}");
     }
 
     #[tokio::test]

@@ -176,6 +176,15 @@ pub fn definitions() -> serde_json::Value {
             "name": "list_projects",
             "description": "List the owner's freelance projects (ClickUp lists). Use to find which project a task belongs to, and before create_project to avoid duplicates.",
             "input_schema": { "type": "object", "properties": {} }
+        },
+        {
+            "name": "create_project",
+            "description": "Create a new freelance project (a ClickUp list) in the configured space. Always ask the user to confirm before calling — this creates data in ClickUp.",
+            "input_schema": {
+                "type": "object",
+                "properties": { "name": { "type": "string", "description": "Project name, e.g. PT AIS" } },
+                "required": ["name"]
+            }
         }
     ])
 }
@@ -203,6 +212,7 @@ mod tests {
                 "reject_review", "list_accounts", "create_account",
                 "list_pending_reviews", "confirm_review", "list_instruments",
                 "list_projects",
+                "create_project",
             ]
         );
         for tool in defs.as_array().unwrap() {
@@ -238,5 +248,6 @@ mod tests {
             find("create_account")["input_schema"]["required"],
             serde_json::json!(["name", "account_type", "native_currency"])
         );
+        assert_eq!(find("create_project")["input_schema"]["required"], serde_json::json!(["name"]));
     }
 }
