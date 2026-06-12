@@ -81,6 +81,17 @@ pub fn plan_inbound_one(r: &GCalEvent, existing: Option<&EventRow>) -> Option<In
 }
 
 /// Google wins when its `updated` timestamp is strictly after our last sync.
+///
+/// Intentionally compares Google's `updated` against our `synced_at` (last sync
+/// instant), NOT against the app row's `updated_at` as the spec's prose suggests:
+/// the question is "did Google change this since we last reconciled it", which
+/// `synced_at` answers exactly. Do not "correct" this to `updated_at`.
+///
+/// Known limitation (Phase 1.1): `synced_at` and Google's `updated` come from
+/// different clocks, so skew can yield one redundant, self-correcting `UpdateLocal`
+/// per change. Gating on `r.etag != row.google_etag` would make this exact and
+/// clock-independent; deferred because it changes the timestamp-based semantics
+/// these unit tests encode.
 fn google_is_newer(row: &EventRow, r: &GCalEvent) -> bool {
     let (Some(synced), Some(updated)) = (row.synced_at.as_deref(), r.updated.as_deref()) else {
         return true;
