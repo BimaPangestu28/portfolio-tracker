@@ -3,3 +3,4 @@
 
 pub mod tick;
 pub mod compose;
+pub mod alerts;
