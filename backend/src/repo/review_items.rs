@@ -58,6 +58,25 @@ pub async fn update_payload(db: &Db, id: i64, payload_json: &str) -> anyhow::Res
     get(db, id).await
 }
 
+/// Fill in a previously-unmatched account and/or instrument suggestion. A
+/// `None` argument leaves that column untouched. Returns the refreshed row.
+pub async fn set_suggestions(
+    db: &Db,
+    id: i64,
+    account_id: Option<i64>,
+    instrument_id: Option<i64>,
+) -> anyhow::Result<ReviewItemRow> {
+    if let Some(aid) = account_id {
+        sqlx::query("UPDATE review_item SET suggested_account_id = ? WHERE id = ?")
+            .bind(aid).bind(id).execute(db).await?;
+    }
+    if let Some(iid) = instrument_id {
+        sqlx::query("UPDATE review_item SET suggested_instrument_id = ? WHERE id = ?")
+            .bind(iid).bind(id).execute(db).await?;
+    }
+    get(db, id).await
+}
+
 pub async fn mark_confirmed(db: &Db, id: i64, created_txn_id: i64) -> anyhow::Result<()> {
     let now = chrono::Utc::now().to_rfc3339();
     sqlx::query("UPDATE review_item SET status='confirmed', created_txn_id=?, confirmed_at=? WHERE id=?")
@@ -73,6 +92,57 @@ pub async fn mark_rejected(db: &Db, id: i64) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn set_suggestions_fills_only_provided_ids() {
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        let now = chrono::Utc::now().to_rfc3339();
+
+        // Insert prerequisite rows to satisfy FK constraints on review_item
+        let account_a_id = sqlx::query(
+            "INSERT INTO account (name, account_type, native_currency, created_at) VALUES (?,?,?,?)",
+        )
+        .bind("Acct A").bind("brokerage").bind("IDR").bind(&now)
+        .execute(&db).await.unwrap().last_insert_rowid();
+
+        let account_b_id = sqlx::query(
+            "INSERT INTO account (name, account_type, native_currency, created_at) VALUES (?,?,?,?)",
+        )
+        .bind("Acct B").bind("brokerage").bind("IDR").bind(&now)
+        .execute(&db).await.unwrap().last_insert_rowid();
+
+        let instrument_a_id = sqlx::query(
+            "INSERT INTO instrument (symbol, name, instrument_type, native_currency, price_source) VALUES (?,?,?,?,?)",
+        )
+        .bind("AAA").bind("Instrument A").bind("stock").bind("IDR").bind("manual")
+        .execute(&db).await.unwrap().last_insert_rowid();
+
+        let instrument_b_id = sqlx::query(
+            "INSERT INTO instrument (symbol, name, instrument_type, native_currency, price_source) VALUES (?,?,?,?,?)",
+        )
+        .bind("BBB").bind("Instrument B").bind("stock").bind("IDR").bind("manual")
+        .execute(&db).await.unwrap().last_insert_rowid();
+
+        let item = create(&db, &NewReviewItem {
+            batch_id: "b1", source_kind: "image", source_filename: "f.jpg",
+            source_path: "", doc_type: "txn_history", needs_attention: false,
+            payload_json: "{}", raw_llm_json: "{}",
+            suggested_instrument_id: Some(instrument_a_id), suggested_account_id: None,
+        }).await.unwrap();
+
+        let updated = set_suggestions(&db, item.id, Some(account_a_id), None).await.unwrap();
+        assert_eq!(updated.suggested_account_id, Some(account_a_id));
+        assert_eq!(updated.suggested_instrument_id, Some(instrument_a_id), "instrument left unchanged");
+
+        let updated = set_suggestions(&db, item.id, None, Some(instrument_b_id)).await.unwrap();
+        assert_eq!(updated.suggested_account_id, Some(account_a_id), "account left unchanged");
+        assert_eq!(updated.suggested_instrument_id, Some(instrument_b_id));
+
+        // Verify account can also be updated independently
+        let updated = set_suggestions(&db, item.id, Some(account_b_id), None).await.unwrap();
+        assert_eq!(updated.suggested_account_id, Some(account_b_id));
+        assert_eq!(updated.suggested_instrument_id, Some(instrument_b_id), "instrument still unchanged");
+    }
+
     #[tokio::test]
     async fn create_list_and_status_transitions() {
         let db = crate::db::connect("sqlite::memory:").await.unwrap();
