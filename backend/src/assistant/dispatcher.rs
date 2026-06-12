@@ -24,6 +24,7 @@ pub async fn dispatch(db: &Db, name: &str, input: &serde_json::Value) -> Result<
         "list_accounts" => list_accounts(db).await,
         "create_account" => create_account(db, input).await,
         "list_pending_reviews" => list_pending_reviews(db).await,
+        "confirm_review" => confirm_review(db, input).await,
         _ => Err(format!("unknown tool: {name}")),
     }
 }
@@ -41,8 +42,6 @@ fn id_arg(input: &serde_json::Value, key: &str) -> Result<i64, String> {
 
 /// Optional integer argument: absent/null → None; present-but-not-integer is
 /// an error so the model self-corrects instead of assuming a silent default.
-// used by confirm_review (Task 6)
-#[allow(dead_code)]
 fn optional_id(input: &serde_json::Value, key: &str) -> Result<Option<i64>, String> {
     match input.get(key) {
         None | Some(serde_json::Value::Null) => Ok(None),
@@ -425,6 +424,25 @@ async fn list_pending_reviews(db: &Db) -> Result<String, String> {
     Ok(out)
 }
 
+async fn confirm_review(db: &Db, input: &serde_json::Value) -> Result<String, String> {
+    let review_id = id_arg(input, "review_id")?;
+    let account_id = optional_id(input, "account_id")?;
+    let instrument_id = optional_id(input, "instrument_id")?;
+    if account_id.is_some() || instrument_id.is_some() {
+        crate::repo::review_items::set_suggestions(db, review_id, account_id, instrument_id)
+            .await
+            .map_err(|e| format!("db error: {e}"))?;
+    }
+    let item = crate::repo::review_items::get(db, review_id)
+        .await
+        .map_err(|_| format!("review #{review_id} not found"))?;
+    let payload = crate::ingestion::review::build_confirm_payload(&item)?;
+    let txn_id = crate::ingestion::review::confirm(db, review_id, &payload)
+        .await
+        .map_err(|e| format!("{e}"))?;
+    Ok(format!("transaksi #{txn_id} dibuat dari review #{review_id}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -722,6 +740,47 @@ mod tests {
         .await
         .unwrap()
         .id
+    }
+
+    #[tokio::test]
+    async fn confirm_review_with_account_override_creates_txn() {
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        let instrument = crate::repo::instruments::create(&db, &crate::repo::instruments::NewInstrument {
+            symbol: "BTC".into(), name: "Bitcoin".into(), instrument_type: "crypto".into(),
+            native_currency: "USD".into(), category_id: None, price_source: "manual".into(),
+            decimals: Some(8), note: None,
+        }).await.unwrap();
+        let account = crate::repo::accounts::create(&db, &crate::repo::accounts::NewAccount {
+            name: "Nanovest".into(), account_type: "broker".into(), institution: None,
+            native_currency: "IDR".into(), note: None,
+        }).await.unwrap();
+        // Account unknown at ingest time; instrument matched.
+        let id = seed_pending_item(&db, None, Some(instrument.id)).await;
+
+        let out = dispatch(&db, "confirm_review", &serde_json::json!({
+            "review_id": id, "account_id": account.id
+        })).await.unwrap();
+        assert!(out.contains("dibuat"), "{out}");
+
+        let item = crate::repo::review_items::get(&db, id).await.unwrap();
+        assert_eq!(item.status, "confirmed");
+        assert!(item.created_txn_id.is_some());
+    }
+
+    #[tokio::test]
+    async fn confirm_review_still_incomplete_returns_reason() {
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        let instrument = crate::repo::instruments::create(&db, &crate::repo::instruments::NewInstrument {
+            symbol: "BTC".into(), name: "Bitcoin".into(), instrument_type: "crypto".into(),
+            native_currency: "USD".into(), category_id: None, price_source: "manual".into(),
+            decimals: Some(8), note: None,
+        }).await.unwrap();
+        // No account supplied and none seeded → not confirmable.
+        let id = seed_pending_item(&db, None, Some(instrument.id)).await;
+        let err = dispatch(&db, "confirm_review", &serde_json::json!({ "review_id": id })).await.unwrap_err();
+        assert!(err.contains("akun belum dikenali"), "{err}");
+        let item = crate::repo::review_items::get(&db, id).await.unwrap();
+        assert_eq!(item.status, "pending", "must not confirm");
     }
 
     #[tokio::test]

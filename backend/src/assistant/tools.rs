@@ -153,6 +153,19 @@ pub fn definitions() -> serde_json::Value {
             "name": "list_pending_reviews",
             "description": "List ingest review items awaiting confirmation (from photos/PDFs the owner sent). Each line shows the review id, type, instrument, account, amounts, date, and flags items whose account or instrument isn't recognized yet. Use when the user asks to enter/confirm a transaction they sent.",
             "input_schema": { "type": "object", "properties": {} }
+        },
+        {
+            "name": "confirm_review",
+            "description": "Confirm a pending review item, turning it into a transaction. Pass account_id and/or instrument_id to fill in anything flagged 'belum dikenali' (create the account first with create_account if needed). Always ask the user to confirm before calling — this writes a transaction.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "review_id": { "type": "integer", "description": "Review item id from list_pending_reviews" },
+                    "account_id": { "type": "integer", "description": "Optional account id to set when the item's account is unknown" },
+                    "instrument_id": { "type": "integer", "description": "Optional instrument id to set when the item's instrument is unknown" }
+                },
+                "required": ["review_id"]
+            }
         }
     ])
 }
@@ -178,7 +191,7 @@ mod tests {
                 "get_portfolio_summary", "search_memory", "remember",
                 "create_event", "list_events", "cancel_event",
                 "reject_review", "list_accounts", "create_account",
-                "list_pending_reviews",
+                "list_pending_reviews", "confirm_review",
             ]
         );
         for tool in defs.as_array().unwrap() {
