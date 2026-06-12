@@ -22,8 +22,14 @@ spec:
           ports:
             - containerPort: 8000
           env:
+            # From the secret so the graph backend (Aura vs in-cluster) is a
+            # secret edit, not a manifest change. Aura: neo4j+s://<id>.databases.neo4j.io
+            # In-cluster (k8s/50-neo4j.yaml): bolt://neo4j:7687
             - name: NEO4J_URI
-              value: "bolt://neo4j:7687"
+              valueFrom:
+                secretKeyRef:
+                  name: portfolio-secrets
+                  key: NEO4J_URI
             - name: NEO4J_USER
               value: "neo4j"
             - name: NEO4J_PASSWORD
