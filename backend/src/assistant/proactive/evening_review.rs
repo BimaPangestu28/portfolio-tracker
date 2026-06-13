@@ -37,15 +37,7 @@ pub async fn gather(db: &Db, now_utc: DateTime<Utc>) -> anyhow::Result<ReviewDat
 
     // Start of today in WIB, expressed as a +00:00 RFC3339 string to match the
     // format `todos::complete` writes into completed_at.
-    let day_start_utc = now_wib
-        .date_naive()
-        .and_hms_opt(0, 0, 0)
-        .expect("midnight is valid")
-        .and_local_timezone(crate::assistant::time::wib())
-        .single()
-        .expect("WIB has no DST gaps")
-        .with_timezone(&Utc)
-        .to_rfc3339();
+    let day_start_utc = crate::assistant::time::start_of_today_wib(now_utc).to_rfc3339();
 
     let done_today = crate::repo::todos::completed_since(db, &day_start_utc).await?;
     let unfinished = super::plan::order_todos(unfinished_through_today(

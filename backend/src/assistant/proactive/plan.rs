@@ -48,14 +48,7 @@ pub async fn gather(db: &Db, now_utc: DateTime<Utc>) -> anyhow::Result<DayPlan> 
     let now_wib = now_utc.with_timezone(&crate::assistant::time::wib());
     let date_wib = now_wib.format("%Y-%m-%d").to_string();
 
-    let day_start = now_wib
-        .date_naive()
-        .and_hms_opt(0, 0, 0)
-        .expect("midnight is valid")
-        .and_local_timezone(crate::assistant::time::wib())
-        .single()
-        .expect("WIB has no DST gaps")
-        .with_timezone(&Utc);
+    let day_start = crate::assistant::time::start_of_today_wib(now_utc);
     let events = crate::repo::events::list_between(
         db,
         &crate::assistant::time::to_db_utc(day_start),

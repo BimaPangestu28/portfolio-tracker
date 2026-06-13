@@ -28,6 +28,18 @@ pub fn parse_tool_datetime(raw: &str) -> Option<DateTime<Utc>> {
         .map(|dt| dt.with_timezone(&Utc))
 }
 
+/// Start of the WIB calendar day containing `now`, expressed as a UTC instant.
+pub fn start_of_today_wib(now: DateTime<Utc>) -> DateTime<Utc> {
+    now.with_timezone(&wib())
+        .date_naive()
+        .and_hms_opt(0, 0, 0)
+        .expect("midnight is valid")
+        .and_local_timezone(wib())
+        .single()
+        .expect("WIB has no DST gaps")
+        .with_timezone(&Utc)
+}
+
 /// Epoch-ms of 23:59:59 WIB on the WIB-local date of `now`. Used to bound a
 /// "due today" window for tasks whose due dates are epoch ms.
 pub fn end_of_today_wib_ms(now: DateTime<Utc>) -> i64 {
@@ -81,6 +93,15 @@ mod tests {
         assert_eq!(to_wib_display("2026-06-12T02:00:00Z"), "2026-06-12 09:00 WIB");
         // Unparseable values pass through untouched rather than panicking.
         assert_eq!(to_wib_display("oops"), "oops");
+    }
+
+    #[test]
+    fn start_of_today_wib_is_midnight_wib_in_utc() {
+        // 2026-06-12T02:00:00Z == 09:00 WIB → start of WIB day is 2026-06-11T17:00:00Z.
+        let now = chrono::DateTime::parse_from_rfc3339("2026-06-12T02:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        assert_eq!(start_of_today_wib(now).to_rfc3339(), "2026-06-11T17:00:00+00:00");
     }
 
     #[test]

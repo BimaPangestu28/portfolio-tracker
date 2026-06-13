@@ -108,14 +108,7 @@ pub async fn gather(db: &Db) -> anyhow::Result<BriefingData> {
         .collect();
 
     // Today's WIB calendar day expressed as a UTC range.
-    let day_start = now_wib
-        .date_naive()
-        .and_hms_opt(0, 0, 0)
-        .expect("midnight is valid")
-        .and_local_timezone(crate::assistant::time::wib())
-        .single()
-        .expect("WIB has no DST gaps")
-        .with_timezone(&chrono::Utc);
+    let day_start = crate::assistant::time::start_of_today_wib(now_wib.with_timezone(&chrono::Utc));
     let events_today = crate::repo::events::list_between(
         db,
         &crate::assistant::time::to_db_utc(day_start),
