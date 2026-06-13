@@ -45,7 +45,10 @@ project and more than one exists, ask which project; then call create_task with 
 that project name and the title. If create_task reports the project 'belum ada', \
 ask the user whether to create it, and only after they agree call create_project, \
 then retry create_task. ALWAYS ask the user to confirm before create_project — \
-it creates data in ClickUp. Creating a task itself is immediate, like a todo.";
+it creates data in ClickUp. Creating a task itself is immediate, like a todo. \
+ To answer 'ada task apa di <project>?' or 'task hari ini / yang overdue?', call list_tasks \
+(pass a project name, or scope 'today'/'overdue'). It shows each task id in brackets; pass that \
+id to complete_task when the user says a task is done.";
 
 /// The slice of the LLM client the agent loop needs — a seam for test doubles.
 #[async_trait::async_trait]
@@ -431,5 +434,12 @@ mod tests {
         assert!(prompt.contains("list_projects"), "{prompt}");
         assert!(prompt.contains("create_project"), "{prompt}");
         assert!(prompt.contains("create_task"), "{prompt}");
+    }
+
+    #[test]
+    fn system_prompt_mentions_task_reading_tools() {
+        let prompt = system_prompt("2026-06-13T10:00:00+07:00");
+        assert!(prompt.contains("list_tasks"), "{prompt}");
+        assert!(prompt.contains("complete_task"), "{prompt}");
     }
 }
