@@ -45,6 +45,11 @@ pub fn build_native_body(model: &str, system: &str, parts: &[Part]) -> Result<se
     Ok(serde_json::json!({
         "model": model,
         "max_tokens": 4096,
+        // Force a JSON-object reply. The OpenAI-shape `json_object` mode keeps the
+        // model from emitting free-form prose — including the stray "I'm sorry, I
+        // cannot fulfill this request." refusals that otherwise reach the parser as
+        // non-JSON. Requires the word "JSON" in the prompt, which SYSTEM_PROMPT has.
+        "response_format": { "type": "json_object" },
         "messages": [
             { "role": "system", "content": system },
             { "role": "user", "content": content },
@@ -131,6 +136,7 @@ mod tests {
             &[Part::Text("hi".into()), Part::Image("image/png".into(), "AAAA".into())],
         ).unwrap();
         assert_eq!(body["model"], "gpt-4o");
+        assert_eq!(body["response_format"]["type"], "json_object");
         let messages = body["messages"].as_array().unwrap();
         assert_eq!(messages[0]["role"], "system");
         assert_eq!(messages[0]["content"], "extract");

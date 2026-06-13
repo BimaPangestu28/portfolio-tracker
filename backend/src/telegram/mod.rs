@@ -186,6 +186,9 @@ const ANSWER_FAILED_REPLY: &str =
     "Maaf, lagi ada gangguan saat menjawab. Coba lagi sebentar lagi ya.";
 const INGEST_FAILED_REPLY: &str =
     "Maaf, gagal memproses file-nya. Coba kirim ulang sebentar lagi ya.";
+const REFUSED_REPLY: &str =
+    "Modelnya menolak membaca dokumen ini. Coba kirim ulang, atau potong jadi screenshot \
+     yang isinya cukup detail transaksinya saja ya.";
 const UNSUPPORTED_FILE_REPLY: &str =
     "Format file tidak didukung — kirim foto atau PDF ya.";
 
@@ -268,7 +271,14 @@ async fn handle_update(client: &TelegramClient, db: &Db, tg: &SharedTgState, upd
                     }
                     Err(e) => {
                         tracing::error!("telegram: ingest failed: {e:#}");
-                        send_or_log(client, chat_id, INGEST_FAILED_REPLY).await;
+                        // A model refusal gets its own guidance; everything else
+                        // (download/parse/timeout) keeps the generic retry hint.
+                        let reply = if e.downcast_ref::<crate::ingestion::ingest::ModelRefused>().is_some() {
+                            REFUSED_REPLY
+                        } else {
+                            INGEST_FAILED_REPLY
+                        };
+                        send_or_log(client, chat_id, reply).await;
                     }
                 }
             }
