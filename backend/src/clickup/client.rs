@@ -27,6 +27,24 @@ pub struct Task {
     pub due_date_ms: Option<i64>,
 }
 
+/// A completed/closed ClickUp time entry, used for reporting.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TimeEntry {
+    pub task_id: String,
+    pub task_name: String,
+    pub project_name: String,
+    pub duration_ms: i64,
+    pub start_ms: i64,
+    pub billable: bool,
+}
+
+/// The currently running timer, if any.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RunningEntry {
+    pub task_name: String,
+    pub started_ms: i64,
+}
+
 #[derive(Debug)]
 pub enum ClickUpError {
     NoToken,
