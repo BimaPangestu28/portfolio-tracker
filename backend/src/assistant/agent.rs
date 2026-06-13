@@ -51,7 +51,11 @@ it creates data in ClickUp. Creating a task itself is immediate, like a todo. \
 id to complete_task when the user says a task is done. \
  When the user says a task is billable or gives a price (e.g. 'task landing page PT AIS, \
 billable 10 juta'), pass billable=true and amount (in IDR) to create_task so it can be \
-invoiced later.";
+invoiced later. \
+ You can also draft Upwork job proposals: when the owner pastes a job and asks for a proposal \
+(e.g. 'buatin proposal buat ini'), call draft_proposal with the pasted job_text (and notes if the \
+owner specifies emphasis or a bid). The tool returns a ready-to-send English draft — relay it to \
+the owner verbatim, without summarizing, translating, or reformatting it.";
 
 /// The slice of the LLM client the agent loop needs — a seam for test doubles.
 #[async_trait::async_trait]
@@ -450,5 +454,11 @@ mod tests {
     fn system_prompt_mentions_billable() {
         let prompt = system_prompt("2026-06-13T10:00:00+07:00");
         assert!(prompt.contains("billable"), "{prompt}");
+    }
+
+    #[test]
+    fn system_prompt_mentions_proposal_relay() {
+        assert!(SYSTEM.contains("draft_proposal"));
+        assert!(SYSTEM.contains("verbatim"));
     }
 }
