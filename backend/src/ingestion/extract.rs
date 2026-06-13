@@ -44,11 +44,21 @@ pub struct Extraction {
 
 #[derive(Debug, thiserror::Error)]
 pub enum ExtractError {
+    /// The model returned a natural-language reply with no JSON object at all —
+    /// almost always a content refusal (e.g. "I'm sorry, I cannot fulfill this
+    /// request."). Kept distinct from `NotJson` so the caller can retry and,
+    /// failing that, explain the real cause instead of a generic parse error.
+    #[error("model refused (no JSON in response): {0}")]
+    Refused(String),
     #[error("response not valid JSON: {0}")]
     NotJson(String),
     #[error("missing field: {0}")]
     Missing(String),
 }
+
+/// Longest refusal snippet preserved for logs/messages — enough to recognize the
+/// refusal without dumping an unbounded model reply.
+const REFUSAL_SNIPPET_LEN: usize = 200;
 
 /// Locate the JSON object in a model response. Despite the ONLY-JSON
 /// instruction the model sometimes prefixes reasoning prose and/or wraps the
@@ -74,6 +84,13 @@ fn extract_json(s: &str) -> &str {
 }
 
 pub fn parse_extraction(raw: &str) -> Result<Extraction, ExtractError> {
+    // A valid extraction is always a JSON object, so an absence of braces means
+    // the model emitted prose only — i.e. it declined the task. Surface that as a
+    // refusal rather than letting serde report a vague "expected value" error.
+    if !raw.contains('{') {
+        let snippet: String = raw.trim().chars().take(REFUSAL_SNIPPET_LEN).collect();
+        return Err(ExtractError::Refused(snippet));
+    }
     let cleaned = extract_json(raw);
     let v: serde_json::Value = serde_json::from_str(cleaned).map_err(|e| ExtractError::NotJson(e.to_string()))?;
     let doc_type = v.get("doc_type").and_then(|d| d.as_str())
@@ -355,6 +372,26 @@ mod tests {
         let e = parse_extraction(raw).unwrap();
         assert_eq!(e.doc_type, "txn_history");
         assert_eq!(e.entries.len(), 0);
+    }
+
+    #[test]
+    fn prose_only_refusal_is_classified_as_refused() {
+        // The exact production failure: gpt-4o declined and replied with prose
+        // instead of JSON. Must be a Refused (so the caller retries / explains),
+        // not a vague NotJson parse error.
+        let raw = "I'm sorry, I cannot fulfill this request.";
+        match parse_extraction(raw) {
+            Err(ExtractError::Refused(snippet)) => assert!(snippet.contains("I cannot fulfill")),
+            other => panic!("expected Refused, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn malformed_json_with_braces_is_not_a_refusal() {
+        // Has a brace but is broken JSON -> NotJson, not Refused (retrying a
+        // truncated/garbled response is a different concern).
+        let raw = "{ this is not valid json ";
+        assert!(matches!(parse_extraction(raw), Err(ExtractError::NotJson(_))));
     }
 
     #[test]
