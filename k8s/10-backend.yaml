@@ -122,6 +122,46 @@ spec:
                   name: portfolio-secrets
                   key: CLICKUP_SPACE_ID
                   optional: true
+            # Optional: Upwork OAuth sync. Leave unset / omit from secret to disable.
+            - name: UPWORK_REDIRECT_URI
+              value: "https://portfolio.catalystlabs.id/api/upwork/oauth/callback"
+            - name: UPWORK_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: portfolio-secrets
+                  key: UPWORK_CLIENT_ID
+                  optional: true
+            - name: UPWORK_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: portfolio-secrets
+                  key: UPWORK_CLIENT_SECRET
+                  optional: true
+            - name: UPWORK_TOKEN_ENC_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: portfolio-secrets
+                  key: UPWORK_TOKEN_ENC_KEY
+                  optional: true
+            # Optional: invoice generator. INVOICE_ISSUER_NAME + INVOICE_ACCOUNT_NO
+            # required to enable; the rest default in code (CITY=Jakarta, DUE_DAYS=14).
+            # All from the secret — public repo, no real issuer/bank values here.
+            - name: INVOICE_ISSUER_NAME
+              valueFrom: { secretKeyRef: { name: portfolio-secrets, key: INVOICE_ISSUER_NAME, optional: true } }
+            - name: INVOICE_ISSUER_COMPANY
+              valueFrom: { secretKeyRef: { name: portfolio-secrets, key: INVOICE_ISSUER_COMPANY, optional: true } }
+            - name: INVOICE_ISSUER_WEBSITE
+              valueFrom: { secretKeyRef: { name: portfolio-secrets, key: INVOICE_ISSUER_WEBSITE, optional: true } }
+            - name: INVOICE_ISSUER_CITY
+              valueFrom: { secretKeyRef: { name: portfolio-secrets, key: INVOICE_ISSUER_CITY, optional: true } }
+            - name: INVOICE_BANK
+              valueFrom: { secretKeyRef: { name: portfolio-secrets, key: INVOICE_BANK, optional: true } }
+            - name: INVOICE_ACCOUNT_NO
+              valueFrom: { secretKeyRef: { name: portfolio-secrets, key: INVOICE_ACCOUNT_NO, optional: true } }
+            - name: INVOICE_ACCOUNT_NAME
+              valueFrom: { secretKeyRef: { name: portfolio-secrets, key: INVOICE_ACCOUNT_NAME, optional: true } }
+            - name: INVOICE_DUE_DAYS
+              valueFrom: { secretKeyRef: { name: portfolio-secrets, key: INVOICE_DUE_DAYS, optional: true } }
           volumeMounts:
             - name: data
               mountPath: /data

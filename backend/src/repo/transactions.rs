@@ -119,6 +119,24 @@ pub async fn has_price_one_txn(db: &Db, instrument_id: i64) -> anyhow::Result<bo
     Ok(row.0 > 0)
 }
 
+/// Per account that has traded this instrument: (account_id, txn_count,
+/// last_executed_at), ordered by count desc then most-recent first. Drives the
+/// "infer the account from history" step of ingest account resolution.
+pub async fn accounts_for_instrument(
+    db: &Db,
+    instrument_id: i64,
+) -> anyhow::Result<Vec<(i64, i64, String)>> {
+    let rows = sqlx::query_as::<_, (i64, i64, String)>(
+        "SELECT account_id, COUNT(*) AS cnt, MAX(executed_at) AS last_at \
+         FROM txn WHERE instrument_id = ? \
+         GROUP BY account_id ORDER BY cnt DESC, last_at DESC",
+    )
+    .bind(instrument_id)
+    .fetch_all(db)
+    .await?;
+    Ok(rows)
+}
+
 /// Returns the set of external_ids already present for the given source.
 pub async fn existing_external_ids(db: &Db, source: &str) -> anyhow::Result<std::collections::HashSet<String>> {
     let rows = sqlx::query_as::<_, (String,)>("SELECT external_id FROM txn WHERE source = ? AND external_id IS NOT NULL")
@@ -266,6 +284,41 @@ mod tests {
         };
         create(&db, &nt2).await.unwrap();
         assert!(!has_price_one_txn(&db, ins2.id).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn accounts_for_instrument_orders_by_count_then_recency() {
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        let acc_a = accounts::create(&db, &accounts::NewAccount { name:"A".into(), account_type:"manual".into(), institution:None, native_currency:"USD".into(), note:None }).await.unwrap();
+        let acc_b = accounts::create(&db, &accounts::NewAccount { name:"B".into(), account_type:"manual".into(), institution:None, native_currency:"USD".into(), note:None }).await.unwrap();
+        let acc_c = accounts::create(&db, &accounts::NewAccount { name:"C".into(), account_type:"manual".into(), institution:None, native_currency:"USD".into(), note:None }).await.unwrap();
+        let ins = instruments::create(&db, &instruments::NewInstrument { symbol:"QQQM".into(), name:"Invesco NASDAQ 100 ETF".into(), instrument_type:"etf".into(), native_currency:"USD".into(), category_id:None, price_source:"manual".into(), decimals:Some(8), note:None }).await.unwrap();
+
+        let buy = |account_id: i64, when: DateTime<Utc>| NewTransaction {
+            account_id, instrument_id: ins.id, txn_type:"buy".into(), executed_at: when,
+            quantity:"1".into(), price_native:"100".into(), fee_native:None, currency:"USD".into(),
+            fx_to_idr:"16000".into(), fx_to_usd:"1".into(), note:None, source:None, external_id:None,
+        };
+        let at = |s: &str| DateTime::parse_from_rfc3339(s).unwrap().with_timezone(&Utc);
+        // A and B both have 2 txns (tie on count); A's most-recent is later than B's.
+        // C has the single newest txn overall — must still sort last on count.
+        create(&db, &buy(acc_a.id, at("2026-01-01T00:00:00Z"))).await.unwrap();
+        create(&db, &buy(acc_a.id, at("2026-04-01T00:00:00Z"))).await.unwrap();
+        create(&db, &buy(acc_b.id, at("2026-02-01T00:00:00Z"))).await.unwrap();
+        create(&db, &buy(acc_b.id, at("2026-03-01T00:00:00Z"))).await.unwrap();
+        create(&db, &buy(acc_c.id, at("2026-05-01T00:00:00Z"))).await.unwrap();
+
+        let rows = accounts_for_instrument(&db, ins.id).await.unwrap();
+        assert_eq!(rows.len(), 3);
+        assert_eq!(rows[0].0, acc_a.id, "tie on count, A more recent -> first");
+        assert_eq!(rows[0].1, 2);
+        assert_eq!(rows[1].0, acc_b.id, "tie on count, B older -> second");
+        assert_eq!(rows[1].1, 2);
+        assert_eq!(rows[2].0, acc_c.id, "fewer txns -> last despite newest date");
+        assert_eq!(rows[2].1, 1);
+        // empty for an instrument with no history
+        let ins2 = instruments::create(&db, &instruments::NewInstrument { symbol:"VOO".into(), name:"VOO".into(), instrument_type:"etf".into(), native_currency:"USD".into(), category_id:None, price_source:"manual".into(), decimals:Some(8), note:None }).await.unwrap();
+        assert!(accounts_for_instrument(&db, ins2.id).await.unwrap().is_empty());
     }
 
     #[tokio::test]

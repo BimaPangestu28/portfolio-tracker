@@ -220,6 +220,42 @@ pub fn definitions() -> serde_json::Value {
                 "properties": { "task_id": { "type": "string", "description": "ClickUp task id from list_tasks" } },
                 "required": ["task_id"]
             }
+        },
+        {
+            "name": "list_clients",
+            "description": "List saved invoice clients (name). Use to reuse an existing client before create_invoice.",
+            "input_schema": { "type": "object", "properties": {} }
+        },
+        {
+            "name": "create_invoice",
+            "description": "Create and send a freelance invoice PDF over Telegram. Dictate the client and line items. If the client is new, first ask for their details (sub_name/website) and pass client_details. Echo the parsed items + total to the user before calling so they can catch typos.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "client_name": { "type": "string", "description": "Client name, e.g. PT AIS" },
+                    "line_items": {
+                        "type": "array",
+                        "description": "Invoice lines",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "title": { "type": "string", "description": "Bold line, e.g. Pengembangan Landing Page" },
+                                "body": { "type": "string", "description": "Optional description paragraph" },
+                                "qty": { "type": "integer", "description": "Quantity, default 1" },
+                                "amount": { "type": "integer", "description": "Line total in IDR (e.g. 10 juta -> 10000000)" }
+                            },
+                            "required": ["title", "amount"]
+                        }
+                    },
+                    "client_details": {
+                        "type": "object",
+                        "description": "Only when the client is new",
+                        "properties": { "sub_name": { "type": "string" }, "website": { "type": "string" } }
+                    },
+                    "due_days": { "type": "integer", "description": "Override default due-in days" }
+                },
+                "required": ["client_name", "line_items"]
+            }
         }
     ])
 }
@@ -251,6 +287,8 @@ mod tests {
                 "create_task",
                 "list_tasks",
                 "complete_task",
+                "list_clients",
+                "create_invoice",
             ]
         );
         for tool in defs.as_array().unwrap() {
@@ -289,5 +327,6 @@ mod tests {
         assert_eq!(find("create_project")["input_schema"]["required"], serde_json::json!(["name"]));
         assert_eq!(find("create_task")["input_schema"]["required"], serde_json::json!(["project", "title"]));
         assert_eq!(find("complete_task")["input_schema"]["required"], serde_json::json!(["task_id"]));
+        assert_eq!(find("create_invoice")["input_schema"]["required"], serde_json::json!(["client_name", "line_items"]));
     }
 }

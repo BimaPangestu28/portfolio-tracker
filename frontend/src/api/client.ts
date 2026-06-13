@@ -45,6 +45,16 @@ const googleSyncSchema = z.object({
   imported: z.number(),
 });
 
+// ── Upwork schemas ───────────────────────────────────────────────────────────
+
+const upworkStatusSchema = z.object({
+  status: z.enum(["connected", "disconnected", "error"]),
+  last_error: z.string().nullable(),
+});
+
+const upworkStartSchema = z.object({ consent_url: z.string() });
+
+const upworkSyncSchema = z.object({ inserted: z.number() });
 // ── API client ───────────────────────────────────────────────────────────────
 
 export const api = {
@@ -60,4 +70,10 @@ export const api = {
   googleStart: () => request("/google/oauth/start", googleStartSchema),
   googleSync: () => request("/google/sync", googleSyncSchema, { method: "POST" }),
   googleDisconnect: () => request("/google/disconnect", googleStatusSchema, { method: "POST" }),
+
+  // Upwork integration
+  upworkStatus: () => request("/upwork/status", upworkStatusSchema),
+  upworkStart: () => request("/upwork/oauth/start", upworkStartSchema),
+  upworkSync: () => request("/upwork/sync", upworkSyncSchema, { method: "POST" }),
+  upworkDisconnect: () => request("/upwork/disconnect", upworkStatusSchema, { method: "POST" }),
 };

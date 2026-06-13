@@ -21,6 +21,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import WhatsAppPage from "./WhatsAppPage";
 import TelegramPage from "./TelegramPage";
 import GoogleCalendarCard from "../components/GoogleCalendarCard";
+import UpworkCard from "../components/UpworkCard";
 
 const today = () => new Date().toISOString().slice(0, 10);
 const ACCOUNT_TYPES = ["manual", "exchange", "broker", "bank", "wallet"];
@@ -121,6 +122,13 @@ export default function SettingsPage() {
         >
           Google Calendar
         </button>
+        <button
+          type="button"
+          className={`ptab${tab === "upwork" ? " active" : ""}`}
+          onClick={() => setTab("upwork")}
+        >
+          Upwork
+        </button>
       </div>
 
       {tab === "general" && <GeneralSettings />}
@@ -131,11 +139,16 @@ export default function SettingsPage() {
           <GoogleCalendarCard />
         </div>
       )}
+      {tab === "upwork" && (
+        <div className="space-y-4 pt-4">
+          <UpworkCard />
+        </div>
+      )}
     </div>
   );
 }
 
-type Tab = "general" | "whatsapp" | "telegram" | "google";
+type Tab = "general" | "whatsapp" | "telegram" | "google" | "upwork";
 
 function GeneralSettings() {
   const accounts = useAccounts();

@@ -1,6 +1,7 @@
 pub mod accounts;
 pub mod events;
 pub mod google_integration;
+pub mod upwork_integration;
 pub mod proactive_log;
 pub mod cashflow;
 pub mod cashflow_categories;
@@ -16,6 +17,8 @@ pub mod review_items;
 pub mod telegram_link;
 pub mod todos;
 pub mod reminders;
+pub mod clients;
+pub mod invoices;
 
 use rust_decimal::Decimal;
 use std::str::FromStr;

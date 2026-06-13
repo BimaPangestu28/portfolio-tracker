@@ -253,6 +253,8 @@ mod tests {
             currency: currency.into(),
             category_id: None,
             note: None,
+            source: None,
+            external_ref: None,
             created_at: String::new(),
         }
     }

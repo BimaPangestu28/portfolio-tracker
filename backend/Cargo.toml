@@ -13,7 +13,7 @@ sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "sqlite", "chrono"
 rust_decimal = { version = "1", features = ["serde-with-str", "maths"] }
 rust_decimal_macros = "1"
 chrono = { version = "0.4", features = ["serde"] }
-reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+reqwest = { version = "0.12", features = ["json", "rustls-tls", "multipart"], default-features = false }
 base64 = "0.22"
 async-trait = "0.1"
 thiserror = "1"
@@ -24,6 +24,9 @@ jsonwebtoken = "9"
 constant_time_eq = "0.3"
 rand = "0.8"
 aes-gcm = "0.10"
+typst-as-lib = "0.15.5"
+typst-pdf = "0.14.2"
+typst-assets = { version = "0.14.2", features = ["fonts"] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

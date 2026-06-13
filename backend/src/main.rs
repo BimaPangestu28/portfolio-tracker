@@ -8,12 +8,14 @@ mod db;
 mod domain;
 mod error;
 mod ingestion;
+mod invoice;
 mod llm;
 mod pricing;
 mod repo;
 mod scheduler;
 mod service;
 mod telegram;
+mod upwork;
 mod wa_state;
 
 use db::Db;
