@@ -268,6 +268,32 @@ pub fn definitions() -> serde_json::Value {
                 },
                 "required": ["client_name", "line_items"]
             }
+        },
+        {
+            "name": "capture_to_inbox",
+            "description": "Save a raw quick capture to the GTD inbox for later sorting. Use for vague/ambiguous dumps with no clear single action (e.g. 'inget beliin kado', 'ide fitur X').",
+            "input_schema": {
+                "type": "object",
+                "properties": { "content": { "type": "string", "description": "The raw captured text" } },
+                "required": ["content"]
+            }
+        },
+        {
+            "name": "list_inbox",
+            "description": "List pending inbox captures with ids. Use for 'apa di inbox?' or before sorting.",
+            "input_schema": { "type": "object", "properties": {} }
+        },
+        {
+            "name": "resolve_inbox",
+            "description": "Mark inbox items as sorted (after you created todos/events/tasks/notes from them) or dropped (discarded). Pass the item ids.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "ids": { "type": "array", "items": { "type": "integer" }, "description": "Inbox item ids to resolve" },
+                    "status": { "type": "string", "enum": ["sorted", "dropped"], "description": "sorted (handled) or dropped (discarded)" }
+                },
+                "required": ["ids", "status"]
+            }
         }
     ])
 }
@@ -302,6 +328,9 @@ mod tests {
                 "draft_proposal",
                 "list_clients",
                 "create_invoice",
+                "capture_to_inbox",
+                "list_inbox",
+                "resolve_inbox",
             ]
         );
         for tool in defs.as_array().unwrap() {
