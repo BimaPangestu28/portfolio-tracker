@@ -125,6 +125,123 @@ pub fn format_invitation_alert(inv: &Invitation) -> String {
     msg
 }
 
+use crate::db::Db;
+use crate::llm::claude::{ClaudeClient, Part};
+use crate::repo::proactive_log;
+use crate::upwork::client::UpworkClient;
+use async_trait::async_trait;
+
+/// LLM-backed intelligence seam (query derivation + job scoring). Real impl uses
+/// the chat model; tests inject a fake.
+#[async_trait]
+pub trait JobIntel: Send + Sync {
+    async fn derive_queries(&self, facts: &[MemoryFact], max: usize) -> Vec<String>;
+    async fn score_jobs(&self, jobs: &[MarketplaceJob], facts: &[MemoryFact]) -> Vec<JobScore>;
+}
+
+/// Telegram delivery seam. Real impl wraps `TelegramClient`; tests record sends.
+#[async_trait]
+pub trait Notifier: Send + Sync {
+    async fn send(&self, chat_id: i64, text: &str) -> Result<(), String>;
+}
+
+/// Production `JobIntel`: builds the prompts and calls the chat model. Any LLM
+/// failure degrades to an empty result (no queries / no scores).
+pub struct LlmJobIntel;
+
+#[async_trait]
+impl JobIntel for LlmJobIntel {
+    async fn derive_queries(&self, facts: &[MemoryFact], max: usize) -> Vec<String> {
+        if facts.is_empty() {
+            return Vec::new();
+        }
+        let Ok(client) = ClaudeClient::from_env() else { return Vec::new() };
+        match client.complete("You output Upwork search queries.", &[Part::Text(build_query_prompt(facts))]).await {
+            Ok(text) => parse_queries(&text, max),
+            Err(e) => { tracing::warn!("job query derivation failed: {e}"); Vec::new() }
+        }
+    }
+    async fn score_jobs(&self, jobs: &[MarketplaceJob], facts: &[MemoryFact]) -> Vec<JobScore> {
+        if jobs.is_empty() {
+            return Vec::new();
+        }
+        let Ok(client) = ClaudeClient::from_env() else { return Vec::new() };
+        match client.complete("You score Upwork job relevance.", &[Part::Text(build_scoring_prompt(jobs, facts))]).await {
+            Ok(text) => parse_scores(&text),
+            Err(e) => { tracing::warn!("job scoring failed: {e}"); Vec::new() }
+        }
+    }
+}
+
+/// Production `Notifier`: sends over Telegram.
+pub struct TelegramNotifier {
+    pub client: crate::telegram::client::TelegramClient,
+}
+#[async_trait]
+impl Notifier for TelegramNotifier {
+    async fn send(&self, chat_id: i64, text: &str) -> Result<(), String> {
+        self.client.send_message(chat_id, text).await.map_err(|e| e.to_string())
+    }
+}
+
+/// One notification pass against injected seams. Returns the number of messages
+/// sent. Pure DB + traits, so tests drive it with fakes.
+pub async fn run_pass<C: UpworkClient, I: JobIntel, N: Notifier>(
+    db: &Db,
+    client: &C,
+    intel: &I,
+    notifier: &N,
+    chat_id: i64,
+    facts: &[MemoryFact],
+    threshold: u8,
+    max_queries: usize,
+) -> anyhow::Result<usize> {
+    let mut sent = 0usize;
+
+    // --- Invitations: always notify newly-seen ones ---
+    match client.fetch_invitations(None).await {
+        Ok(batch) => {
+            for inv in &batch.invitations {
+                if proactive_log::try_claim(db, "upwork-invite", &inv.id).await? {
+                    if notifier.send(chat_id, &format_invitation_alert(inv)).await.is_ok() {
+                        sent += 1;
+                    }
+                }
+            }
+        }
+        Err(e) => tracing::warn!("fetch invitations failed: {e}"),
+    }
+
+    // --- Marketplace: derive queries, fetch, claim-new, score, notify >= threshold ---
+    let queries = intel.derive_queries(facts, max_queries).await;
+    let mut new_jobs: Vec<MarketplaceJob> = Vec::new();
+    for q in &queries {
+        match client.fetch_marketplace_jobs(q).await {
+            Ok(jobs) => {
+                for job in jobs {
+                    if proactive_log::try_claim(db, "upwork-job", &job.id).await? {
+                        new_jobs.push(job);
+                    }
+                }
+            }
+            Err(e) => tracing::warn!("fetch jobs for '{q}' failed: {e}"),
+        }
+    }
+    if !new_jobs.is_empty() {
+        let scores = intel.score_jobs(&new_jobs, facts).await;
+        for job in &new_jobs {
+            if let Some(s) = scores.iter().find(|s| s.id == job.id) {
+                if s.score >= threshold
+                    && notifier.send(chat_id, &format_job_alert(job, s.score, &s.reason)).await.is_ok()
+                {
+                    sent += 1;
+                }
+            }
+        }
+    }
+    Ok(sent)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -207,5 +324,52 @@ mod tests {
         assert!(msg.contains("saw your profile"));
         assert!(msg.contains("https://www.upwork.com/jobs/xyz"));
         assert!(!msg.contains("**"));
+    }
+
+    use crate::upwork::client::testkit::FakeUpwork;
+    use crate::upwork::client::Invitation;
+    use std::sync::Mutex;
+
+    struct FakeIntel { queries: Vec<String>, scores: Vec<JobScore> }
+    #[async_trait::async_trait]
+    impl JobIntel for FakeIntel {
+        async fn derive_queries(&self, _f: &[MemoryFact], _m: usize) -> Vec<String> { self.queries.clone() }
+        async fn score_jobs(&self, _j: &[MarketplaceJob], _f: &[MemoryFact]) -> Vec<JobScore> { self.scores.clone() }
+    }
+    #[derive(Default)]
+    struct CapturingNotifier { sent: Mutex<Vec<String>> }
+    #[async_trait::async_trait]
+    impl Notifier for CapturingNotifier {
+        async fn send(&self, _chat: i64, text: &str) -> Result<(), String> {
+            self.sent.lock().unwrap().push(text.to_string());
+            Ok(())
+        }
+    }
+    async fn mem_db() -> Db { crate::db::connect("sqlite::memory:").await.unwrap() }
+
+    #[tokio::test]
+    async fn sends_invitations_and_above_threshold_jobs_then_dedupes() {
+        let db = mem_db().await;
+        let jobs = vec![job("j1", "Rust API"), job("j2", "WordPress")];
+        let invites = vec![Invitation { id: "i1".into(), job_title: "Direct gig".into(), client_note: None, url: "u".into() }];
+        let client = FakeUpwork::with_notifications(jobs, invites);
+        let intel = FakeIntel {
+            queries: vec!["rust".into()],
+            scores: vec![
+                JobScore { id: "j1".into(), score: 9, reason: "fit".into() },
+                JobScore { id: "j2".into(), score: 3, reason: "weak".into() },
+            ],
+        };
+        let notifier = CapturingNotifier::default();
+
+        let n = run_pass(&db, &client, &intel, &notifier, 42, &[], 7, 3).await.unwrap();
+        assert_eq!(n, 2, "1 invitation + 1 above-threshold job");
+        let sent = notifier.sent.lock().unwrap().clone();
+        assert!(sent.iter().any(|m| m.contains("Direct gig")));
+        assert!(sent.iter().any(|m| m.contains("Rust API")));
+        assert!(!sent.iter().any(|m| m.contains("WordPress")), "below-threshold job not sent");
+
+        let n2 = run_pass(&db, &client, &intel, &notifier, 42, &[], 7, 3).await.unwrap();
+        assert_eq!(n2, 0);
     }
 }
