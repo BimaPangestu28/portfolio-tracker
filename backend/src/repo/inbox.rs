@@ -9,7 +9,7 @@ pub struct InboxRow {
     pub content: String,
     pub status: String,
     pub created_at: String,
-    pub sorted_at: Option<String>,
+    pub resolved_at: Option<String>,
 }
 
 pub async fn create(db: &Db, content: &str) -> anyhow::Result<InboxRow> {
@@ -42,13 +42,13 @@ pub async fn list_pending(db: &Db) -> anyhow::Result<Vec<InboxRow>> {
 }
 
 /// Move the given pending items to `status` ('sorted' or 'dropped'), stamping
-/// sorted_at. Only pending rows change. Returns the number of rows affected.
+/// resolved_at. Only pending rows change. Returns the number of rows affected.
 pub async fn resolve(db: &Db, ids: &[i64], status: &str) -> anyhow::Result<u64> {
     let now = chrono::Utc::now().to_rfc3339();
     let mut affected = 0u64;
     for id in ids {
         let result = sqlx::query(
-            "UPDATE inbox SET status = ?, sorted_at = ? WHERE id = ? AND status = 'pending'",
+            "UPDATE inbox SET status = ?, resolved_at = ? WHERE id = ? AND status = 'pending'",
         )
         .bind(status)
         .bind(&now)
@@ -74,7 +74,7 @@ mod tests {
         let a = create(&db, "beli kado").await.unwrap();
         let _b = create(&db, "meeting senin").await.unwrap();
         assert_eq!(a.status, "pending");
-        assert!(a.sorted_at.is_none());
+        assert!(a.resolved_at.is_none());
         let pending = list_pending(&db).await.unwrap();
         assert_eq!(pending.len(), 2);
         assert_eq!(pending[0].content, "beli kado");
@@ -92,7 +92,7 @@ mod tests {
         assert_eq!(pending.iter().map(|r| r.id).collect::<Vec<_>>(), vec![c.id]);
         let again = resolve(&db, &[a.id], "sorted").await.unwrap();
         assert_eq!(again, 0);
-        assert!(get(&db, a.id).await.unwrap().sorted_at.is_some());
+        assert!(get(&db, a.id).await.unwrap().resolved_at.is_some());
     }
 
     #[tokio::test]

@@ -5,7 +5,7 @@ CREATE TABLE inbox (
   status TEXT NOT NULL DEFAULT 'pending'
     CHECK (status IN ('pending', 'sorted', 'dropped')),
   created_at TEXT NOT NULL,
-  sorted_at TEXT
+  resolved_at TEXT
 );
 
 CREATE INDEX idx_inbox_pending ON inbox (status, id);
