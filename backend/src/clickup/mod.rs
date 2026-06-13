@@ -2,4 +2,4 @@
 //! assistant's project/task tools can be tested with a fake.
 pub mod client;
 
-pub use client::{ClickUpApi, ClickUpClient, NewTask, Task};
+pub use client::{ClickUpApi, ClickUpClient, NewTask, Project, Task};

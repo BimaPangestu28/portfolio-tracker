@@ -198,6 +198,17 @@ pub fn definitions() -> serde_json::Value {
                 },
                 "required": ["project", "title"]
             }
+        },
+        {
+            "name": "list_tasks",
+            "description": "List freelance tasks from ClickUp. Pass a project name to list that project's open tasks; or pass scope 'today' / 'overdue' to list due/overdue tasks across all projects. Default scope 'open' lists all open tasks.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "project": { "type": "string", "description": "Optional project (list) name to filter to" },
+                    "scope": { "type": "string", "enum": ["open", "today", "overdue"], "description": "open (default), today (due today), or overdue" }
+                }
+            }
         }
     ])
 }
@@ -227,6 +238,7 @@ mod tests {
                 "list_projects",
                 "create_project",
                 "create_task",
+                "list_tasks",
             ]
         );
         for tool in defs.as_array().unwrap() {

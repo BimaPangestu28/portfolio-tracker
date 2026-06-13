@@ -38,6 +38,10 @@ pub async fn dispatch(db: &Db, name: &str, input: &serde_json::Value) -> Result<
             Ok(api) => clickup_create_task(&api, input).await,
             Err(e) => Err(format!("clickup belum dikonfigurasi: {e}")),
         },
+        "list_tasks" => match crate::clickup::ClickUpClient::from_env() {
+            Ok(api) => clickup_list_tasks(&api, input).await,
+            Err(e) => Err(format!("clickup belum dikonfigurasi: {e}")),
+        },
         _ => Err(format!("unknown tool: {name}")),
     }
 }
@@ -400,6 +404,45 @@ async fn clickup_create_task(
     let task = crate::clickup::NewTask { name: title.to_string(), due_date_ms };
     api.create_task(&matched.id, &task).await.map_err(|e| format!("{e}"))?;
     Ok(format!("task '{title}' ditambahkan ke project '{}'", matched.name))
+}
+
+async fn clickup_list_tasks(
+    api: &dyn crate::clickup::ClickUpApi,
+    input: &serde_json::Value,
+) -> Result<String, String> {
+    let scope = str_arg(input, "scope").unwrap_or("open");
+    let projects = api.list_projects().await.map_err(|e| format!("{e}"))?;
+    let targets: Vec<&crate::clickup::Project> = match str_arg(input, "project") {
+        Some(name) => {
+            let p = projects.iter().find(|p| p.name.eq_ignore_ascii_case(name))
+                .ok_or_else(|| format!("project '{name}' belum ada"))?;
+            vec![p]
+        }
+        None => projects.iter().collect(),
+    };
+    let now_ms = chrono::Utc::now().timestamp_millis();
+    let end_today = crate::assistant::time::end_of_today_wib_ms(chrono::Utc::now());
+    let mut out = String::new();
+    for project in targets {
+        let tasks = api.list_tasks(&project.id).await.map_err(|e| format!("{e}"))?;
+        let mut lines = String::new();
+        for t in &tasks {
+            let keep = match scope {
+                "overdue" => t.due_date_ms.is_some_and(|d| d < now_ms),
+                "today" => t.due_date_ms.is_some_and(|d| d >= now_ms && d <= end_today),
+                _ => true,
+            };
+            if !keep { continue; }
+            lines.push_str(&format!("  [{}] {}\n", t.id, t.name));
+        }
+        if !lines.is_empty() {
+            out.push_str(&format!("{}:\n{lines}", project.name));
+        }
+    }
+    if out.is_empty() {
+        return Ok("tidak ada task".into());
+    }
+    Ok(out)
 }
 
 async fn clickup_list_projects(api: &dyn crate::clickup::ClickUpApi) -> Result<String, String> {
@@ -970,7 +1013,7 @@ mod tests {
 
     // ── ClickUp fake ─────────────────────────────────────────────────────────
 
-    use crate::clickup::client::{ClickUpApi, ClickUpError, NewTask, Project};
+    use crate::clickup::client::{ClickUpApi, ClickUpError, NewTask, Project, Task};
     use std::sync::Mutex;
 
     #[derive(Default)]
@@ -978,6 +1021,8 @@ mod tests {
         projects: Mutex<Vec<Project>>,
         created_tasks: Mutex<Vec<(String, String)>>, // (list_id, title)
         created_dues: Mutex<Vec<Option<i64>>>,       // due_date_ms per created task
+        tasks: Mutex<std::collections::HashMap<String, Vec<crate::clickup::client::Task>>>,
+        completed: Mutex<Vec<String>>,
     }
 
     #[async_trait::async_trait]
@@ -994,6 +1039,13 @@ mod tests {
             self.created_tasks.lock().unwrap().push((list_id.to_string(), task.name.clone()));
             self.created_dues.lock().unwrap().push(task.due_date_ms);
             Ok(format!("task_{}", task.name))
+        }
+        async fn list_tasks(&self, list_id: &str) -> Result<Vec<crate::clickup::client::Task>, ClickUpError> {
+            Ok(self.tasks.lock().unwrap().get(list_id).cloned().unwrap_or_default())
+        }
+        async fn complete_task(&self, task_id: &str) -> Result<(), ClickUpError> {
+            self.completed.lock().unwrap().push(task_id.to_string());
+            Ok(())
         }
     }
 
@@ -1097,6 +1149,38 @@ mod tests {
         assert!(err.contains("Klien Baru"), "{err}");
         assert!(err.contains("belum ada"), "{err}");
         assert!(fake.created_tasks.lock().unwrap().is_empty(), "no task created");
+    }
+
+    #[tokio::test]
+    async fn list_tasks_for_a_project_shows_open_tasks() {
+        let fake = FakeClickUp::default();
+        fake.projects.lock().unwrap().push(Project { id: "l1".into(), name: "PT AIS".into() });
+        fake.tasks.lock().unwrap().insert("l1".into(), vec![
+            Task { id: "t1".into(), name: "bikin kontrak".into(), status: "to do".into(), due_date_ms: None },
+        ]);
+        let out = clickup_list_tasks(&fake, &serde_json::json!({ "project": "PT AIS" })).await.unwrap();
+        assert!(out.contains("bikin kontrak"), "{out}");
+        assert!(out.contains("t1"), "task id shown: {out}");
+    }
+
+    #[tokio::test]
+    async fn list_tasks_overdue_filters_across_projects() {
+        let fake = FakeClickUp::default();
+        fake.projects.lock().unwrap().push(Project { id: "l1".into(), name: "PT AIS".into() });
+        fake.tasks.lock().unwrap().insert("l1".into(), vec![
+            Task { id: "t1".into(), name: "lewat deadline".into(), status: "to do".into(), due_date_ms: Some(1_000) },
+            Task { id: "t2".into(), name: "tanpa due".into(), status: "to do".into(), due_date_ms: None },
+        ]);
+        let out = clickup_list_tasks(&fake, &serde_json::json!({ "scope": "overdue" })).await.unwrap();
+        assert!(out.contains("lewat deadline"), "{out}");
+        assert!(!out.contains("tanpa due"), "no-due task must not be overdue: {out}");
+    }
+
+    #[tokio::test]
+    async fn list_tasks_empty_is_explicit() {
+        let fake = FakeClickUp::default();
+        let out = clickup_list_tasks(&fake, &serde_json::json!({ "scope": "today" })).await.unwrap();
+        assert!(out.contains("tidak ada task"), "{out}");
     }
 
     #[tokio::test]
