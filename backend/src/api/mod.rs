@@ -3,6 +3,7 @@ pub mod cashflow;
 pub mod chat;
 pub mod connectors;
 pub mod crud;
+pub mod events;
 pub mod goals;
 pub mod google;
 pub mod ingest;
@@ -45,6 +46,9 @@ pub fn router(state: AppState) -> Router {
         .route("/google/oauth/start", get(google::start))
         .route("/google/status", get(google::status))
         .route("/google/disconnect", post(google::disconnect))
+        .route("/events", get(events::list).post(events::create))
+        .route("/events/:id", axum::routing::patch(events::update))
+        .route("/events/:id/cancel", post(events::cancel))
         .route(
             "/accounts",
             get(crud::list_accounts).post(crud::create_account),
@@ -178,6 +182,21 @@ mod router_tests {
         ).await.unwrap();
         assert_ne!(res.status(), StatusCode::UNAUTHORIZED);
 
+        std::env::remove_var("AUTH_PASSWORD");
+        std::env::remove_var("JWT_SECRET");
+    }
+
+    #[serial]
+    #[tokio::test]
+    async fn events_routes_are_protected() {
+        std::env::set_var("AUTH_PASSWORD", "pw");
+        std::env::set_var("JWT_SECRET", "router-test-events");
+        let app = router(test_state().await);
+        let res = app.oneshot(
+            Request::builder().uri("/events?from=2026-06-01T00:00:00Z&to=2026-07-01T00:00:00Z")
+                .body(Body::empty()).unwrap()
+        ).await.unwrap();
+        assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
         std::env::remove_var("AUTH_PASSWORD");
         std::env::remove_var("JWT_SECRET");
     }
