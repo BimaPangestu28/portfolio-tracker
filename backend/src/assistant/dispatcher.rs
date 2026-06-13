@@ -34,6 +34,10 @@ pub async fn dispatch(db: &Db, name: &str, input: &serde_json::Value) -> Result<
             Ok(api) => clickup_create_project(&api, input).await,
             Err(e) => Err(format!("clickup belum dikonfigurasi: {e}")),
         },
+        "create_task" => match crate::clickup::ClickUpClient::from_env() {
+            Ok(api) => clickup_create_task(&api, input).await,
+            Err(e) => Err(format!("clickup belum dikonfigurasi: {e}")),
+        },
         _ => Err(format!("unknown tool: {name}")),
     }
 }
@@ -372,6 +376,30 @@ async fn clickup_create_project(
     let name = str_arg(input, "name").ok_or("missing required argument 'name'")?;
     let project = api.create_project(name).await.map_err(|e| format!("{e}"))?;
     Ok(format!("project '{}' dibuat di ClickUp", project.name))
+}
+
+async fn clickup_create_task(
+    api: &dyn crate::clickup::ClickUpApi,
+    input: &serde_json::Value,
+) -> Result<String, String> {
+    let project = str_arg(input, "project").ok_or("missing required argument 'project'")?;
+    let title = str_arg(input, "title").ok_or("missing required argument 'title'")?;
+    let projects = api.list_projects().await.map_err(|e| format!("{e}"))?;
+    let matched = projects
+        .iter()
+        .find(|p| p.name.eq_ignore_ascii_case(project))
+        .ok_or_else(|| format!("project '{project}' belum ada — tawarkan buat project baru dulu"))?;
+    let due_date_ms = match str_arg(input, "due") {
+        Some(raw) => {
+            let dt = parse_tool_datetime(raw)
+                .ok_or_else(|| format!("due '{raw}' tidak terbaca — pakai RFC3339 +07:00"))?;
+            Some(dt.timestamp_millis())
+        }
+        None => None,
+    };
+    let task = crate::clickup::NewTask { name: title.to_string(), due_date_ms };
+    api.create_task(&matched.id, &task).await.map_err(|e| format!("{e}"))?;
+    Ok(format!("task '{title}' ditambahkan ke project '{}'", matched.name))
 }
 
 async fn clickup_list_projects(api: &dyn crate::clickup::ClickUpApi) -> Result<String, String> {
@@ -942,7 +970,7 @@ mod tests {
 
     // ── ClickUp fake ─────────────────────────────────────────────────────────
 
-    use crate::clickup::{ClickUpApi, ClickUpError, NewTask, Project};
+    use crate::clickup::client::{ClickUpApi, ClickUpError, NewTask, Project};
     use std::sync::Mutex;
 
     #[derive(Default)]
@@ -995,6 +1023,30 @@ mod tests {
         let fake = FakeClickUp::default();
         let err = clickup_create_project(&fake, &serde_json::json!({})).await.unwrap_err();
         assert!(err.contains("name"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn create_task_adds_to_matching_project() {
+        let fake = FakeClickUp::default();
+        fake.projects.lock().unwrap().push(Project { id: "l1".into(), name: "PT AIS".into() });
+        let out = clickup_create_task(&fake, &serde_json::json!({
+            "project": "pt ais", "title": "bikin kontrak"
+        })).await.unwrap();
+        assert!(out.contains("bikin kontrak"), "{out}");
+        let created = fake.created_tasks.lock().unwrap();
+        assert_eq!(created.len(), 1);
+        assert_eq!(created[0].0, "l1", "task went to the matched list");
+    }
+
+    #[tokio::test]
+    async fn create_task_unknown_project_reports_for_offer() {
+        let fake = FakeClickUp::default();
+        let err = clickup_create_task(&fake, &serde_json::json!({
+            "project": "Klien Baru", "title": "x"
+        })).await.unwrap_err();
+        assert!(err.contains("Klien Baru"), "{err}");
+        assert!(err.contains("belum ada"), "{err}");
+        assert!(fake.created_tasks.lock().unwrap().is_empty(), "no task created");
     }
 
     #[tokio::test]

@@ -185,6 +185,19 @@ pub fn definitions() -> serde_json::Value {
                 "properties": { "name": { "type": "string", "description": "Project name, e.g. PT AIS" } },
                 "required": ["name"]
             }
+        },
+        {
+            "name": "create_task",
+            "description": "Add a task to a freelance project (ClickUp). Pass the project name; if you don't know which project the user means and there is more than one, ask first. If the named project doesn't exist, offer to create it with create_project before retrying.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "project": { "type": "string", "description": "Project (ClickUp list) name the task belongs to" },
+                    "title": { "type": "string", "description": "What the task is" },
+                    "due": { "type": "string", "description": "Optional due date, RFC3339 with +07:00 offset, e.g. 2026-06-14T17:00:00+07:00" }
+                },
+                "required": ["project", "title"]
+            }
         }
     ])
 }
@@ -213,6 +226,7 @@ mod tests {
                 "list_pending_reviews", "confirm_review", "list_instruments",
                 "list_projects",
                 "create_project",
+                "create_task",
             ]
         );
         for tool in defs.as_array().unwrap() {
@@ -249,5 +263,6 @@ mod tests {
             serde_json::json!(["name", "account_type", "native_currency"])
         );
         assert_eq!(find("create_project")["input_schema"]["required"], serde_json::json!(["name"]));
+        assert_eq!(find("create_task")["input_schema"]["required"], serde_json::json!(["project", "title"]));
     }
 }
