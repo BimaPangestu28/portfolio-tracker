@@ -116,6 +116,21 @@ pub fn build_typ(data: &InvoiceData) -> String {
     )
 }
 
+/// Compile the invoice to PDF bytes using Typst with bundled fonts.
+pub fn render_pdf(data: &InvoiceData) -> anyhow::Result<Vec<u8>> {
+    use typst_as_lib::TypstEngine;
+    let source = build_typ(data);
+    let fonts: Vec<&[u8]> = typst_assets::fonts().collect();
+    let engine = TypstEngine::builder().main_file(source).fonts(fonts).build();
+    let doc = engine
+        .compile()
+        .output
+        .map_err(|e| anyhow::anyhow!("typst compile failed: {e:?}"))?;
+    let pdf = typst_pdf::pdf(&doc, &Default::default())
+        .map_err(|e| anyhow::anyhow!("typst pdf export failed: {e:?}"))?;
+    Ok(pdf)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -164,5 +179,12 @@ mod tests {
         data.client.name = "C#Corp".into();
         let src = build_typ(&data);
         assert!(src.contains("C\\#Corp"), "client name not escaped:\n{src}");
+    }
+
+    #[test]
+    fn render_pdf_produces_a_real_pdf() {
+        let pdf = render_pdf(&sample()).expect("render");
+        assert!(pdf.len() > 800, "pdf too small: {} bytes", pdf.len());
+        assert_eq!(&pdf[..5], b"%PDF-");
     }
 }
