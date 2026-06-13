@@ -73,8 +73,9 @@ pub struct ClickUpClient {
 
 impl ClickUpClient {
     /// Build from env: `CLICKUP_API_TOKEN` (required), `CLICKUP_SPACE_ID`
-    /// (required). `CLICKUP_WORKSPACE_ID` is accepted for documentation but the
-    /// v2 endpoints used here are space-scoped, so it is not required.
+    /// (required); `CLICKUP_DONE_STATUS`, `CLICKUP_BILLABLE_FIELD`,
+    /// `CLICKUP_AMOUNT_FIELD` (optional, defaulted). The v2 endpoints used here
+    /// are space-scoped, so no workspace/team id is needed.
     pub fn from_env() -> Result<Self, ClickUpError> {
         let token = std::env::var("CLICKUP_API_TOKEN").map_err(|_| ClickUpError::NoToken)?;
         if token.trim().is_empty() {
@@ -196,6 +197,9 @@ impl ClickUpApi for ClickUpClient {
     }
 
     async fn list_tasks(&self, list_id: &str) -> Result<Vec<Task>, ClickUpError> {
+        // No include_closed=true, so ClickUp returns only open tasks — that's
+        // what makes a completed task disappear from list_tasks/the briefing.
+        // (Also no page= param: results are capped at ClickUp's first page.)
         let url = format!("https://api.clickup.com/api/v2/list/{list_id}/task?archived=false");
         let resp = self.http.get(&url)
             .header(reqwest::header::AUTHORIZATION, &self.token)

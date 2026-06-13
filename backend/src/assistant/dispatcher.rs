@@ -1064,6 +1064,10 @@ mod tests {
         }
         async fn complete_task(&self, task_id: &str) -> Result<(), ClickUpError> {
             self.completed.lock().unwrap().push(task_id.to_string());
+            // Mirror ClickUp: a completed task drops out of the open-task views.
+            for tasks in self.tasks.lock().unwrap().values_mut() {
+                tasks.retain(|t| t.id != task_id);
+            }
             Ok(())
         }
     }
@@ -1215,6 +1219,23 @@ mod tests {
         let fake = FakeClickUp::default();
         let err = clickup_complete_task(&fake, &serde_json::json!({})).await.unwrap_err();
         assert!(err.contains("task_id"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn completing_a_task_removes_it_from_list_tasks() {
+        // Headline cross-phase invariant: list → complete → no longer listed.
+        let fake = FakeClickUp::default();
+        fake.projects.lock().unwrap().push(Project { id: "l1".into(), name: "PT AIS".into() });
+        fake.tasks.lock().unwrap().insert("l1".into(), vec![
+            Task { id: "t1".into(), name: "bikin kontrak".into(), status: "to do".into(), due_date_ms: None },
+        ]);
+        let before = clickup_list_tasks(&fake, &serde_json::json!({ "project": "PT AIS" })).await.unwrap();
+        assert!(before.contains("bikin kontrak"), "{before}");
+
+        clickup_complete_task(&fake, &serde_json::json!({ "task_id": "t1" })).await.unwrap();
+
+        let after = clickup_list_tasks(&fake, &serde_json::json!({ "project": "PT AIS" })).await.unwrap();
+        assert!(!after.contains("bikin kontrak"), "completed task still listed: {after}");
     }
 
     #[tokio::test]
