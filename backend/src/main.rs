@@ -8,6 +8,7 @@ mod db;
 mod domain;
 mod error;
 mod ingestion;
+mod invoice;
 mod llm;
 mod pricing;
 mod repo;
