@@ -256,6 +256,49 @@ pub fn definitions() -> serde_json::Value {
                 },
                 "required": ["client_name", "line_items"]
             }
+        },
+        {
+            "name": "start_timer",
+            "description": "Start a ClickUp time tracker on a task. Use for 'mulai ngerjain <task>'. Resolves the task by name; if ambiguous, ask which one.",
+            "input_schema": {
+                "type": "object",
+                "properties": { "task": { "type": "string", "description": "Task name to start timing" } },
+                "required": ["task"]
+            }
+        },
+        {
+            "name": "stop_timer",
+            "description": "Stop the running ClickUp timer. Use for 'udahan' / 'stop'. Reports the task and elapsed time.",
+            "input_schema": { "type": "object", "properties": {} }
+        },
+        {
+            "name": "current_timer",
+            "description": "Show the currently running ClickUp timer. Use for 'lagi ngerjain apa?'.",
+            "input_schema": { "type": "object", "properties": {} }
+        },
+        {
+            "name": "time_report",
+            "description": "Report tracked hours grouped by project/task for a period. Use for 'minggu ini berapa jam?' or 'jam di <project> bulan ini'. Default scope is this week.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "scope": { "type": "string", "enum": ["today", "week", "month"], "description": "Reporting period; default week" },
+                    "project": { "type": "string", "description": "Optional: limit the report to one project" }
+                }
+            }
+        },
+        {
+            "name": "add_time_entry",
+            "description": "Log time manually on a task when the user forgot to run a timer. Use for 'tambahin 2 jam ke task <name>'. Duration accepts forms like '2 jam', '90 menit', '1j30m'.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "task": { "type": "string", "description": "Task name" },
+                    "duration": { "type": "string", "description": "Duration, e.g. '2 jam', '90 menit', '1j30m'" },
+                    "day": { "type": "string", "description": "Optional day the work happened, RFC3339 +07:00; defaults to today" }
+                },
+                "required": ["task", "duration"]
+            }
         }
     ])
 }
@@ -289,6 +332,7 @@ mod tests {
                 "complete_task",
                 "list_clients",
                 "create_invoice",
+                "start_timer", "stop_timer", "current_timer", "time_report", "add_time_entry",
             ]
         );
         for tool in defs.as_array().unwrap() {

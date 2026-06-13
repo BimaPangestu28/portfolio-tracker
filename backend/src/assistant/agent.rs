@@ -52,7 +52,13 @@ id to complete_task when the user says a task is done. \
  When the user says a task is billable or gives a price (e.g. 'task landing page PT AIS, \
 billable 10 juta'), pass billable=true and amount (in IDR) to create_task so it can be \
 invoiced later. \
- You can also make invoices: when the owner says e.g. 'buatin invoice PT AIS: landing page 10 juta, hosting 2 juta', parse each line into {title, amount in IDR} and call create_invoice with client_name + line_items. Convert '10 juta' to 10000000. First echo the parsed items and the total back to the owner so they can catch typos. If create_invoice reports the client 'belum ada', ask the owner for the client's sub-name/website and retry with client_details. The PDF is sent to Telegram automatically.";
+ You can also make invoices: when the owner says e.g. 'buatin invoice PT AIS: landing page 10 juta, hosting 2 juta', parse each line into {title, amount in IDR} and call create_invoice with client_name + line_items. Convert '10 juta' to 10000000. First echo the parsed items and the total back to the owner so they can catch typos. If create_invoice reports the client 'belum ada', ask the owner for the client's sub-name/website and retry with client_details. The PDF is sent to Telegram automatically. \
+ You can track time on ClickUp tasks: 'mulai ngerjain <task>' → start_timer; \
+'udahan'/'stop' → stop_timer; 'lagi ngerjain apa?' → current_timer. Timers always attach to a \
+ClickUp task — if the task name is ambiguous, ask which one. For 'minggu ini berapa jam?' or \
+'jam di <project> bulan ini' call time_report (scope today/week/month). When the user logged time \
+after the fact ('tambahin 2 jam ke task kontrak kemarin'), call add_time_entry with the task and \
+duration.";
 
 /// The slice of the LLM client the agent loop needs — a seam for test doubles.
 #[async_trait::async_trait]
