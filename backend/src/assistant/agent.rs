@@ -35,7 +35,12 @@ the account shows 'belum dikenali', call list_accounts to find a match; if \
 none fits, ask the user before calling create_account. If the instrument shows \
 'belum dikenali', call list_instruments to find it (auto-matching only catches \
 exact names); if it isn't there, tell the user to add it in the web UI → Data \
-— instruments can't be created from chat. Then call confirm_review with the \
+— instruments can't be created from chat. The account/instrument shown is only \
+a guess read from the photo (OCR), not authoritative — if the owner says it's \
+wrong (e.g. the photo reads one broker but the holding is in another), find the \
+right one with list_accounts/list_instruments and pass its account_id/instrument_id \
+to confirm_review to override it; you do NOT need the item to show 'belum \
+dikenali' first. Then call confirm_review with the \
 account_id and/or instrument_id needed. Unlike todos/reminders, ALWAYS ask the \
 user to confirm before create_account or confirm_review — these write financial \
 data that can't be silently undone. Use reject_review to discard an item. \
@@ -470,6 +475,18 @@ mod tests {
         assert!(prompt.contains("confirm_review"), "{prompt}");
         assert!(prompt.contains("create_account"), "{prompt}");
         assert!(prompt.contains("list_instruments"), "{prompt}");
+    }
+
+    /// The detected account is only an OCR guess from the photo. When the owner
+    /// says it's wrong, the assistant must override it via confirm_review — not
+    /// give up because the item isn't flagged 'belum dikenali'.
+    #[test]
+    fn system_prompt_allows_overriding_a_wrongly_detected_account() {
+        let prompt = system_prompt("2026-06-12T10:00:00+07:00").to_lowercase();
+        assert!(
+            prompt.contains("override"),
+            "prompt must tell the assistant it can override a wrongly-detected account: {prompt}"
+        );
     }
 
     #[test]

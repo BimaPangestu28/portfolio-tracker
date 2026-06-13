@@ -156,7 +156,7 @@ pub fn definitions() -> serde_json::Value {
         },
         {
             "name": "confirm_review",
-            "description": "Confirm a pending review item, turning it into a transaction. Pass account_id and/or instrument_id to fill in anything flagged 'belum dikenali' (create the account first with create_account if needed). Always ask the user to confirm before calling — this writes a transaction.",
+            "description": "Confirm a pending review item, turning it into a transaction. The account/instrument shown is only a guess read from the photo — pass account_id and/or instrument_id both to fill in anything flagged 'belum dikenali' AND to override a wrongly-detected account/instrument the owner corrects (e.g. the photo reads one broker but the holding is in another). You do NOT need the item to show 'belum dikenali' to override it (create the account first with create_account if needed). Always ask the user to confirm before calling — this writes a transaction.",
             "input_schema": {
                 "type": "object",
                 "properties": {
@@ -342,5 +342,26 @@ mod tests {
         assert_eq!(find("complete_task")["input_schema"]["required"], serde_json::json!(["task_id"]));
         assert_eq!(find("draft_proposal")["input_schema"]["required"], serde_json::json!(["job_text"]));
         assert_eq!(find("create_invoice")["input_schema"]["required"], serde_json::json!(["client_name", "line_items"]));
+    }
+
+    /// The detected account/instrument is only an OCR guess; the assistant must
+    /// know confirm_review can OVERRIDE it, not merely fill in 'belum dikenali'.
+    #[test]
+    fn confirm_review_description_allows_overriding_a_detected_account() {
+        let defs = definitions();
+        let desc = defs
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|t| t["name"] == "confirm_review")
+            .unwrap()["description"]
+            .as_str()
+            .unwrap()
+            .to_lowercase();
+        assert!(
+            desc.contains("override"),
+            "confirm_review must say account/instrument can be overridden/corrected, \
+             not only filled when 'belum dikenali': {desc}"
+        );
     }
 }
