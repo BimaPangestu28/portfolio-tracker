@@ -136,47 +136,39 @@ async fn store_and_ingest(
     Ok(())
 }
 
-/// Run the agent loop for one inbound message. Stores the user message and
-/// the final reply in chat history only on success (no orphaned rows).
-pub async fn handle_message<M: ToolModel + Sync>(
+/// Load the channel's recent chat history as (role, content) pairs.
+async fn load_history(db: &Db, channel: &str) -> Vec<(String, String)> {
+    crate::repo::chat::recent_by_channel(db, channel, HISTORY_LIMIT)
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .map(|m| (m.role, m.content))
+        .collect()
+}
+
+/// Drive the tool-use loop over `messages` until the model returns text or hits
+/// the iteration cap. Returns the reply only — persisting is the caller's job.
+/// A shape anomaly or the cap yields a fallback reply (Ok), never an Err; only a
+/// transport/LLM error propagates.
+async fn run_tool_loop<M: ToolModel + Sync>(
     db: &Db,
     model: &M,
-    channel: &str,
-    user_msg: &str,
+    system: &str,
+    mut messages: Vec<serde_json::Value>,
 ) -> anyhow::Result<String> {
-    let now_wib = chrono::Utc::now().with_timezone(&super::time::wib()).to_rfc3339();
-    let memory = super::memory::MemoryClient::from_env();
-    let facts = match &memory {
-        Some(client) => client.search(user_msg, INJECT_FACT_LIMIT).await,
-        None => Vec::new(),
-    };
-    let system = compose_system(&now_wib, &facts);
     let tools = super::tools::definitions();
-    let history: Vec<(String, String)> =
-        crate::repo::chat::recent_by_channel(db, channel, HISTORY_LIMIT)
-            .await
-            .unwrap_or_default()
-            .into_iter()
-            .map(|m| (m.role, m.content))
-            .collect();
-    let mut messages = build_messages(&history, user_msg);
-
-    // Tool side effects commit eagerly per iteration and are intentionally NOT
-    // rolled back if a later model call fails — a created todo is real even if
-    // the confirmation reply never arrives. Only chat rows wait for success.
     for _ in 0..MAX_ITERATIONS {
         let resp = model
-            .complete_tools(&system, &messages, &tools)
+            .complete_tools(system, &messages, &tools)
             .await
             .map_err(|e| anyhow::anyhow!("llm error: {e}"))?;
-        // A shape anomaly (empty content, malformed blocks) ends the turn with
-        // a fallback instead of erroring: prior tool side effects are already
-        // committed and the user deserves *some* reply.
         let blocks = match extract_blocks(&resp) {
             Ok(blocks) => blocks,
             Err(e) => {
+                // Prior iterations' tool side effects are already committed; end
+                // the turn with a fallback reply (the caller still persists it)
+                // rather than erroring and leaving the user with nothing.
                 tracing::warn!("assistant: unusable model response ({e}); using fallback reply");
-                store_and_ingest(db, memory.clone(), channel, user_msg, NO_TEXT_REPLY).await?;
                 return Ok(NO_TEXT_REPLY.to_string());
             }
         };
@@ -201,11 +193,9 @@ pub async fn handle_message<M: ToolModel + Sync>(
             if reply.trim().is_empty() {
                 reply = NO_TEXT_REPLY.to_string();
             }
-            store_and_ingest(db, memory.clone(), channel, user_msg, &reply).await?;
             return Ok(reply);
         }
 
-        // Replay the assistant turn verbatim, then answer every tool_use.
         messages.push(serde_json::json!({ "role": "assistant", "content": resp["content"].clone() }));
         let mut results = Vec::new();
         for (id, name, input) in &tool_uses {
@@ -218,9 +208,55 @@ pub async fn handle_message<M: ToolModel + Sync>(
         }
         messages.push(serde_json::json!({ "role": "user", "content": results }));
     }
-
-    store_and_ingest(db, memory, channel, user_msg, ITERATION_CAP_REPLY).await?;
     Ok(ITERATION_CAP_REPLY.to_string())
+}
+
+/// Run the agent loop for one inbound message. Stores the user message and
+/// the final reply in chat history only on success (no orphaned rows).
+pub async fn handle_message<M: ToolModel + Sync>(
+    db: &Db,
+    model: &M,
+    channel: &str,
+    user_msg: &str,
+) -> anyhow::Result<String> {
+    let now_wib = chrono::Utc::now().with_timezone(&super::time::wib()).to_rfc3339();
+    let memory = super::memory::MemoryClient::from_env();
+    let facts = match &memory {
+        Some(client) => client.search(user_msg, INJECT_FACT_LIMIT).await,
+        None => Vec::new(),
+    };
+    let system = compose_system(&now_wib, &facts);
+    let history = load_history(db, channel).await;
+    let messages = build_messages(&history, user_msg);
+
+    // Tool side effects commit eagerly per iteration and are intentionally NOT
+    // rolled back if a later model call fails. Only chat rows wait for success.
+    let reply = run_tool_loop(db, model, &system, messages).await?;
+    store_and_ingest(db, memory, channel, user_msg, &reply).await?;
+    Ok(reply)
+}
+
+/// Kick off the assistant after a file upload. The model sees `seed` (the staged
+/// items plus how to handle them) as the opening turn and replies naturally, but
+/// chat history stores the concise `history_marker` in place of the verbose seed,
+/// so a later "iya" still has the assistant's question for context. Long-term
+/// memory is not consulted here — the seed already carries the resolved account.
+pub async fn handle_upload_event<M: ToolModel + Sync>(
+    db: &Db,
+    model: &M,
+    channel: &str,
+    seed: &str,
+    history_marker: &str,
+) -> anyhow::Result<String> {
+    let now_wib = chrono::Utc::now().with_timezone(&super::time::wib()).to_rfc3339();
+    // No memory lookup here — the upload seed is self-contained.
+    let system = compose_system(&now_wib, &[]);
+    let history = load_history(db, channel).await;
+    let messages = build_messages(&history, seed);
+
+    let reply = run_tool_loop(db, model, &system, messages).await?;
+    store_and_ingest(db, None, channel, history_marker, &reply).await?;
+    Ok(reply)
 }
 
 #[cfg(test)]
@@ -450,5 +486,45 @@ mod tests {
     fn system_prompt_mentions_billable() {
         let prompt = system_prompt("2026-06-13T10:00:00+07:00");
         assert!(prompt.contains("billable"), "{prompt}");
+    }
+
+    #[tokio::test]
+    async fn upload_event_seeds_model_and_stores_marker() {
+        let db = mem_db().await;
+        let model = ScriptedModel::new(vec![text_response("Aku baca beli QQQM Rp2jt, catat ke IBKR ya?")]);
+        let reply = handle_upload_event(
+            &db, &model, "telegram",
+            "SEED-CTX-XYZ beli QQQM ke IBKR",
+            "(kirim 1 bukti transaksi)",
+        ).await.unwrap();
+        assert_eq!(reply, "Aku baca beli QQQM Rp2jt, catat ke IBKR ya?");
+
+        // The model saw the verbose seed as the trailing user message.
+        let seen = model.messages_of_call(0);
+        let last = seen.last().unwrap();
+        assert_eq!(last["role"], "user");
+        assert!(last["content"].as_str().unwrap().contains("SEED-CTX-XYZ"), "{last:?}");
+
+        // Chat history stores the concise marker, not the seed.
+        let history = crate::repo::chat::recent_by_channel(&db, "telegram", 10).await.unwrap();
+        assert_eq!(history.len(), 2);
+        assert_eq!(history[0].content, "(kirim 1 bukti transaksi)");
+        assert_eq!(history[1].content, "Aku baca beli QQQM Rp2jt, catat ke IBKR ya?");
+    }
+
+    #[tokio::test]
+    async fn followup_after_upload_sees_prior_question() {
+        let db = mem_db().await;
+        let model1 = ScriptedModel::new(vec![text_response("Beli QQQM Rp2jt, catat ke IBKR ya?")]);
+        handle_upload_event(&db, &model1, "telegram", "seed", "(kirim 1 bukti transaksi)").await.unwrap();
+
+        // The owner replies "iya"; the model must see its own prior question.
+        let model2 = ScriptedModel::new(vec![text_response("Sip, kecatat.")]);
+        handle_message(&db, &model2, "telegram", "iya").await.unwrap();
+        let seen = model2.messages_of_call(0);
+        assert!(
+            seen.iter().any(|m| m["content"].as_str().map_or(false, |c| c.contains("IBKR"))),
+            "follow-up turn should include the prior assistant question: {seen:?}"
+        );
     }
 }
