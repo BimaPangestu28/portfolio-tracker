@@ -53,7 +53,7 @@ pub fn parse_queries(resp: &str, max: usize) -> Vec<String> {
     out
 }
 
-use crate::upwork::client::MarketplaceJob;
+use crate::upwork::client::{Invitation, MarketplaceJob};
 
 /// A relevance verdict for one job.
 #[derive(Debug, Clone, PartialEq)]
@@ -103,6 +103,26 @@ pub fn parse_scores(resp: &str) -> Vec<JobScore> {
         });
     }
     out
+}
+
+/// Plain-text Telegram alert for a relevant marketplace job (no Markdown).
+pub fn format_job_alert(job: &MarketplaceJob, score: u8, reason: &str) -> String {
+    let mut msg = format!("🧑‍💻 New Upwork job (match {score}/10)\n{}\n", job.title);
+    if let Some(b) = &job.budget {
+        msg.push_str(&format!("💰 {b}\n"));
+    }
+    msg.push_str(&format!("📝 {reason}\n🔗 {}", job.url));
+    msg
+}
+
+/// Plain-text Telegram alert for a direct invitation (no Markdown).
+pub fn format_invitation_alert(inv: &Invitation) -> String {
+    let mut msg = format!("📨 Upwork invitation\n{}\n", inv.job_title);
+    if let Some(note) = &inv.client_note {
+        msg.push_str(&format!("🗒 {note}\n"));
+    }
+    msg.push_str(&format!("🔗 {}", inv.url));
+    msg
 }
 
 #[cfg(test)]
@@ -161,5 +181,31 @@ mod tests {
         assert_eq!(scores.len(), 2);
         assert_eq!(scores[0], JobScore { id: "1".into(), score: 8, reason: "Strong Rust fit".into() });
         assert_eq!(scores[1].score, 10); // 99 clamped
+    }
+
+    #[test]
+    fn job_alert_has_title_score_url_no_markdown() {
+        let mut j = job("1", "Senior Rust Engineer");
+        j.budget = Some("$50/hr".into());
+        j.url = "https://www.upwork.com/jobs/abc".into();
+        let msg = format_job_alert(&j, 9, "Great Rust match");
+        assert!(msg.contains("Senior Rust Engineer"));
+        assert!(msg.contains("9/10"));
+        assert!(msg.contains("$50/hr"));
+        assert!(msg.contains("https://www.upwork.com/jobs/abc"));
+        assert!(!msg.contains("**"));
+    }
+
+    #[test]
+    fn invitation_alert_has_title_and_url() {
+        let inv = Invitation {
+            id: "i1".into(), job_title: "Build an API".into(),
+            client_note: Some("saw your profile".into()), url: "https://www.upwork.com/jobs/xyz".into(),
+        };
+        let msg = format_invitation_alert(&inv);
+        assert!(msg.contains("Build an API"));
+        assert!(msg.contains("saw your profile"));
+        assert!(msg.contains("https://www.upwork.com/jobs/xyz"));
+        assert!(!msg.contains("**"));
     }
 }
