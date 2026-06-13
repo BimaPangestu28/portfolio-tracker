@@ -48,7 +48,10 @@ then retry create_task. ALWAYS ask the user to confirm before create_project —
 it creates data in ClickUp. Creating a task itself is immediate, like a todo. \
  To answer 'ada task apa di <project>?' or 'task hari ini / yang overdue?', call list_tasks \
 (pass a project name, or scope 'today'/'overdue'). It shows each task id in brackets; pass that \
-id to complete_task when the user says a task is done.";
+id to complete_task when the user says a task is done. \
+ When the user says a task is billable or gives a price (e.g. 'task landing page PT AIS, \
+billable 10 juta'), pass billable=true and amount (in IDR) to create_task so it can be \
+invoiced later.";
 
 /// The slice of the LLM client the agent loop needs — a seam for test doubles.
 #[async_trait::async_trait]
@@ -441,5 +444,11 @@ mod tests {
         let prompt = system_prompt("2026-06-13T10:00:00+07:00");
         assert!(prompt.contains("list_tasks"), "{prompt}");
         assert!(prompt.contains("complete_task"), "{prompt}");
+    }
+
+    #[test]
+    fn system_prompt_mentions_billable() {
+        let prompt = system_prompt("2026-06-13T10:00:00+07:00");
+        assert!(prompt.contains("billable"), "{prompt}");
     }
 }
