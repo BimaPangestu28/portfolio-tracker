@@ -107,6 +107,27 @@ spec:
                   name: portfolio-secrets
                   key: GOOGLE_TOKEN_ENC_KEY
                   optional: true
+            # Optional: Upwork OAuth sync. Leave unset / omit from secret to disable.
+            - name: UPWORK_REDIRECT_URI
+              value: "https://portfolio.catalystlabs.id/api/upwork/oauth/callback"
+            - name: UPWORK_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: portfolio-secrets
+                  key: UPWORK_CLIENT_ID
+                  optional: true
+            - name: UPWORK_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: portfolio-secrets
+                  key: UPWORK_CLIENT_SECRET
+                  optional: true
+            - name: UPWORK_TOKEN_ENC_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: portfolio-secrets
+                  key: UPWORK_TOKEN_ENC_KEY
+                  optional: true
           volumeMounts:
             - name: data
               mountPath: /data
