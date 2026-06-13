@@ -18,6 +18,7 @@ pub struct IntegrationRow {
     pub last_error: Option<String>,
     pub created_at: String,
     pub updated_at: String,
+    pub last_synced_at: Option<String>,
 }
 
 pub async fn get(db: &Db) -> anyhow::Result<Option<IntegrationRow>> {
@@ -87,6 +88,14 @@ pub async fn set_status(db: &Db, status: &str, last_error: Option<&str>) -> anyh
     Ok(())
 }
 
+/// Record the timestamp of a completed successful sync pass.
+pub async fn set_synced_at(db: &Db, ts: &str) -> anyhow::Result<()> {
+    sqlx::query("UPDATE google_integration SET last_synced_at = ? WHERE id = 1")
+        .bind(ts)
+        .execute(db).await?;
+    Ok(())
+}
+
 pub async fn delete(db: &Db) -> anyhow::Result<()> {
     sqlx::query("DELETE FROM google_integration WHERE id = 1").execute(db).await?;
     Ok(())
@@ -129,5 +138,14 @@ mod tests {
         assert_eq!(row.last_error.as_deref(), Some("invalid_grant"));
         delete(&db).await.unwrap();
         assert!(get(&db).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn set_synced_at_records_timestamp() {
+        let db = mem_db().await;
+        upsert(&db, "a", "r", "2026-06-12T10:00:00+00:00", "calendar.events").await.unwrap();
+        assert!(get(&db).await.unwrap().unwrap().last_synced_at.is_none());
+        set_synced_at(&db, "2026-06-13T03:00:00+00:00").await.unwrap();
+        assert_eq!(get(&db).await.unwrap().unwrap().last_synced_at.as_deref(), Some("2026-06-13T03:00:00+00:00"));
     }
 }
