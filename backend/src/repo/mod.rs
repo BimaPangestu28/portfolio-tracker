@@ -10,6 +10,7 @@ pub mod categories;
 pub mod chat;
 pub mod connectors;
 pub mod goals;
+pub mod inbox;
 pub mod instruments;
 pub mod transactions;
 pub mod prices;
