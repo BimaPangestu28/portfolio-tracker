@@ -13,6 +13,7 @@ mod repo;
 mod scheduler;
 mod service;
 mod telegram;
+mod upwork;
 mod wa_state;
 
 use db::Db;
