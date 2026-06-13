@@ -46,6 +46,7 @@ pub async fn dispatch(db: &Db, name: &str, input: &serde_json::Value) -> Result<
             Ok(api) => clickup_complete_task(&api, input).await,
             Err(e) => Err(format!("clickup belum dikonfigurasi: {e}")),
         },
+        "draft_proposal" => draft_proposal(input).await,
         "list_clients" => invoice_list_clients(db).await,
         "create_invoice" => invoice_create(db, input).await,
         _ => Err(format!("unknown tool: {name}")),
@@ -219,6 +220,15 @@ async fn search_memory(input: &serde_json::Value) -> Result<String, String> {
         out.push('\n');
     }
     Ok(out)
+}
+
+/// Draft an Upwork proposal from a pasted job. Validation only here; the
+/// memory + LLM work lives in `assistant::proposal`.
+async fn draft_proposal(input: &serde_json::Value) -> Result<String, String> {
+    let job_text = str_arg(input, "job_text")
+        .ok_or("missing required argument 'job_text' — paste the job description")?;
+    let notes = str_arg(input, "notes");
+    Ok(super::proposal::draft(job_text, notes).await)
 }
 
 async fn remember(input: &serde_json::Value) -> Result<String, String> {
@@ -1356,6 +1366,12 @@ mod tests {
         clickup_create_task(&fake, &serde_json::json!({ "project": "PT AIS", "title": "x" })).await.unwrap();
         assert_eq!(fake.created_billables.lock().unwrap()[0], None);
         assert_eq!(fake.created_amounts.lock().unwrap()[0], None);
+    }
+
+    #[tokio::test]
+    async fn draft_proposal_requires_job_text() {
+        let err = super::draft_proposal(&serde_json::json!({})).await;
+        assert!(err.is_err(), "missing job_text must error");
     }
 
     #[tokio::test]

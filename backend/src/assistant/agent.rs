@@ -52,6 +52,10 @@ id to complete_task when the user says a task is done. \
  When the user says a task is billable or gives a price (e.g. 'task landing page PT AIS, \
 billable 10 juta'), pass billable=true and amount (in IDR) to create_task so it can be \
 invoiced later. \
+ You can also draft Upwork job proposals: when the owner pastes a job and asks for a proposal \
+(e.g. 'buatin proposal buat ini'), call draft_proposal with the pasted job_text (and notes if the \
+owner specifies emphasis or a bid). The tool returns a ready-to-send English draft — relay it to \
+the owner verbatim, without summarizing, translating, or reformatting it. \
  You can also make invoices: when the owner says e.g. 'buatin invoice PT AIS: landing page 10 juta, hosting 2 juta', parse each line into {title, amount in IDR} and call create_invoice with client_name + line_items. Convert '10 juta' to 10000000. First echo the parsed items and the total back to the owner so they can catch typos. If create_invoice reports the client 'belum ada', ask the owner for the client's sub-name/website and retry with client_details. The PDF is sent to Telegram automatically.";
 
 /// The slice of the LLM client the agent loop needs — a seam for test doubles.
@@ -487,6 +491,12 @@ mod tests {
     fn system_prompt_mentions_billable() {
         let prompt = system_prompt("2026-06-13T10:00:00+07:00");
         assert!(prompt.contains("billable"), "{prompt}");
+    }
+
+    #[test]
+    fn system_prompt_mentions_proposal_relay() {
+        assert!(SYSTEM.contains("draft_proposal"));
+        assert!(SYSTEM.contains("verbatim"));
     }
 
     #[test]

@@ -5,6 +5,7 @@
 pub mod client;
 pub mod crypto;
 pub mod engine;
+pub mod jobs;
 pub mod oauth;
 pub mod sync;
 

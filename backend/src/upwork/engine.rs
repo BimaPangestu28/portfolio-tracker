@@ -36,7 +36,7 @@ pub async fn run_pass<C: UpworkClient>(db: &Db, client: &C) -> anyhow::Result<us
 }
 
 /// Ensure a non-expired access token, refreshing if needed. Returns plaintext.
-async fn ensure_access_token(db: &Db, cfg: &OAuthConfig, key: &[u8; 32]) -> anyhow::Result<String> {
+pub(crate) async fn ensure_access_token(db: &Db, cfg: &OAuthConfig, key: &[u8; 32]) -> anyhow::Result<String> {
     let row = upwork_integration::get(db).await?
         .ok_or_else(|| anyhow::anyhow!("not connected"))?;
     let expired = chrono::DateTime::parse_from_rfc3339(&row.expiry)
