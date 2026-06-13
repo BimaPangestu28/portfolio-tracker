@@ -14,6 +14,15 @@ pub struct NewTask {
     pub due_date_ms: Option<i64>,
 }
 
+/// A ClickUp task as read back from the API.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Task {
+    pub id: String,
+    pub name: String,
+    pub status: String,
+    pub due_date_ms: Option<i64>,
+}
+
 #[derive(Debug)]
 pub enum ClickUpError {
     NoToken,
@@ -42,6 +51,10 @@ pub trait ClickUpApi: Send + Sync {
     async fn create_project(&self, name: &str) -> Result<Project, ClickUpError>;
     /// Create a task in the given List; returns the new task id.
     async fn create_task(&self, list_id: &str, task: &NewTask) -> Result<String, ClickUpError>;
+    /// Open tasks in a List.
+    async fn list_tasks(&self, list_id: &str) -> Result<Vec<Task>, ClickUpError>;
+    /// Mark a task complete (sets its status to the configured done status).
+    async fn complete_task(&self, task_id: &str) -> Result<(), ClickUpError>;
 }
 
 /// Real reqwest-backed client. Reads token + space id from env.
@@ -49,6 +62,7 @@ pub struct ClickUpClient {
     http: reqwest::Client,
     token: String,
     space_id: String,
+    done_status: String,
 }
 
 impl ClickUpClient {
@@ -62,7 +76,8 @@ impl ClickUpClient {
         }
         let space_id = std::env::var("CLICKUP_SPACE_ID")
             .map_err(|_| ClickUpError::Api { status: 0, body: "CLICKUP_SPACE_ID tidak diset".into() })?;
-        Ok(Self { http: reqwest::Client::new(), token, space_id })
+        let done_status = std::env::var("CLICKUP_DONE_STATUS").unwrap_or_else(|_| "complete".into());
+        Ok(Self { http: reqwest::Client::new(), token, space_id, done_status })
     }
 
     fn classify(status: reqwest::StatusCode, body: String) -> ClickUpError {
@@ -132,6 +147,45 @@ impl ClickUpApi for ClickUpClient {
         let parsed: serde_json::Value =
             serde_json::from_str(&body).map_err(|e| ClickUpError::Http(e.to_string()))?;
         Ok(parsed["id"].as_str().unwrap_or_default().to_string())
+    }
+
+    async fn list_tasks(&self, list_id: &str) -> Result<Vec<Task>, ClickUpError> {
+        let url = format!("https://api.clickup.com/api/v2/list/{list_id}/task?archived=false");
+        let resp = self.http.get(&url)
+            .header(reqwest::header::AUTHORIZATION, &self.token)
+            .send().await.map_err(|e| ClickUpError::Http(e.to_string()))?;
+        let status = resp.status();
+        let body = resp.text().await.map_err(|e| ClickUpError::Http(e.to_string()))?;
+        if !status.is_success() {
+            return Err(Self::classify(status, body));
+        }
+        let parsed: serde_json::Value =
+            serde_json::from_str(&body).map_err(|e| ClickUpError::Http(e.to_string()))?;
+        let tasks = parsed["tasks"].as_array().map(|arr| {
+            arr.iter().filter_map(|t| {
+                Some(Task {
+                    id: t["id"].as_str()?.to_string(),
+                    name: t["name"].as_str()?.to_string(),
+                    status: t["status"]["status"].as_str().unwrap_or("").to_string(),
+                    due_date_ms: t["due_date"].as_str().and_then(|s| s.parse::<i64>().ok()),
+                })
+            }).collect()
+        }).unwrap_or_default();
+        Ok(tasks)
+    }
+
+    async fn complete_task(&self, task_id: &str) -> Result<(), ClickUpError> {
+        let url = format!("https://api.clickup.com/api/v2/task/{task_id}");
+        let resp = self.http.put(&url)
+            .header(reqwest::header::AUTHORIZATION, &self.token)
+            .json(&serde_json::json!({ "status": self.done_status }))
+            .send().await.map_err(|e| ClickUpError::Http(e.to_string()))?;
+        let status = resp.status();
+        let body = resp.text().await.map_err(|e| ClickUpError::Http(e.to_string()))?;
+        if !status.is_success() {
+            return Err(Self::classify(status, body));
+        }
+        Ok(())
     }
 }
 
