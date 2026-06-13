@@ -61,6 +61,31 @@ pub fn to_request_body(w: &EventWrite) -> serde_json::Value {
     })
 }
 
+/// Normalize a Google `start` object to a canonical UTC `...:SSZ` string so that
+/// every stored `start_at` is directly comparable (lexical order == chronological)
+/// and the web UI buckets it on the correct WIB day. Google returns timed events
+/// as `dateTime` (often with a local offset like `+07:00`) and all-day events as
+/// a bare `date` ("YYYY-MM-DD"); the latter is anchored to 00:00 WIB.
+fn normalize_start(start: &serde_json::Value) -> Option<String> {
+    if let Some(dt) = start.get("dateTime").and_then(|x| x.as_str()) {
+        return Some(
+            chrono::DateTime::parse_from_rfc3339(dt)
+                .map(|d| d.with_timezone(&chrono::Utc).to_rfc3339_opts(chrono::SecondsFormat::Secs, true))
+                .unwrap_or_else(|_| dt.to_string()),
+        );
+    }
+    if let Some(date) = start.get("date").and_then(|x| x.as_str()) {
+        let normalized = chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d")
+            .ok()
+            .and_then(|d| d.and_hms_opt(0, 0, 0))
+            .and_then(|naive| naive.and_local_timezone(crate::assistant::time::wib()).single())
+            .map(|dt| dt.with_timezone(&chrono::Utc).to_rfc3339_opts(chrono::SecondsFormat::Secs, true))
+            .unwrap_or_else(|| date.to_string());
+        return Some(normalized);
+    }
+    None
+}
+
 pub fn parse_event(v: &serde_json::Value) -> anyhow::Result<GCalEvent> {
     let id = v
         .get("id")
@@ -71,11 +96,7 @@ pub fn parse_event(v: &serde_json::Value) -> anyhow::Result<GCalEvent> {
         .get("status")
         .and_then(|x| x.as_str())
         .unwrap_or("confirmed");
-    let start = v
-        .get("start")
-        .and_then(|s| s.get("dateTime").or_else(|| s.get("date")))
-        .and_then(|x| x.as_str())
-        .map(String::from);
+    let start = v.get("start").and_then(normalize_start);
     let app_owned = v
         .get("extendedProperties")
         .and_then(|e| e.get("private"))
@@ -327,5 +348,29 @@ mod tests {
         let ev = parse_event(&json).unwrap();
         assert!(ev.cancelled);
         assert!(!ev.app_owned);
+    }
+
+    #[test]
+    fn parse_event_normalizes_start_to_utc_z() {
+        // Offset dateTime -> canonical Z (07:00 +07:00 == 00:00 UTC).
+        let offset = serde_json::json!({
+            "id": "g1", "etag": "e", "status": "confirmed",
+            "start": { "dateTime": "2026-06-13T07:00:00+07:00" }
+        });
+        assert_eq!(parse_event(&offset).unwrap().start_rfc3339.as_deref(), Some("2026-06-13T00:00:00Z"));
+
+        // Already-Z dateTime stays put.
+        let zulu = serde_json::json!({
+            "id": "g2", "etag": "e", "status": "confirmed",
+            "start": { "dateTime": "2026-06-13T07:00:00Z" }
+        });
+        assert_eq!(parse_event(&zulu).unwrap().start_rfc3339.as_deref(), Some("2026-06-13T07:00:00Z"));
+
+        // All-day `date` anchored to 00:00 WIB (== prior day 17:00 UTC).
+        let allday = serde_json::json!({
+            "id": "g3", "etag": "e", "status": "confirmed",
+            "start": { "date": "2026-06-13" }
+        });
+        assert_eq!(parse_event(&allday).unwrap().start_rfc3339.as_deref(), Some("2026-06-12T17:00:00Z"));
     }
 }

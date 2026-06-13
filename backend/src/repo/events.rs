@@ -81,6 +81,33 @@ pub async fn cancel(db: &Db, id: i64) -> anyhow::Result<bool> {
     Ok(result.rows_affected() > 0)
 }
 
+/// Edit an app-owned scheduled event. Bumps updated_at so the next Google sync
+/// pushes the change. Refuses foreign (source='google') and non-scheduled rows.
+/// Returns false when no row matched.
+pub async fn update(
+    db: &Db,
+    id: i64,
+    title: &str,
+    location: Option<&str>,
+    notes: Option<&str>,
+    start_at: &str,
+) -> anyhow::Result<bool> {
+    let now = chrono::Utc::now().to_rfc3339();
+    let result = sqlx::query(
+        "UPDATE events SET title = ?, location = ?, notes = ?, start_at = ?, updated_at = ?
+         WHERE id = ? AND status = 'scheduled' AND source = 'local'",
+    )
+    .bind(title)
+    .bind(location)
+    .bind(notes)
+    .bind(start_at)
+    .bind(&now)
+    .bind(id)
+    .execute(db)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
 /// App-owned events whose local edits are not yet pushed: never synced, or
 /// edited since the last successful sync.
 pub async fn pending_push(db: &Db) -> anyhow::Result<Vec<EventRow>> {
@@ -266,5 +293,30 @@ mod tests {
         let id = upsert_foreign(&db, "gid-1", "foreign", None, None, "2026-06-13T03:00:00Z", "etag").await.unwrap();
         assert!(!cancel(&db, id).await.unwrap());
         assert_eq!(get(&db, id).await.unwrap().status, "scheduled");
+    }
+
+    #[tokio::test]
+    async fn update_edits_local_and_bumps_updated_at() {
+        let db = mem_db().await;
+        let e = create(&db, "old", None, None, "2026-06-13T07:00:00Z").await.unwrap();
+        let before = get(&db, e.id).await.unwrap();
+        assert!(update(&db, e.id, "new", Some("kantor"), Some("catatan"), "2026-06-14T02:00:00Z").await.unwrap());
+        let after = get(&db, e.id).await.unwrap();
+        assert_eq!(after.title, "new");
+        assert_eq!(after.location.as_deref(), Some("kantor"));
+        assert_eq!(after.start_at, "2026-06-14T02:00:00Z");
+        assert!(after.updated_at.as_deref().unwrap() >= before.updated_at.as_deref().unwrap());
+    }
+
+    #[tokio::test]
+    async fn update_refuses_foreign_and_cancelled() {
+        let db = mem_db().await;
+        let fid = upsert_foreign(&db, "g-1", "foreign", None, None, "2026-06-13T03:00:00Z", "etag").await.unwrap();
+        assert!(!update(&db, fid, "hack", None, None, "2026-06-13T03:00:00Z").await.unwrap());
+        assert_eq!(get(&db, fid).await.unwrap().title, "foreign");
+
+        let e = create(&db, "x", None, None, "2026-06-13T07:00:00Z").await.unwrap();
+        cancel(&db, e.id).await.unwrap();
+        assert!(!update(&db, e.id, "y", None, None, "2026-06-13T07:00:00Z").await.unwrap());
     }
 }

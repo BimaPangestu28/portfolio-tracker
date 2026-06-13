@@ -350,3 +350,17 @@ export const PerformanceSchema = z.object({
   insufficient_data: z.boolean(),
 });
 export type Performance = z.infer<typeof PerformanceSchema>;
+
+// ── Agenda: events ────────────────────────────────────────────────────────────
+
+export const EventSchema = z.object({
+  id: z.number(),
+  title: z.string(),
+  location: z.string().nullable().optional(),
+  notes: z.string().nullable().optional(),
+  start_at: z.string(),
+  status: z.string(),
+  source: z.string(),
+  google_event_id: z.string().nullable().optional(),
+});
+export type EventItem = z.infer<typeof EventSchema>;
