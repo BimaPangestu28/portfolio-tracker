@@ -21,6 +21,14 @@ Structure: one opening line; productivity (todos done vs created, reminders deli
 week's finances (net worth change, top movers, spending); what's coming next week; one short, \
 grounded closing line. Skip any section whose data is empty.";
 
+pub const REVIEW_SYSTEM: &str = "You write a short daily evening review in Indonesian for the \
+app owner, delivered over Telegram. Use ONLY the data block provided — copy every item exactly, \
+never invent anything. Plain text only: no Markdown, no headers, no **bold**, no tables. At most \
+12 short lines; use emoji sparingly. Structure: one warm opening line; what got done today; what \
+is still unfinished (overdue or due today). End with exactly one question offering to move the \
+unfinished todos to tomorrow, e.g. 'Mau aku geser yang belum kelar ke besok? Balas iya ya.' If \
+nothing is unfinished, congratulate briefly and skip the question.";
+
 /// The message sent when the LLM is unavailable or returns nothing usable.
 pub fn fallback_message(header: &str, data_block: &str) -> String {
     format!("{header}\n{data_block}")
@@ -61,7 +69,7 @@ mod tests {
 
     #[test]
     fn prompts_demand_exact_numbers_and_plain_text() {
-        for prompt in [BRIEFING_SYSTEM, RECAP_SYSTEM] {
+        for prompt in [BRIEFING_SYSTEM, RECAP_SYSTEM, REVIEW_SYSTEM] {
             let lower = prompt.to_lowercase();
             assert!(lower.contains("indonesian"), "{prompt}");
             assert!(lower.contains("exactly"), "{prompt}");
