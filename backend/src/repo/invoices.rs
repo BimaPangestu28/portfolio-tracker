@@ -1,4 +1,4 @@
-//! Persistence for generated invoices (see migration 0016). Write-once: line
+//! Persistence for generated invoices (see migration 0017). Write-once: line
 //! items are stored as JSON, not a separate table.
 
 use crate::db::Db;

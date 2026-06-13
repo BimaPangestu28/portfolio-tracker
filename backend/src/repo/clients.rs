@@ -1,4 +1,4 @@
-//! Persistence for invoice clients (see migration 0016).
+//! Persistence for invoice clients (see migration 0017).
 
 use crate::db::Db;
 use serde::Serialize;
