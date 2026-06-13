@@ -249,6 +249,8 @@ use crate::upwork::oauth::OAuthConfig;
 const DEFAULT_POLL_SECS: u64 = 1800;
 const DEFAULT_THRESHOLD: u8 = 7;
 const DEFAULT_MAX_QUERIES: usize = 3;
+/// Hard ceiling on watch-queries per cycle, regardless of env override.
+const MAX_WATCH_QUERIES_CAP: usize = 20;
 const FACT_LIMIT: u32 = 8;
 
 fn env_u8(key: &str, default: u8) -> u8 {
@@ -283,7 +285,8 @@ pub async fn notify_cycle(db: &Db) -> anyhow::Result<usize> {
     run_pass(
         db, &client, &intel, &notifier, link.chat_id, &facts,
         env_u8("UPWORK_JOB_SCORE_THRESHOLD", DEFAULT_THRESHOLD),
-        env_usize("UPWORK_MAX_WATCH_QUERIES", DEFAULT_MAX_QUERIES),
+        // Cap watch-queries so a misconfigured env var can't hammer the Upwork API.
+        env_usize("UPWORK_MAX_WATCH_QUERIES", DEFAULT_MAX_QUERIES).min(MAX_WATCH_QUERIES_CAP),
     ).await
 }
 
