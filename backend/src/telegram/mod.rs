@@ -487,4 +487,49 @@ mod tests {
         assert!(again.contains("sudah") || again.contains("tidak ditemukan"), "{again}");
     }
 
+    #[test]
+    fn seed_entry_line_renders_qty_and_price() {
+        let entry: ExtractedEntry = serde_json::from_str(
+            r#"{"entry_type":"buy","symbol":"QQQM","quantity":"3","price_native":"200","currency":"USD","executed_at":"2026-06-11"}"#,
+        ).unwrap();
+        let line = seed_entry_line(Some(&entry));
+        assert!(line.contains("buy QQQM"), "{line}");
+        assert!(line.contains("@ USD"), "{line}");
+        assert!(line.contains("2026-06-11"), "{line}");
+        assert!(!line.contains("nominal"), "{line}");
+    }
+
+    #[test]
+    fn seed_entry_line_renders_amount_only_nominal() {
+        let entry: ExtractedEntry = serde_json::from_str(
+            r#"{"entry_type":"buy","instrument_name":"Sucorinvest Bond Fund","amount_native":"13000000","currency":"IDR"}"#,
+        ).unwrap();
+        let line = seed_entry_line(Some(&entry));
+        assert!(line.contains("nominal IDR"), "{line}");
+        assert!(line.contains("13.000.000"), "{line}");
+        assert!(!line.contains('@'), "{line}");
+    }
+
+    #[test]
+    fn seed_entry_line_handles_unreadable_entry() {
+        assert_eq!(seed_entry_line(None), "(tidak terbaca)");
+    }
+
+    #[tokio::test]
+    async fn build_upload_seed_labels_unknown_and_flags_attention() {
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        let item = crate::repo::review_items::create(&db, &crate::repo::review_items::NewReviewItem {
+            batch_id: "b", source_kind: "image", source_filename: "f.png", source_path: "p",
+            doc_type: "txn_history", needs_attention: true,
+            payload_json: r#"{"entry_type":"buy","symbol":"QQQM","amount_native":"2000000","currency":"IDR"}"#,
+            raw_llm_json: "{}", suggested_instrument_id: None, suggested_account_id: None,
+        }).await.unwrap();
+        let (seed, marker) = build_upload_seed(&db, std::slice::from_ref(&item)).await;
+        assert!(seed.contains("akun: belum dikenali"), "{seed}");
+        assert!(seed.contains("instrumen: belum dikenali"), "{seed}");
+        assert!(seed.contains("perlu dicek"), "{seed}");
+        assert!(seed.contains("confirm_review"), "{seed}");
+        assert_eq!(marker, "(kirim 1 bukti transaksi)");
+    }
+
 }
