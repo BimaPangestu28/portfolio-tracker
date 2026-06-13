@@ -3,13 +3,13 @@
 -- Single-row Upwork connection (mirrors google_integration). Tokens are stored
 -- already-encrypted by the caller (see upwork::crypto). id is always 1.
 CREATE TABLE upwork_integration (
-  id INTEGER PRIMARY KEY,
+  id INTEGER PRIMARY KEY CHECK (id = 1),
   access_token TEXT NOT NULL,
   refresh_token TEXT NOT NULL,
   expiry TEXT NOT NULL,
   scope TEXT NOT NULL,
   earnings_cursor TEXT,
-  status TEXT NOT NULL DEFAULT 'connected',
+  status TEXT NOT NULL DEFAULT 'connected' CHECK (status IN ('connected', 'disconnected', 'error')),
   last_error TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
