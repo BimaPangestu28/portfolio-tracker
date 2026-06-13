@@ -24,6 +24,9 @@ jsonwebtoken = "9"
 constant_time_eq = "0.3"
 rand = "0.8"
 aes-gcm = "0.10"
+typst-as-lib = "0.15.5"
+typst-pdf = "0.14.2"
+typst-assets = { version = "0.14.2", features = ["fonts"] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
