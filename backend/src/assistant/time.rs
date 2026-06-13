@@ -91,3 +91,16 @@ mod tests {
         assert_eq!(end_ms, expected);
     }
 }
+
+/// Indonesian weekday name (used by proactive plan/briefing/review).
+pub fn weekday_id(day: chrono::Weekday) -> &'static str {
+    match day {
+        chrono::Weekday::Mon => "Senin",
+        chrono::Weekday::Tue => "Selasa",
+        chrono::Weekday::Wed => "Rabu",
+        chrono::Weekday::Thu => "Kamis",
+        chrono::Weekday::Fri => "Jumat",
+        chrono::Weekday::Sat => "Sabtu",
+        chrono::Weekday::Sun => "Minggu",
+    }
+}
