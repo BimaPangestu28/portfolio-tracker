@@ -90,11 +90,17 @@ async fn create_todo(db: &Db, input: &serde_json::Value) -> Result<String, Strin
     };
     let estimate_minutes = match input.get("estimate_minutes") {
         None | Some(serde_json::Value::Null) => None,
-        Some(v) => Some(
-            v.as_i64()
-                .filter(|m| *m > 0)
-                .ok_or_else(|| format!("estimate_minutes must be a positive integer, got {v}"))?,
-        ),
+        Some(v) => {
+            let minutes = v
+                .as_i64()
+                .ok_or_else(|| format!("estimate_minutes must be an integer, got {v}"))?;
+            if !(1..=MAX_ESTIMATE_MINUTES).contains(&minutes) {
+                return Err(format!(
+                    "estimate_minutes must be between 1 and {MAX_ESTIMATE_MINUTES}, got {minutes}"
+                ));
+            }
+            Some(minutes)
+        }
     };
     let todo = crate::repo::todos::create(
         db,
@@ -258,6 +264,10 @@ async fn remember(input: &serde_json::Value) -> Result<String, String> {
         .map_err(|e| format!("could not save the note: {e}"))?;
     Ok("noted — saved to long-term memory".into())
 }
+
+/// Upper bound for a todo effort estimate (one week of minutes), mirroring the
+/// event reminder ceiling — guards against hallucinated absurd values.
+const MAX_ESTIMATE_MINUTES: i64 = 7 * 24 * 60;
 
 /// Default lead time for the automatic pre-event reminder.
 const DEFAULT_EVENT_REMIND_MINUTES: i64 = 30;
@@ -653,6 +663,17 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn list_todos_renders_priority_and_estimate() {
+        let db = mem_db().await;
+        crate::repo::todos::create(&db, "deck", None, None, Some("high"), Some(45)).await.unwrap();
+        crate::repo::todos::create(&db, "santai", None, None, Some("normal"), None).await.unwrap();
+        let out = dispatch(&db, "list_todos", &serde_json::json!({})).await.unwrap();
+        assert!(out.contains("[high]"), "{out}");
+        assert!(out.contains("~45m"), "{out}");
+        assert!(!out.contains("[normal]"), "{out}");
+    }
+
+    #[tokio::test]
     async fn complete_todo_round_trips_and_errors_when_done() {
         let db = mem_db().await;
         let todo = crate::repo::todos::create(&db, "x", None, None, None, None).await.unwrap();
@@ -998,6 +1019,7 @@ mod tests {
             "title": "x", "priority": "urgent"
         })).await.unwrap_err();
         assert!(err.contains("priority"), "{err}");
+        assert!(err.contains("high/normal/low"), "{err}");
     }
 
     #[tokio::test]

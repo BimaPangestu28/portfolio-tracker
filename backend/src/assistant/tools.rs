@@ -20,7 +20,7 @@ pub fn definitions() -> serde_json::Value {
         },
         {
             "name": "list_todos",
-            "description": "List the user's open todos with ids, titles, and due dates.",
+            "description": "List the user's open todos with ids, titles, due dates, priority, and time estimates.",
             "input_schema": { "type": "object", "properties": {} }
         },
         {
