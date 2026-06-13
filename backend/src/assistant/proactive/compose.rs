@@ -3,14 +3,15 @@
 
 use crate::llm::claude::Part;
 
-pub const BRIEFING_SYSTEM: &str = "You write a short daily morning briefing in Indonesian \
+pub const BRIEFING_SYSTEM: &str = "You write a short daily morning plan in Indonesian \
 for the app owner, delivered over Telegram. Use ONLY the data block provided — copy every \
 number exactly as written, never invent or recalculate anything. Plain text only: no Markdown, \
 no headers, no **bold**, no tables. At most 15 short lines; use emoji sparingly as bullets. \
-Structure: a one-line greeting with the day and date; today's todos and reminders (or say the \
-day is clear); a one-or-two-line portfolio summary (net worth, change, notable movers, pending \
-reviews when present); remembered facts only if clearly relevant today; one short, grounded \
-closing line — no exaggeration. Skip any section whose data is empty.";
+Frame it as a plan for the day, not a flat list: open with a one-line greeting (day and date), \
+then the agenda at its fixed times, then the todos in the order given (highest priority first) — \
+suggest a sensible flow around the events. Add a one-or-two-line portfolio summary (net worth, \
+change, notable movers, pending reviews when present), remembered facts only if clearly relevant \
+today, and one short grounded closing line. Skip any section whose data is empty.";
 
 pub const RECAP_SYSTEM: &str = "You write a short weekly recap in Indonesian for the app \
 owner, delivered over Telegram on Sunday evening. Use ONLY the data block provided — copy \
