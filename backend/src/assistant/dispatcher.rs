@@ -58,6 +58,14 @@ pub async fn dispatch(db: &Db, name: &str, input: &serde_json::Value) -> Result<
             Ok(api) => clickup_current_timer(&api).await,
             Err(e) => Err(format!("clickup belum dikonfigurasi: {e}")),
         },
+        "time_report" => match crate::clickup::ClickUpClient::from_env() {
+            Ok(api) => clickup_time_report(&api, input).await,
+            Err(e) => Err(format!("clickup belum dikonfigurasi: {e}")),
+        },
+        "add_time_entry" => match crate::clickup::ClickUpClient::from_env() {
+            Ok(api) => clickup_add_time_entry(&api, input).await,
+            Err(e) => Err(format!("clickup belum dikonfigurasi: {e}")),
+        },
         "list_clients" => invoice_list_clients(db).await,
         "create_invoice" => invoice_create(db, input).await,
         _ => Err(format!("unknown tool: {name}")),
@@ -542,6 +550,63 @@ async fn clickup_current_timer(api: &dyn crate::clickup::ClickUpApi) -> Result<S
         Some(running) => Ok(format!("lagi ngerjain '{}'", running.task_name)),
         None => Ok("lagi nggak ada timer yang jalan".into()),
     }
+}
+
+async fn clickup_time_report(
+    api: &dyn crate::clickup::ClickUpApi,
+    input: &serde_json::Value,
+) -> Result<String, String> {
+    let scope = match str_arg(input, "scope") {
+        Some(s) if matches!(s, "today" | "week" | "month") => s,
+        Some(s) => return Err(format!("scope '{s}' nggak dikenal — pakai today/week/month")),
+        None => "week",
+    };
+    let (start_ms, end_ms) = crate::clickup::report::period_window(scope, chrono::Utc::now());
+    let mut entries = api.time_entries(start_ms, end_ms).await.map_err(|e| format!("{e}"))?;
+    if let Some(project) = str_arg(input, "project") {
+        let needle = project.to_lowercase();
+        entries.retain(|e| e.project_name.to_lowercase() == needle);
+    }
+    let (projects, grand_total) = crate::clickup::report::aggregate_hours(&entries);
+    if projects.is_empty() {
+        return Ok("belum ada jam tercatat untuk periode itu".into());
+    }
+    let label = match scope { "today" => "Hari ini", "month" => "Bulan ini", _ => "Minggu ini" };
+    let mut out = format!("{label}: {}\n", crate::clickup::report::format_duration(grand_total));
+    for project in projects {
+        out.push_str(&format!("- {}: {}\n", project.project, crate::clickup::report::format_duration(project.total_ms)));
+        for (task, ms) in project.tasks {
+            out.push_str(&format!("  - {task}: {}\n", crate::clickup::report::format_duration(ms)));
+        }
+    }
+    Ok(out)
+}
+
+async fn clickup_add_time_entry(
+    api: &dyn crate::clickup::ClickUpApi,
+    input: &serde_json::Value,
+) -> Result<String, String> {
+    let name = str_arg(input, "task").ok_or("missing required argument 'task'")?;
+    let raw_duration = str_arg(input, "duration").ok_or("missing required argument 'duration'")?;
+    let duration_ms = crate::clickup::report::parse_duration(raw_duration)
+        .ok_or_else(|| format!("durasi '{raw_duration}' nggak kebaca — coba '2 jam' atau '90 menit'"))?;
+    let start_ms = match str_arg(input, "day") {
+        Some(raw) => {
+            let dt = parse_tool_datetime(raw)
+                .ok_or_else(|| format!("day '{raw}' nggak terbaca — pakai RFC3339 +07:00"))?;
+            dt.timestamp_millis()
+        }
+        None => {
+            let (start, _) = crate::clickup::report::period_window("today", chrono::Utc::now());
+            start
+        }
+    };
+    let (task_id, task_name, _project) = resolve_clickup_task(api, name).await?;
+    api.add_time_entry(&task_id, duration_ms, start_ms).await.map_err(|e| format!("{e}"))?;
+    Ok(format!(
+        "{} dicatat ke '{task_name}'",
+        crate::clickup::report::format_duration(duration_ms)
+    ))
 }
 
 async fn invoice_list_clients(db: &Db) -> Result<String, String> {
@@ -1557,6 +1622,50 @@ mod tests {
         assert!(clickup_current_timer(&fake).await.unwrap().to_lowercase().contains("nggak ada"));
         *fake.running.lock().unwrap() = Some(RunningEntry { task_name: "kontrak".into(), started_ms: 0 });
         assert!(clickup_current_timer(&fake).await.unwrap().to_lowercase().contains("kontrak"));
+    }
+
+    #[tokio::test]
+    async fn time_report_aggregates_entries() {
+        let fake = FakeClickUp::default();
+        fake.entries.lock().unwrap().extend([
+            TimeEntry { task_id: "t1".into(), task_name: "landing".into(), project_name: "PT AIS".into(), duration_ms: 4 * 3_600_000, start_ms: 0, billable: false },
+            TimeEntry { task_id: "t2".into(), task_name: "kontrak".into(), project_name: "PT AIS".into(), duration_ms: 2 * 3_600_000, start_ms: 0, billable: false },
+        ]);
+        let out = clickup_time_report(&fake, &serde_json::json!({ "scope": "week" })).await.unwrap();
+        assert!(out.contains("PT AIS"), "{out}");
+        assert!(out.contains("landing"), "{out}");
+        assert!(out.contains("6j"), "{out}"); // project total 6j
+    }
+
+    #[tokio::test]
+    async fn time_report_empty_is_explicit() {
+        let fake = FakeClickUp::default();
+        let out = clickup_time_report(&fake, &serde_json::json!({ "scope": "week" })).await.unwrap();
+        assert!(out.to_lowercase().contains("belum ada"), "{out}");
+    }
+
+    #[tokio::test]
+    async fn add_time_entry_parses_duration_and_records() {
+        let fake = FakeClickUp::default();
+        fake.projects.lock().unwrap().push(Project { id: "l1".into(), name: "PT AIS".into() });
+        fake.tasks.lock().unwrap().insert("l1".into(), vec![Task {
+            id: "t9".into(), name: "kontrak".into(), status: "open".into(), due_date_ms: None,
+        }]);
+        let out = clickup_add_time_entry(&fake, &serde_json::json!({ "task": "kontrak", "duration": "2 jam" })).await.unwrap();
+        assert!(out.to_lowercase().contains("kontrak"), "{out}");
+        let added = fake.added.lock().unwrap();
+        assert_eq!(added.as_slice(), &[("t9".to_string(), 7_200_000i64)]);
+    }
+
+    #[tokio::test]
+    async fn add_time_entry_bad_duration_errors() {
+        let fake = FakeClickUp::default();
+        fake.projects.lock().unwrap().push(Project { id: "l1".into(), name: "PT AIS".into() });
+        fake.tasks.lock().unwrap().insert("l1".into(), vec![Task {
+            id: "t9".into(), name: "kontrak".into(), status: "open".into(), due_date_ms: None,
+        }]);
+        let err = clickup_add_time_entry(&fake, &serde_json::json!({ "task": "kontrak", "duration": "kapan-kapan" })).await.unwrap_err();
+        assert!(err.to_lowercase().contains("durasi"), "{err}");
     }
 
     #[tokio::test]
