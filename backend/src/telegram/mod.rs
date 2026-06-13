@@ -85,6 +85,77 @@ fn fmt_payload_num(raw: &str) -> String {
         .unwrap_or_else(|_| raw.to_string())
 }
 
+/// Build the model-facing seed and the concise history marker for an upload.
+/// The seed lists each staged item with its DB-resolved account/instrument and
+/// tells the assistant to confirm naturally before writing; the marker is what
+/// gets stored in chat history.
+/// Errors resolving an account/instrument just yield a "belum dikenali" label; this never fails.
+async fn build_upload_seed(db: &Db, items: &[ReviewItemRow]) -> (String, String) {
+    let mut lines = String::new();
+    for item in items {
+        let entry: Option<ExtractedEntry> = serde_json::from_str(&item.payload_json).ok();
+        let instrument = match item.suggested_instrument_id {
+            Some(id) => crate::repo::instruments::get(db, id)
+                .await
+                .ok()
+                .map(|i| format!("{} ({})", i.symbol, i.name))
+                .unwrap_or_else(|| "belum dikenali".into()),
+            None => "belum dikenali".into(),
+        };
+        let account = match item.suggested_account_id {
+            Some(id) => crate::repo::accounts::get(db, id)
+                .await
+                .ok()
+                .map(|a| a.name)
+                .unwrap_or_else(|| "belum dikenali".into()),
+            None => "belum dikenali".into(),
+        };
+        lines.push_str(&format!(
+            "- #{} {} — instrumen: {instrument} — akun: {account}",
+            item.id,
+            seed_entry_line(entry.as_ref())
+        ));
+        if item.needs_attention != 0 {
+            lines.push_str(" — perlu dicek (confidence rendah / data kurang)");
+        }
+        lines.push('\n');
+    }
+    let count = items.len();
+    // The seed embeds owner-controlled account/instrument names and the owner's
+    // own uploaded entry data into an instruction string — acceptable for this
+    // single-owner bot. Revisit if names ever come from a third-party feed.
+    let seed = format!(
+        "[event:upload] Owner baru mengirim bukti transaksi ({count} item). \
+         Item review yang ter-stage:\n{lines}\
+         Sapa singkat, sebut yang kamu baca, lalu minta owner mengonfirmasi akun \
+         secara natural sebelum memanggil confirm_review. Kalau akun 'belum dikenali', \
+         tanya akun mana — boleh create_account setelah owner setuju. Kalau instrumen \
+         'belum dikenali', minta owner menambahkannya di web UI -> Data (instrumen tidak \
+         bisa dibuat dari chat). JANGAN menulis transaksi tanpa 'ya' eksplisit dari owner."
+    );
+    let marker = format!("(kirim {count} bukti transaksi)");
+    (seed, marker)
+}
+
+/// One-line entry summary for the upload seed: type, symbol, qty/amount, date.
+fn seed_entry_line(entry: Option<&ExtractedEntry>) -> String {
+    let Some(e) = entry else {
+        return "(tidak terbaca)".to_string();
+    };
+    let mut out = e.entry_type.clone();
+    if let Some(symbol) = &e.symbol {
+        out.push_str(&format!(" {symbol}"));
+    }
+    let currency = e.currency.as_deref().unwrap_or("");
+    if let (Some(qty), Some(price)) = (&e.quantity, &e.price_native) {
+        out.push_str(&format!(" — {} @ {currency} {}", fmt_payload_num(qty), fmt_payload_num(price)));
+    } else if let Some(amount) = &e.amount_native {
+        out.push_str(&format!(" — nominal {currency} {}", fmt_payload_num(amount)));
+    }
+    out.push_str(&format!(" — {}", e.executed_at.as_deref().unwrap_or("hari ini")));
+    out
+}
+
 /// One-message summary of a staged review item for the confirmation prompt.
 fn item_summary(
     item: &ReviewItemRow,
@@ -233,7 +304,17 @@ async fn handle_update(client: &TelegramClient, db: &Db, tg: &SharedTgState, upd
         Action::Answer => match pick_attachment(&message) {
             AttachmentPick::Some(attachment) => {
                 match ingest_attachment(client, db, &attachment).await {
-                    Ok(items) => send_review_prompts(client, db, chat_id, &items).await,
+                    Ok(items) if items.is_empty() => {
+                        send_or_log(client, chat_id, "Tidak ada transaksi yang terbaca dari file itu.").await;
+                    }
+                    Ok(items) => {
+                        let (seed, marker) = build_upload_seed(db, &items).await;
+                        let reply = kickoff_upload(db, &seed, &marker).await.unwrap_or_else(|e| {
+                            tracing::error!("telegram: upload kickoff failed: {e:#}");
+                            ANSWER_FAILED_REPLY.to_string()
+                        });
+                        send_or_log(client, chat_id, &reply).await;
+                    }
                     Err(e) => {
                         tracing::error!("telegram: ingest failed: {e:#}");
                         send_or_log(client, chat_id, INGEST_FAILED_REPLY).await;
@@ -285,6 +366,14 @@ async fn answer(db: &Db, text: &str) -> anyhow::Result<String> {
     let llm = crate::llm::claude::ClaudeClient::from_env()
         .map_err(|e| anyhow::anyhow!("chat unavailable: {e}"))?;
     crate::assistant::agent::handle_message(db, &llm, "telegram", text).await
+}
+
+/// Run the assistant kickoff for a freshly-ingested upload: build the LLM client
+/// and hand the staged-item seed to the agent. Mirrors `answer` for text turns.
+async fn kickoff_upload(db: &Db, seed: &str, marker: &str) -> anyhow::Result<String> {
+    let llm = crate::llm::claude::ClaudeClient::from_env()
+        .map_err(|e| anyhow::anyhow!("chat unavailable: {e}"))?;
+    crate::assistant::agent::handle_upload_event(db, &llm, "telegram", seed, marker).await
 }
 
 /// Download an attachment and run it through the shared ingestion pipeline
