@@ -32,9 +32,18 @@ async function request<T>(path: string, schema: z.ZodType<T>, init?: RequestInit
 const googleStatusSchema = z.object({
   status: z.enum(["connected", "disconnected", "error"]),
   last_error: z.string().nullable(),
+  last_synced_at: z.string().nullable(),
 });
 
 const googleStartSchema = z.object({ consent_url: z.string() });
+
+const googleSyncSchema = z.object({
+  status: z.enum(["connected", "disconnected", "error"]),
+  last_error: z.string().nullable(),
+  last_synced_at: z.string().nullable(),
+  pushed: z.number(),
+  imported: z.number(),
+});
 
 // ── API client ───────────────────────────────────────────────────────────────
 
@@ -49,5 +58,6 @@ export const api = {
   // Google Calendar integration
   googleStatus: () => request("/google/status", googleStatusSchema),
   googleStart: () => request("/google/oauth/start", googleStartSchema),
+  googleSync: () => request("/google/sync", googleSyncSchema, { method: "POST" }),
   googleDisconnect: () => request("/google/disconnect", googleStatusSchema, { method: "POST" }),
 };

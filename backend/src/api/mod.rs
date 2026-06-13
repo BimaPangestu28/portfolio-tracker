@@ -45,6 +45,7 @@ pub fn router(state: AppState) -> Router {
         .route("/telegram/unlink", post(telegram::unlink))
         .route("/google/oauth/start", get(google::start))
         .route("/google/status", get(google::status))
+        .route("/google/sync", post(google::sync))
         .route("/google/disconnect", post(google::disconnect))
         .route("/events", get(events::list).post(events::create))
         .route("/events/:id", axum::routing::patch(events::update))

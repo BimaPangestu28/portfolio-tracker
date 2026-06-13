@@ -10,19 +10,31 @@ use crate::repo::events;
 /// Window for the initial (token-less) inbound list: now .. now + 30 days.
 const INBOUND_WINDOW_DAYS: i64 = 30;
 
+/// What one sync pass changed — surfaced to the manual-sync API and logs.
+#[derive(Debug, Default, Clone, Copy, serde::Serialize)]
+pub struct SyncSummary {
+    /// app events pushed to Google (created/patched/deleted).
+    pub pushed: usize,
+    /// Google events applied locally (imported/updated/removed).
+    pub imported: usize,
+}
+
 /// Execute one outbound+inbound pass with a given client. Pure DB + the trait;
-/// no env reads, so tests inject a fake.
-pub async fn run_pass<C: CalendarApi>(db: &Db, cal: &C) -> anyhow::Result<()> {
+/// no env reads, so tests inject a fake. Returns a count of what changed.
+pub async fn run_pass<C: CalendarApi>(db: &Db, cal: &C) -> anyhow::Result<SyncSummary> {
+    let mut pushed = 0usize;
+    let mut imported = 0usize;
+
     // --- Outbound ---
     for op in plan_outbound(&events::pending_push(db).await?) {
         match op {
             OutboundOp::Create { event_id, write } => match cal.insert(&write).await {
-                Ok(ev) => events::mark_synced(db, event_id, &ev.id, &ev.etag).await?,
+                Ok(ev) => { events::mark_synced(db, event_id, &ev.id, &ev.etag).await?; pushed += 1; }
                 Err(e) => tracing::warn!("google insert {event_id} skipped: {e}"),
             },
             OutboundOp::Patch { event_id, google_event_id, etag, write } => {
                 match cal.patch(&google_event_id, &etag, &write).await {
-                    Ok(ev) => events::mark_synced(db, event_id, &ev.id, &ev.etag).await?,
+                    Ok(ev) => { events::mark_synced(db, event_id, &ev.id, &ev.etag).await?; pushed += 1; }
                     Err(CalendarError::PreconditionFailed) => {
                         tracing::info!("google patch {event_id} lost race; inbound will reconcile");
                     }
@@ -30,7 +42,7 @@ pub async fn run_pass<C: CalendarApi>(db: &Db, cal: &C) -> anyhow::Result<()> {
                 }
             }
             OutboundOp::Delete { event_id, google_event_id } => match cal.delete(&google_event_id).await {
-                Ok(()) => events::mark_synced(db, event_id, &google_event_id, "").await?,
+                Ok(()) => { events::mark_synced(db, event_id, &google_event_id, "").await?; pushed += 1; }
                 Err(e) => tracing::warn!("google delete {event_id} skipped: {e}"),
             },
         }
@@ -48,9 +60,9 @@ pub async fn run_pass<C: CalendarApi>(db: &Db, cal: &C) -> anyhow::Result<()> {
         Err(CalendarError::SyncTokenGone) => {
             crate::repo::google_integration::clear_sync_token(db).await?;
             tracing::info!("google sync token expired; will full-resync next pass");
-            return Ok(());
+            return Ok(SyncSummary { pushed, imported });
         }
-        Err(e) => { tracing::warn!("google list skipped: {e}"); return Ok(()); }
+        Err(e) => { tracing::warn!("google list skipped: {e}"); return Ok(SyncSummary { pushed, imported }); }
     };
 
     for r in &page.events {
@@ -58,12 +70,14 @@ pub async fn run_pass<C: CalendarApi>(db: &Db, cal: &C) -> anyhow::Result<()> {
         match plan_inbound_one(r, existing.as_ref()) {
             Some(InboundOp::UpsertForeign { google_event_id, etag, summary, location, notes, start_at }) => {
                 events::upsert_foreign(db, &google_event_id, &summary, location.as_deref(), notes.as_deref(), &start_at, &etag).await?;
+                imported += 1;
             }
-            Some(InboundOp::RemoveForeign { event_id }) => events::cancel_by_sync(db, event_id).await?,
+            Some(InboundOp::RemoveForeign { event_id }) => { events::cancel_by_sync(db, event_id).await?; imported += 1; }
             Some(InboundOp::UpdateLocal { event_id, etag, summary, location, notes, start_at }) => {
                 events::update_from_google(db, event_id, &summary, location.as_deref(), notes.as_deref(), &start_at, &etag).await?;
+                imported += 1;
             }
-            Some(InboundOp::CancelLocal { event_id }) => events::cancel_by_sync(db, event_id).await?,
+            Some(InboundOp::CancelLocal { event_id }) => { events::cancel_by_sync(db, event_id).await?; imported += 1; }
             None => {}
         }
     }
@@ -71,7 +85,7 @@ pub async fn run_pass<C: CalendarApi>(db: &Db, cal: &C) -> anyhow::Result<()> {
     if let Some(tok) = page.next_sync_token {
         crate::repo::google_integration::set_sync_token(db, &tok).await?;
     }
-    Ok(())
+    Ok(SyncSummary { pushed, imported })
 }
 
 use crate::google::oauth::{self, OAuthConfig};
@@ -95,24 +109,29 @@ async fn ensure_access_token(db: &Db, cfg: &OAuthConfig, key: &[u8; 32]) -> anyh
     Ok(tokens.access_token)
 }
 
-/// One full cycle including auth. Sets integration status on failure.
-pub async fn run_cycle(db: &Db) -> anyhow::Result<()> {
-    let Some(row) = crate::repo::google_integration::get(db).await? else { return Ok(()) };
-    if row.status == "disconnected" { return Ok(()); }
+/// One full cycle including auth. Sets integration status + last_synced_at, and
+/// returns what changed. A not-connected/disconnected/errored account yields an
+/// empty summary (the caller reads the row's status separately).
+pub async fn run_cycle(db: &Db) -> anyhow::Result<SyncSummary> {
+    let Some(row) = crate::repo::google_integration::get(db).await? else { return Ok(SyncSummary::default()) };
+    if row.status == "disconnected" { return Ok(SyncSummary::default()); }
     let cfg = OAuthConfig::from_env()?;
     let key = crate::google::crypto::key_from_env()?;
     let token = match ensure_access_token(db, &cfg, &key).await {
         Ok(t) => t,
         Err(e) => {
+            tracing::warn!("google sync: auth failed: {e}");
             crate::repo::google_integration::set_status(db, "error", Some(&e.to_string())).await?;
-            return Ok(());
+            return Ok(SyncSummary::default());
         }
     };
     if row.status == "error" {
         crate::repo::google_integration::set_status(db, "connected", None).await?;
     }
     let cal = crate::google::calendar::HttpCalendar::new(token);
-    run_pass(db, &cal).await
+    let summary = run_pass(db, &cal).await?;
+    crate::repo::google_integration::set_synced_at(db, &chrono::Utc::now().to_rfc3339()).await?;
+    Ok(summary)
 }
 
 const TICK: std::time::Duration = std::time::Duration::from_secs(300);
@@ -126,8 +145,12 @@ pub fn spawn(db: Db) {
     }
     tokio::spawn(async move {
         loop {
-            if let Err(e) = run_cycle(&db).await {
-                tracing::warn!("google sync cycle failed: {e:#}");
+            match run_cycle(&db).await {
+                Ok(s) if s.pushed > 0 || s.imported > 0 => {
+                    tracing::info!("google sync: pushed {}, imported {}", s.pushed, s.imported);
+                }
+                Ok(_) => {} // connected but nothing changed, or idle — stay quiet
+                Err(e) => tracing::warn!("google sync cycle failed: {e:#}"),
             }
             tokio::time::sleep(TICK).await;
         }
@@ -174,7 +197,9 @@ mod tests {
         let db = mem_db().await;
         events::create(&db, "rapat", None, None, "2026-06-13T07:00:00Z").await.unwrap();
         let cal = FakeCalendar::default();
-        run_pass(&db, &cal).await.unwrap();
+        let summary = run_pass(&db, &cal).await.unwrap();
+        assert_eq!(summary.pushed, 1);
+        assert_eq!(summary.imported, 0);
         assert_eq!(cal.inserted.lock().unwrap().len(), 1);
         assert!(events::pending_push(&db).await.unwrap().is_empty());
     }
@@ -188,7 +213,9 @@ mod tests {
             description: None, start_rfc3339: Some("2026-06-13T03:00:00Z".into()),
             updated: Some("2026-06-12T09:00:00Z".into()), cancelled: false, app_owned: false,
         });
-        run_pass(&db, &cal).await.unwrap();
+        let summary = run_pass(&db, &cal).await.unwrap();
+        assert_eq!(summary.imported, 1);
+        assert_eq!(summary.pushed, 0);
         let row = events::get_by_google_id(&db, "gf-1").await.unwrap().unwrap();
         assert_eq!(row.source, "google");
         assert_eq!(row.title, "dokter");
