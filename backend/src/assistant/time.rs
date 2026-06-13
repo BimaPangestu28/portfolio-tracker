@@ -28,6 +28,14 @@ pub fn parse_tool_datetime(raw: &str) -> Option<DateTime<Utc>> {
         .map(|dt| dt.with_timezone(&Utc))
 }
 
+/// Epoch-ms of 23:59:59 WIB on the WIB-local date of `now`. Used to bound a
+/// "due today" window for tasks whose due dates are epoch ms.
+pub fn end_of_today_wib_ms(now: DateTime<Utc>) -> i64 {
+    let today = now.with_timezone(&wib()).date_naive();
+    let end = today.and_hms_opt(23, 59, 59).expect("23:59:59 is valid");
+    wib().from_local_datetime(&end).single().expect("WIB has no DST gaps").timestamp_millis()
+}
+
 /// Render a stored UTC timestamp as WIB for user-facing text. Unparseable
 /// input is returned as-is (display helper — never fails).
 pub fn to_wib_display(raw: &str) -> String {
@@ -73,5 +81,13 @@ mod tests {
         assert_eq!(to_wib_display("2026-06-12T02:00:00Z"), "2026-06-12 09:00 WIB");
         // Unparseable values pass through untouched rather than panicking.
         assert_eq!(to_wib_display("oops"), "oops");
+    }
+
+    #[test]
+    fn end_of_today_wib_is_2359_local() {
+        let now = Utc.with_ymd_and_hms(2026, 6, 12, 20, 0, 0).unwrap();
+        let end_ms = end_of_today_wib_ms(now);
+        let expected = Utc.with_ymd_and_hms(2026, 6, 13, 16, 59, 59).unwrap().timestamp_millis();
+        assert_eq!(end_ms, expected);
     }
 }

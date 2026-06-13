@@ -26,6 +26,26 @@ pub async fn dispatch(db: &Db, name: &str, input: &serde_json::Value) -> Result<
         "list_pending_reviews" => list_pending_reviews(db).await,
         "confirm_review" => confirm_review(db, input).await,
         "list_instruments" => list_instruments(db).await,
+        "list_projects" => match crate::clickup::ClickUpClient::from_env() {
+            Ok(api) => clickup_list_projects(&api).await,
+            Err(e) => Err(format!("clickup belum dikonfigurasi: {e}")),
+        },
+        "create_project" => match crate::clickup::ClickUpClient::from_env() {
+            Ok(api) => clickup_create_project(&api, input).await,
+            Err(e) => Err(format!("clickup belum dikonfigurasi: {e}")),
+        },
+        "create_task" => match crate::clickup::ClickUpClient::from_env() {
+            Ok(api) => clickup_create_task(&api, input).await,
+            Err(e) => Err(format!("clickup belum dikonfigurasi: {e}")),
+        },
+        "list_tasks" => match crate::clickup::ClickUpClient::from_env() {
+            Ok(api) => clickup_list_tasks(&api, input).await,
+            Err(e) => Err(format!("clickup belum dikonfigurasi: {e}")),
+        },
+        "complete_task" => match crate::clickup::ClickUpClient::from_env() {
+            Ok(api) => clickup_complete_task(&api, input).await,
+            Err(e) => Err(format!("clickup belum dikonfigurasi: {e}")),
+        },
         _ => Err(format!("unknown tool: {name}")),
     }
 }
@@ -353,6 +373,101 @@ async fn list_accounts(db: &Db) -> Result<String, String> {
     let mut out = String::new();
     for a in accounts {
         out.push_str(&format!("#{} {} ({})\n", a.id, a.name, a.account_type));
+    }
+    Ok(out)
+}
+
+async fn clickup_create_project(
+    api: &dyn crate::clickup::ClickUpApi,
+    input: &serde_json::Value,
+) -> Result<String, String> {
+    let name = str_arg(input, "name").ok_or("missing required argument 'name'")?;
+    let project = api.create_project(name).await.map_err(|e| format!("{e}"))?;
+    Ok(format!("project '{}' dibuat di ClickUp", project.name))
+}
+
+async fn clickup_create_task(
+    api: &dyn crate::clickup::ClickUpApi,
+    input: &serde_json::Value,
+) -> Result<String, String> {
+    let project = str_arg(input, "project").ok_or("missing required argument 'project'")?;
+    let title = str_arg(input, "title").ok_or("missing required argument 'title'")?;
+    let projects = api.list_projects().await.map_err(|e| format!("{e}"))?;
+    let matched = projects
+        .iter()
+        .find(|p| p.name.eq_ignore_ascii_case(project))
+        .ok_or_else(|| format!("project '{project}' belum ada — tawarkan buat project baru dulu"))?;
+    let due_date_ms = match str_arg(input, "due") {
+        Some(raw) => {
+            let dt = parse_tool_datetime(raw)
+                .ok_or_else(|| format!("due '{raw}' tidak terbaca — pakai RFC3339 +07:00"))?;
+            Some(dt.timestamp_millis())
+        }
+        None => None,
+    };
+    let billable = input.get("billable").and_then(|v| v.as_bool());
+    let amount = input.get("amount").and_then(|v| v.as_f64());
+    let task = crate::clickup::NewTask { name: title.to_string(), due_date_ms, billable, amount };
+    api.create_task(&matched.id, &task).await.map_err(|e| format!("{e}"))?;
+    Ok(format!("task '{title}' ditambahkan ke project '{}'", matched.name))
+}
+
+async fn clickup_list_tasks(
+    api: &dyn crate::clickup::ClickUpApi,
+    input: &serde_json::Value,
+) -> Result<String, String> {
+    let scope = str_arg(input, "scope").unwrap_or("open");
+    let projects = api.list_projects().await.map_err(|e| format!("{e}"))?;
+    let targets: Vec<&crate::clickup::Project> = match str_arg(input, "project") {
+        Some(name) => {
+            let p = projects.iter().find(|p| p.name.eq_ignore_ascii_case(name))
+                .ok_or_else(|| format!("project '{name}' belum ada"))?;
+            vec![p]
+        }
+        None => projects.iter().collect(),
+    };
+    let now_ms = chrono::Utc::now().timestamp_millis();
+    let end_today = crate::assistant::time::end_of_today_wib_ms(chrono::Utc::now());
+    let mut out = String::new();
+    for project in targets {
+        let tasks = api.list_tasks(&project.id).await.map_err(|e| format!("{e}"))?;
+        let mut lines = String::new();
+        for t in &tasks {
+            let keep = match scope {
+                "overdue" => t.due_date_ms.is_some_and(|d| d < now_ms),
+                "today" => t.due_date_ms.is_some_and(|d| d >= now_ms && d <= end_today),
+                _ => true,
+            };
+            if !keep { continue; }
+            lines.push_str(&format!("  [{}] {}\n", t.id, t.name));
+        }
+        if !lines.is_empty() {
+            out.push_str(&format!("{}:\n{lines}", project.name));
+        }
+    }
+    if out.is_empty() {
+        return Ok("tidak ada task".into());
+    }
+    Ok(out)
+}
+
+async fn clickup_complete_task(
+    api: &dyn crate::clickup::ClickUpApi,
+    input: &serde_json::Value,
+) -> Result<String, String> {
+    let task_id = str_arg(input, "task_id").ok_or("missing required argument 'task_id'")?;
+    api.complete_task(task_id).await.map_err(|e| format!("{e}"))?;
+    Ok(format!("task {task_id} ditandai selesai"))
+}
+
+async fn clickup_list_projects(api: &dyn crate::clickup::ClickUpApi) -> Result<String, String> {
+    let projects = api.list_projects().await.map_err(|e| format!("{e}"))?;
+    if projects.is_empty() {
+        return Ok("belum ada project di ClickUp".into());
+    }
+    let mut out = String::new();
+    for p in projects {
+        out.push_str(&format!("#{} {}\n", p.id, p.name));
     }
     Ok(out)
 }
@@ -909,6 +1024,238 @@ mod tests {
         let item = crate::repo::review_items::get(&db, id).await.unwrap();
         assert_eq!(item.status, "confirmed");
         assert!(item.created_txn_id.is_some());
+    }
+
+    // ── ClickUp fake ─────────────────────────────────────────────────────────
+
+    use crate::clickup::client::{ClickUpApi, ClickUpError, NewTask, Project, Task};
+    use std::sync::Mutex;
+
+    #[derive(Default)]
+    struct FakeClickUp {
+        projects: Mutex<Vec<Project>>,
+        created_tasks: Mutex<Vec<(String, String)>>, // (list_id, title)
+        created_dues: Mutex<Vec<Option<i64>>>,       // due_date_ms per created task
+        created_billables: Mutex<Vec<Option<bool>>>,
+        created_amounts: Mutex<Vec<Option<f64>>>,
+        tasks: Mutex<std::collections::HashMap<String, Vec<crate::clickup::client::Task>>>,
+        completed: Mutex<Vec<String>>,
+    }
+
+    #[async_trait::async_trait]
+    impl ClickUpApi for FakeClickUp {
+        async fn list_projects(&self) -> Result<Vec<Project>, ClickUpError> {
+            Ok(self.projects.lock().unwrap().clone())
+        }
+        async fn create_project(&self, name: &str) -> Result<Project, ClickUpError> {
+            let project = Project { id: format!("list_{name}"), name: name.to_string() };
+            self.projects.lock().unwrap().push(project.clone());
+            Ok(project)
+        }
+        async fn create_task(&self, list_id: &str, task: &NewTask) -> Result<String, ClickUpError> {
+            self.created_tasks.lock().unwrap().push((list_id.to_string(), task.name.clone()));
+            self.created_dues.lock().unwrap().push(task.due_date_ms);
+            self.created_billables.lock().unwrap().push(task.billable);
+            self.created_amounts.lock().unwrap().push(task.amount);
+            Ok(format!("task_{}", task.name))
+        }
+        async fn list_tasks(&self, list_id: &str) -> Result<Vec<crate::clickup::client::Task>, ClickUpError> {
+            Ok(self.tasks.lock().unwrap().get(list_id).cloned().unwrap_or_default())
+        }
+        async fn complete_task(&self, task_id: &str) -> Result<(), ClickUpError> {
+            self.completed.lock().unwrap().push(task_id.to_string());
+            // Mirror ClickUp: a completed task drops out of the open-task views.
+            for tasks in self.tasks.lock().unwrap().values_mut() {
+                tasks.retain(|t| t.id != task_id);
+            }
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn list_projects_formats_known_projects() {
+        let fake = FakeClickUp::default();
+        fake.projects.lock().unwrap().push(Project { id: "l1".into(), name: "PT AIS".into() });
+        let out = clickup_list_projects(&fake).await.unwrap();
+        assert!(out.contains("PT AIS"), "{out}");
+    }
+
+    #[tokio::test]
+    async fn list_projects_empty_is_explicit() {
+        let fake = FakeClickUp::default();
+        let out = clickup_list_projects(&fake).await.unwrap();
+        assert!(out.contains("belum ada project"), "{out}");
+    }
+
+    #[tokio::test]
+    async fn create_project_creates_and_reports() {
+        let fake = FakeClickUp::default();
+        let out = clickup_create_project(&fake, &serde_json::json!({ "name": "Klien Baru" })).await.unwrap();
+        assert!(out.contains("Klien Baru"), "{out}");
+        assert!(fake.projects.lock().unwrap().iter().any(|p| p.name == "Klien Baru"));
+    }
+
+    #[tokio::test]
+    async fn create_task_parses_due_into_ms() {
+        let fake = FakeClickUp::default();
+        fake.projects.lock().unwrap().push(Project { id: "l1".into(), name: "PT AIS".into() });
+        clickup_create_task(&fake, &serde_json::json!({
+            "project": "PT AIS", "title": "kirim invoice", "due": "2026-06-14T17:00:00+07:00"
+        })).await.unwrap();
+        // The same instant in epoch ms; proves parse_tool_datetime -> timestamp_millis ran.
+        let expected = chrono::DateTime::parse_from_rfc3339("2026-06-14T17:00:00+07:00")
+            .unwrap()
+            .timestamp_millis();
+        assert_eq!(fake.created_dues.lock().unwrap()[0], Some(expected));
+    }
+
+    #[tokio::test]
+    async fn create_task_without_due_records_none() {
+        let fake = FakeClickUp::default();
+        fake.projects.lock().unwrap().push(Project { id: "l1".into(), name: "PT AIS".into() });
+        clickup_create_task(&fake, &serde_json::json!({ "project": "PT AIS", "title": "x" }))
+            .await.unwrap();
+        assert_eq!(fake.created_dues.lock().unwrap()[0], None);
+    }
+
+    #[tokio::test]
+    async fn create_task_bad_due_errors_and_creates_nothing() {
+        let fake = FakeClickUp::default();
+        fake.projects.lock().unwrap().push(Project { id: "l1".into(), name: "PT AIS".into() });
+        let err = clickup_create_task(&fake, &serde_json::json!({
+            "project": "PT AIS", "title": "x", "due": "besok pagi"
+        })).await.unwrap_err();
+        assert!(err.contains("tidak terbaca"), "{err}");
+        assert!(fake.created_tasks.lock().unwrap().is_empty(), "no task on bad due");
+    }
+
+    #[tokio::test]
+    async fn create_project_then_create_task_completes_the_recovery_loop() {
+        let fake = FakeClickUp::default();
+        // Agent flow: project missing -> create it -> retry create_task against it.
+        clickup_create_project(&fake, &serde_json::json!({ "name": "Klien Baru" })).await.unwrap();
+        let out = clickup_create_task(&fake, &serde_json::json!({
+            "project": "klien baru", "title": "bikin kontrak"
+        })).await.unwrap();
+        assert!(out.contains("bikin kontrak"), "{out}");
+        let created = fake.created_tasks.lock().unwrap();
+        assert_eq!(created.len(), 1);
+        assert_eq!(created[0].0, "list_Klien Baru", "task routed to the freshly created list");
+    }
+
+    #[tokio::test]
+    async fn create_project_requires_name() {
+        let fake = FakeClickUp::default();
+        let err = clickup_create_project(&fake, &serde_json::json!({})).await.unwrap_err();
+        assert!(err.contains("name"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn create_task_adds_to_matching_project() {
+        let fake = FakeClickUp::default();
+        fake.projects.lock().unwrap().push(Project { id: "l1".into(), name: "PT AIS".into() });
+        let out = clickup_create_task(&fake, &serde_json::json!({
+            "project": "pt ais", "title": "bikin kontrak"
+        })).await.unwrap();
+        assert!(out.contains("bikin kontrak"), "{out}");
+        let created = fake.created_tasks.lock().unwrap();
+        assert_eq!(created.len(), 1);
+        assert_eq!(created[0].0, "l1", "task went to the matched list");
+    }
+
+    #[tokio::test]
+    async fn create_task_unknown_project_reports_for_offer() {
+        let fake = FakeClickUp::default();
+        let err = clickup_create_task(&fake, &serde_json::json!({
+            "project": "Klien Baru", "title": "x"
+        })).await.unwrap_err();
+        assert!(err.contains("Klien Baru"), "{err}");
+        assert!(err.contains("belum ada"), "{err}");
+        assert!(fake.created_tasks.lock().unwrap().is_empty(), "no task created");
+    }
+
+    #[tokio::test]
+    async fn list_tasks_for_a_project_shows_open_tasks() {
+        let fake = FakeClickUp::default();
+        fake.projects.lock().unwrap().push(Project { id: "l1".into(), name: "PT AIS".into() });
+        fake.tasks.lock().unwrap().insert("l1".into(), vec![
+            Task { id: "t1".into(), name: "bikin kontrak".into(), status: "to do".into(), due_date_ms: None },
+        ]);
+        let out = clickup_list_tasks(&fake, &serde_json::json!({ "project": "PT AIS" })).await.unwrap();
+        assert!(out.contains("bikin kontrak"), "{out}");
+        assert!(out.contains("t1"), "task id shown: {out}");
+    }
+
+    #[tokio::test]
+    async fn list_tasks_overdue_filters_across_projects() {
+        let fake = FakeClickUp::default();
+        fake.projects.lock().unwrap().push(Project { id: "l1".into(), name: "PT AIS".into() });
+        fake.tasks.lock().unwrap().insert("l1".into(), vec![
+            Task { id: "t1".into(), name: "lewat deadline".into(), status: "to do".into(), due_date_ms: Some(1_000) },
+            Task { id: "t2".into(), name: "tanpa due".into(), status: "to do".into(), due_date_ms: None },
+        ]);
+        let out = clickup_list_tasks(&fake, &serde_json::json!({ "scope": "overdue" })).await.unwrap();
+        assert!(out.contains("lewat deadline"), "{out}");
+        assert!(!out.contains("tanpa due"), "no-due task must not be overdue: {out}");
+    }
+
+    #[tokio::test]
+    async fn list_tasks_empty_is_explicit() {
+        let fake = FakeClickUp::default();
+        let out = clickup_list_tasks(&fake, &serde_json::json!({ "scope": "today" })).await.unwrap();
+        assert!(out.contains("tidak ada task"), "{out}");
+    }
+
+    #[tokio::test]
+    async fn complete_task_marks_done() {
+        let fake = FakeClickUp::default();
+        let out = clickup_complete_task(&fake, &serde_json::json!({ "task_id": "t1" })).await.unwrap();
+        assert!(out.contains("selesai"), "{out}");
+        assert_eq!(fake.completed.lock().unwrap().as_slice(), &["t1".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn complete_task_requires_id() {
+        let fake = FakeClickUp::default();
+        let err = clickup_complete_task(&fake, &serde_json::json!({})).await.unwrap_err();
+        assert!(err.contains("task_id"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn completing_a_task_removes_it_from_list_tasks() {
+        // Headline cross-phase invariant: list → complete → no longer listed.
+        let fake = FakeClickUp::default();
+        fake.projects.lock().unwrap().push(Project { id: "l1".into(), name: "PT AIS".into() });
+        fake.tasks.lock().unwrap().insert("l1".into(), vec![
+            Task { id: "t1".into(), name: "bikin kontrak".into(), status: "to do".into(), due_date_ms: None },
+        ]);
+        let before = clickup_list_tasks(&fake, &serde_json::json!({ "project": "PT AIS" })).await.unwrap();
+        assert!(before.contains("bikin kontrak"), "{before}");
+
+        clickup_complete_task(&fake, &serde_json::json!({ "task_id": "t1" })).await.unwrap();
+
+        let after = clickup_list_tasks(&fake, &serde_json::json!({ "project": "PT AIS" })).await.unwrap();
+        assert!(!after.contains("bikin kontrak"), "completed task still listed: {after}");
+    }
+
+    #[tokio::test]
+    async fn create_task_passes_billable_and_amount() {
+        let fake = FakeClickUp::default();
+        fake.projects.lock().unwrap().push(Project { id: "l1".into(), name: "PT AIS".into() });
+        clickup_create_task(&fake, &serde_json::json!({
+            "project": "PT AIS", "title": "landing page", "billable": true, "amount": 10000000
+        })).await.unwrap();
+        assert_eq!(fake.created_billables.lock().unwrap()[0], Some(true));
+        assert_eq!(fake.created_amounts.lock().unwrap()[0], Some(10_000_000.0));
+    }
+
+    #[tokio::test]
+    async fn create_task_without_billable_is_none() {
+        let fake = FakeClickUp::default();
+        fake.projects.lock().unwrap().push(Project { id: "l1".into(), name: "PT AIS".into() });
+        clickup_create_task(&fake, &serde_json::json!({ "project": "PT AIS", "title": "x" })).await.unwrap();
+        assert_eq!(fake.created_billables.lock().unwrap()[0], None);
+        assert_eq!(fake.created_amounts.lock().unwrap()[0], None);
     }
 
     #[tokio::test]

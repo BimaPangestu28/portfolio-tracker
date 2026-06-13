@@ -13,7 +13,7 @@ import {
   PerformanceSchema,
   WhatsappStatusSchema,
   TelegramStatusSchema, TelegramLinkCodeSchema,
-  MoverSchema, BenchmarkRowSchema,
+  MoverSchema, BenchmarkRowSchema, EventSchema,
   type Account, type Category, type Instrument, type Transaction, type ReviewItem,
   type CashflowCategory, type Cashflow, type Connector, type Goal,
 } from "./schemas";
@@ -253,3 +253,26 @@ export const useUnlinkTelegram = () => {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["telegram-status"] }); },
   });
 };
+
+// ── Agenda: event hooks ───────────────────────────────────────────────────────
+
+export const useEvents = (fromZ: string, toZ: string) =>
+  useQuery({
+    queryKey: ["events", fromZ, toZ],
+    queryFn: () =>
+      api.get(`/events?from=${encodeURIComponent(fromZ)}&to=${encodeURIComponent(toZ)}`, z.array(EventSchema)),
+  });
+
+type EventBody = { title: string; start_at: string; location?: string | null; notes?: string | null };
+
+export const useCreateEvent = () =>
+  useInvalidatingMutation((b: EventBody) => api.post("/events", EventSchema, b), ["events"]);
+
+export const useUpdateEvent = () =>
+  useInvalidatingMutation(
+    (args: { id: number; patch: EventBody }) => api.patch(`/events/${args.id}`, EventSchema, args.patch),
+    ["events"],
+  );
+
+export const useCancelEvent = () =>
+  useInvalidatingMutation((id: number) => api.post(`/events/${id}/cancel`, z.unknown(), {}), ["events"]);

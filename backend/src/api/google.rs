@@ -50,15 +50,41 @@ pub async fn callback(State(s): State<AppState>, Query(q): Query<CallbackQuery>)
 }
 
 #[derive(Serialize)]
-pub struct StatusOut { pub status: String, pub last_error: Option<String> }
+pub struct StatusOut {
+    pub status: String,
+    pub last_error: Option<String>,
+    pub last_synced_at: Option<String>,
+}
 
 /// Connection status for the Settings UI.
 pub async fn status(State(s): State<AppState>) -> Result<Json<StatusOut>, AppError> {
     let row = crate::repo::google_integration::get(&s.db).await.map_err(AppError::Other)?;
     Ok(Json(match row {
-        Some(r) => StatusOut { status: r.status, last_error: r.last_error },
-        None => StatusOut { status: "disconnected".into(), last_error: None },
+        Some(r) => StatusOut { status: r.status, last_error: r.last_error, last_synced_at: r.last_synced_at },
+        None => StatusOut { status: "disconnected".into(), last_error: None, last_synced_at: None },
     }))
+}
+
+#[derive(Serialize)]
+pub struct SyncOut {
+    pub status: String,
+    pub last_error: Option<String>,
+    pub last_synced_at: Option<String>,
+    pub pushed: usize,
+    pub imported: usize,
+}
+
+/// Run one sync cycle on demand (the "Sync now" button) and report the result.
+/// Surfaces the resulting status/last_error so a silently-failing connection
+/// becomes visible immediately.
+pub async fn sync(State(s): State<AppState>) -> Result<Json<SyncOut>, AppError> {
+    let summary = crate::google::engine::run_cycle(&s.db).await.map_err(AppError::Other)?;
+    let row = crate::repo::google_integration::get(&s.db).await.map_err(AppError::Other)?;
+    let (status, last_error, last_synced_at) = match row {
+        Some(r) => (r.status, r.last_error, r.last_synced_at),
+        None => ("disconnected".into(), None, None),
+    };
+    Ok(Json(SyncOut { status, last_error, last_synced_at, pushed: summary.pushed, imported: summary.imported }))
 }
 
 /// Revoke + delete the connection.
@@ -71,5 +97,5 @@ pub async fn disconnect(State(s): State<AppState>) -> Result<Json<StatusOut>, Ap
         }
     }
     crate::repo::google_integration::delete(&s.db).await.map_err(AppError::Other)?;
-    Ok(Json(StatusOut { status: "disconnected".into(), last_error: None }))
+    Ok(Json(StatusOut { status: "disconnected".into(), last_error: None, last_synced_at: None }))
 }

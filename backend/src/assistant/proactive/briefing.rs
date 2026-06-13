@@ -20,6 +20,44 @@ pub struct BriefingData {
     pub movers: Vec<Mover>,
     pub pending_reviews: usize,
     pub memory_facts: Vec<crate::assistant::memory::MemoryFact>,
+    /// Overdue/due-today ClickUp tasks grouped by project. `None` when ClickUp
+    /// isn't configured (section omitted); `Some(empty)` when nothing is due.
+    pub clickup_due: Option<Vec<(String, Vec<String>)>>,
+}
+
+/// One briefing line for a task that is overdue or due today; None otherwise
+/// (future due date, or no due date — those don't belong in a "due" view).
+fn clickup_due_line(task: &crate::clickup::client::Task, now_ms: i64, end_today_ms: i64) -> Option<String> {
+    let due = task.due_date_ms?;
+    if due < now_ms {
+        Some(format!("{} (overdue)", task.name))
+    } else if due <= end_today_ms {
+        Some(format!("{} (hari ini)", task.name))
+    } else {
+        None
+    }
+}
+
+/// Collect overdue/due-today tasks grouped by project name.
+async fn gather_clickup_due(
+    api: &dyn crate::clickup::ClickUpApi,
+) -> anyhow::Result<Vec<(String, Vec<String>)>> {
+    let now = chrono::Utc::now();
+    let now_ms = now.timestamp_millis();
+    let end_today = crate::assistant::time::end_of_today_wib_ms(now);
+    let projects = api.list_projects().await?;
+    let mut grouped = Vec::new();
+    for project in projects {
+        let tasks = api.list_tasks(&project.id).await?;
+        let lines: Vec<String> = tasks
+            .iter()
+            .filter_map(|t| clickup_due_line(t, now_ms, end_today))
+            .collect();
+        if !lines.is_empty() {
+            grouped.push((project.name, lines));
+        }
+    }
+    Ok(grouped)
 }
 
 /// Indonesian weekday name for the briefing header.
@@ -140,6 +178,14 @@ pub async fn gather(db: &Db) -> anyhow::Result<BriefingData> {
         None => Vec::new(),
     };
 
+    let clickup_due = match crate::clickup::ClickUpClient::from_env() {
+        Ok(api) => Some(gather_clickup_due(&api).await.unwrap_or_else(|e| {
+            tracing::warn!("briefing: clickup due tasks unavailable: {e:#}");
+            Vec::new()
+        })),
+        Err(_) => None, // not configured → section omitted
+    };
+
     Ok(BriefingData {
         date_wib: today,
         weekday: weekday_id(now_wib.weekday()).to_string(),
@@ -152,6 +198,7 @@ pub async fn gather(db: &Db) -> anyhow::Result<BriefingData> {
         movers,
         pending_reviews,
         memory_facts,
+        clickup_due,
     })
 }
 
@@ -236,6 +283,20 @@ pub fn render_data_block(d: &BriefingData) -> String {
     }
     out.push_str(&format!("Review pending: {}\n", d.pending_reviews));
 
+    if let Some(due) = &d.clickup_due {
+        out.push_str("Task ClickUp jatuh tempo:\n");
+        if due.is_empty() {
+            out.push_str("(tidak ada)\n");
+        } else {
+            for (project, lines) in due {
+                out.push_str(&format!("- {project}:\n"));
+                for line in lines {
+                    out.push_str(&format!("  - {line}\n"));
+                }
+            }
+        }
+    }
+
     if !d.memory_facts.is_empty() {
         out.push_str("Fakta tersimpan yang mungkin relevan:\n");
         for f in &d.memory_facts {
@@ -284,7 +345,42 @@ mod tests {
             movers: vec![],
             pending_reviews: 0,
             memory_facts: vec![],
+            clickup_due: None,
         }
+    }
+
+    #[test]
+    fn clickup_due_line_tags_overdue_and_today_only() {
+        use crate::clickup::client::Task;
+        let now = 100_000i64;
+        let end = 200_000i64;
+        let mk = |due: Option<i64>| Task {
+            id: "t".into(),
+            name: "kerjaan".into(),
+            status: "to do".into(),
+            due_date_ms: due,
+        };
+        assert_eq!(clickup_due_line(&mk(Some(50_000)), now, end).as_deref(), Some("kerjaan (overdue)"));
+        assert_eq!(clickup_due_line(&mk(Some(150_000)), now, end).as_deref(), Some("kerjaan (hari ini)"));
+        assert_eq!(clickup_due_line(&mk(Some(300_000)), now, end), None);
+        assert_eq!(clickup_due_line(&mk(None), now, end), None);
+    }
+
+    #[test]
+    fn clickup_section_renders_grouped_due_tasks() {
+        let mut d = data();
+        d.clickup_due = Some(vec![("PT AIS".into(), vec!["landing page (overdue)".into()])]);
+        let block = render_data_block(&d);
+        assert!(block.contains("Task ClickUp jatuh tempo:"), "{block}");
+        assert!(block.contains("PT AIS"), "{block}");
+        assert!(block.contains("landing page (overdue)"), "{block}");
+    }
+
+    #[test]
+    fn clickup_section_omitted_when_unconfigured() {
+        let d = data(); // clickup_due = None
+        let block = render_data_block(&d);
+        assert!(!block.contains("Task ClickUp"), "{block}");
     }
 
     #[test]
