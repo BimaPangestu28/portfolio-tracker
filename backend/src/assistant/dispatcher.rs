@@ -563,13 +563,17 @@ async fn clickup_time_report(
     };
     let (start_ms, end_ms) = crate::clickup::report::period_window(scope, chrono::Utc::now());
     let mut entries = api.time_entries(start_ms, end_ms).await.map_err(|e| format!("{e}"))?;
-    if let Some(project) = str_arg(input, "project") {
+    let project_filter = str_arg(input, "project");
+    if let Some(project) = project_filter {
         let needle = project.to_lowercase();
         entries.retain(|e| e.project_name.to_lowercase() == needle);
     }
     let (projects, grand_total) = crate::clickup::report::aggregate_hours(&entries);
     if projects.is_empty() {
-        return Ok("belum ada jam tercatat untuk periode itu".into());
+        return Ok(match project_filter {
+            Some(project) => format!("nggak ada jam tercatat di project '{project}' untuk periode itu"),
+            None => "belum ada jam tercatat untuk periode itu".into(),
+        });
     }
     let label = match scope { "today" => "Hari ini", "month" => "Bulan ini", _ => "Minggu ini" };
     let mut out = format!("{label}: {}\n", crate::clickup::report::format_duration(grand_total));
@@ -1642,6 +1646,30 @@ mod tests {
         let fake = FakeClickUp::default();
         let out = clickup_time_report(&fake, &serde_json::json!({ "scope": "week" })).await.unwrap();
         assert!(out.to_lowercase().contains("belum ada"), "{out}");
+    }
+
+    #[tokio::test]
+    async fn start_timer_ambiguous_task_errors() {
+        let fake = FakeClickUp::default();
+        fake.projects.lock().unwrap().push(Project { id: "l1".into(), name: "PT AIS".into() });
+        fake.tasks.lock().unwrap().insert("l1".into(), vec![
+            Task { id: "t1".into(), name: "revisi desain".into(), status: "open".into(), due_date_ms: None },
+            Task { id: "t2".into(), name: "revisi kontrak".into(), status: "open".into(), due_date_ms: None },
+        ]);
+        // "revisi" substring-matches both → ambiguous.
+        let err = clickup_start_timer(&fake, &serde_json::json!({ "task": "revisi" })).await.unwrap_err();
+        assert!(err.to_lowercase().contains("beberapa") || err.to_lowercase().contains("spesifik"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn time_report_project_filter_miss_is_project_specific() {
+        let fake = FakeClickUp::default();
+        fake.entries.lock().unwrap().push(TimeEntry {
+            task_id: "t1".into(), task_name: "landing".into(), project_name: "PT AIS".into(),
+            duration_ms: 3_600_000, start_ms: 0, billable: false,
+        });
+        let out = clickup_time_report(&fake, &serde_json::json!({ "scope": "week", "project": "Klien B" })).await.unwrap();
+        assert!(out.contains("Klien B"), "{out}");
     }
 
     #[tokio::test]
