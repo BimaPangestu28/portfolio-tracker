@@ -29,6 +29,11 @@ services:
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
       GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-}
       GOOGLE_TOKEN_ENC_KEY: ${GOOGLE_TOKEN_ENC_KEY:-}
+      # Optional: Upwork OAuth sync. Leave unset to disable.
+      UPWORK_CLIENT_ID: ${UPWORK_CLIENT_ID:-}
+      UPWORK_CLIENT_SECRET: ${UPWORK_CLIENT_SECRET:-}
+      UPWORK_REDIRECT_URI: ${UPWORK_REDIRECT_URI:-}
+      UPWORK_TOKEN_ENC_KEY: ${UPWORK_TOKEN_ENC_KEY:-}
     volumes:
       - backend_data:/data
     expose:

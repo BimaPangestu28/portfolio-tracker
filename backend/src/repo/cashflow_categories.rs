@@ -42,6 +42,27 @@ pub async fn list(db: &Db) -> anyhow::Result<Vec<CashflowCategoryRow>> {
         .fetch_all(db).await?)
 }
 
+/// Return the category with this name, creating it if absent. Used by
+/// connectors that must attach income to a stable category.
+pub async fn ensure_by_name(db: &Db, name: &str, kind: &str) -> anyhow::Result<CashflowCategoryRow> {
+    if let Some(row) = sqlx::query_as::<_, CashflowCategoryRow>(
+        "SELECT * FROM cashflow_category WHERE name = ?",
+    )
+    .bind(name)
+    .fetch_optional(db)
+    .await?
+    {
+        return Ok(row);
+    }
+    create(db, &NewCashflowCategory {
+        name: name.to_string(),
+        kind: kind.to_string(),
+        monthly_budget: None,
+        color: None,
+    })
+    .await
+}
+
 pub async fn delete(db: &Db, id: i64) -> anyhow::Result<()> {
     sqlx::query("DELETE FROM cashflow_category WHERE id = ?").bind(id).execute(db).await?;
     Ok(())
@@ -89,5 +110,15 @@ mod tests {
         assert!(create(&db, &bad).await.is_err());
         // nothing persisted
         assert_eq!(list(&db).await.unwrap().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn ensure_by_name_is_idempotent() {
+        let db = mem_db().await;
+        let a = ensure_by_name(&db, "Upwork", "income").await.unwrap();
+        let b = ensure_by_name(&db, "Upwork", "income").await.unwrap();
+        assert_eq!(a.id, b.id, "second call must reuse the same category");
+        assert_eq!(a.kind, "income");
+        assert_eq!(list(&db).await.unwrap().len(), 1);
     }
 }
