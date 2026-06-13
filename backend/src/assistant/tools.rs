@@ -209,6 +209,15 @@ pub fn definitions() -> serde_json::Value {
                     "scope": { "type": "string", "enum": ["open", "today", "overdue"], "description": "open (default), today (due today), or overdue" }
                 }
             }
+        },
+        {
+            "name": "complete_task",
+            "description": "Mark a freelance task complete in ClickUp. Get the task_id from list_tasks (shown in brackets).",
+            "input_schema": {
+                "type": "object",
+                "properties": { "task_id": { "type": "string", "description": "ClickUp task id from list_tasks" } },
+                "required": ["task_id"]
+            }
         }
     ])
 }
@@ -239,6 +248,7 @@ mod tests {
                 "create_project",
                 "create_task",
                 "list_tasks",
+                "complete_task",
             ]
         );
         for tool in defs.as_array().unwrap() {
@@ -276,5 +286,6 @@ mod tests {
         );
         assert_eq!(find("create_project")["input_schema"]["required"], serde_json::json!(["name"]));
         assert_eq!(find("create_task")["input_schema"]["required"], serde_json::json!(["project", "title"]));
+        assert_eq!(find("complete_task")["input_schema"]["required"], serde_json::json!(["task_id"]));
     }
 }

@@ -42,6 +42,10 @@ pub async fn dispatch(db: &Db, name: &str, input: &serde_json::Value) -> Result<
             Ok(api) => clickup_list_tasks(&api, input).await,
             Err(e) => Err(format!("clickup belum dikonfigurasi: {e}")),
         },
+        "complete_task" => match crate::clickup::ClickUpClient::from_env() {
+            Ok(api) => clickup_complete_task(&api, input).await,
+            Err(e) => Err(format!("clickup belum dikonfigurasi: {e}")),
+        },
         _ => Err(format!("unknown tool: {name}")),
     }
 }
@@ -443,6 +447,15 @@ async fn clickup_list_tasks(
         return Ok("tidak ada task".into());
     }
     Ok(out)
+}
+
+async fn clickup_complete_task(
+    api: &dyn crate::clickup::ClickUpApi,
+    input: &serde_json::Value,
+) -> Result<String, String> {
+    let task_id = str_arg(input, "task_id").ok_or("missing required argument 'task_id'")?;
+    api.complete_task(task_id).await.map_err(|e| format!("{e}"))?;
+    Ok(format!("task {task_id} ditandai selesai"))
 }
 
 async fn clickup_list_projects(api: &dyn crate::clickup::ClickUpApi) -> Result<String, String> {
@@ -1181,6 +1194,21 @@ mod tests {
         let fake = FakeClickUp::default();
         let out = clickup_list_tasks(&fake, &serde_json::json!({ "scope": "today" })).await.unwrap();
         assert!(out.contains("tidak ada task"), "{out}");
+    }
+
+    #[tokio::test]
+    async fn complete_task_marks_done() {
+        let fake = FakeClickUp::default();
+        let out = clickup_complete_task(&fake, &serde_json::json!({ "task_id": "t1" })).await.unwrap();
+        assert!(out.contains("selesai"), "{out}");
+        assert_eq!(fake.completed.lock().unwrap().as_slice(), &["t1".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn complete_task_requires_id() {
+        let fake = FakeClickUp::default();
+        let err = clickup_complete_task(&fake, &serde_json::json!({})).await.unwrap_err();
+        assert!(err.contains("task_id"), "{err}");
     }
 
     #[tokio::test]
