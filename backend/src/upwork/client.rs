@@ -43,6 +43,15 @@ pub struct InvitationBatch {
     pub next_cursor: Option<String>,
 }
 
+/// An active Upwork contract (engagement).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Contract {
+    pub id: String,
+    pub title: String,
+    pub client_name: String,
+    pub status: String,
+}
+
 #[async_trait]
 pub trait UpworkClient: Send + Sync {
     /// Fetch transactions newer than `cursor` (None = from the beginning).
@@ -51,6 +60,8 @@ pub trait UpworkClient: Send + Sync {
     async fn fetch_marketplace_jobs(&self, query: &str) -> Result<Vec<MarketplaceJob>, ClientError>;
     /// Fetch the freelancer's direct invitations (None cursor = from the beginning).
     async fn fetch_invitations(&self, cursor: Option<&str>) -> Result<InvitationBatch, ClientError>;
+    /// Fetch the freelancer's active contracts.
+    async fn fetch_contracts(&self) -> Result<Vec<Contract>, ClientError>;
 }
 
 const GRAPHQL_ENDPOINT: &str = "https://api.upwork.com/graphql";
@@ -183,6 +194,35 @@ impl UpworkClient for HttpUpwork {
         let next_cursor = v["data"]["freelancerInvitations"]["pageInfo"]["endCursor"].as_str().map(|s| s.to_string());
         Ok(InvitationBatch { invitations, next_cursor })
     }
+
+    async fn fetch_contracts(&self) -> Result<Vec<Contract>, ClientError> {
+        let gql = r#"
+            query {
+              contracts(status: ACTIVE) {
+                edges { node { id title client { name } status } }
+              }
+            }"#;
+        let body = serde_json::json!({ "query": gql });
+        let resp = self.http.post(GRAPHQL_ENDPOINT).bearer_auth(&self.access_token).json(&body)
+            .send().await.map_err(|e| ClientError::Http(e.to_string()))?;
+        if !resp.status().is_success() {
+            return Err(ClientError::Http(format!("{}", resp.status())));
+        }
+        let v: serde_json::Value = resp.json().await.map_err(|e| ClientError::Parse(e.to_string()))?;
+        let edges = v["data"]["contracts"]["edges"]
+            .as_array().ok_or_else(|| ClientError::Parse("missing contracts edges".into()))?;
+        let mut out = Vec::with_capacity(edges.len());
+        for e in edges {
+            let n = &e["node"];
+            out.push(Contract {
+                id: n["id"].as_str().unwrap_or_default().to_string(),
+                title: n["title"].as_str().unwrap_or_default().to_string(),
+                client_name: n["client"]["name"].as_str().unwrap_or_default().to_string(),
+                status: n["status"].as_str().unwrap_or_default().to_string(),
+            });
+        }
+        Ok(out)
+    }
 }
 
 #[cfg(test)]
@@ -198,6 +238,7 @@ pub mod testkit {
         pub invitations: Mutex<Vec<Invitation>>,
         pub seen_cursor: Mutex<Option<String>>,
         pub seen_query: Mutex<Option<String>>,
+        pub contracts: Mutex<Vec<Contract>>,
     }
     impl FakeUpwork {
         pub fn with(txns: Vec<UpworkTransaction>, next_cursor: Option<String>) -> Self {
@@ -207,12 +248,18 @@ pub mod testkit {
                 invitations: Mutex::new(Vec::new()),
                 seen_cursor: Mutex::new(None),
                 seen_query: Mutex::new(None),
+                contracts: Mutex::new(Vec::new()),
             }
         }
         pub fn with_notifications(jobs: Vec<MarketplaceJob>, invitations: Vec<Invitation>) -> Self {
             let mut f = Self::with(Vec::new(), None);
             *f.jobs.get_mut().unwrap() = jobs;
             *f.invitations.get_mut().unwrap() = invitations;
+            f
+        }
+        pub fn with_contracts(contracts: Vec<Contract>) -> Self {
+            let mut f = Self::with(Vec::new(), None);
+            *f.contracts.get_mut().unwrap() = contracts;
             f
         }
     }
@@ -230,6 +277,9 @@ pub mod testkit {
         async fn fetch_invitations(&self, cursor: Option<&str>) -> Result<InvitationBatch, ClientError> {
             *self.seen_cursor.lock().unwrap() = cursor.map(|c| c.to_string());
             Ok(InvitationBatch { invitations: self.invitations.lock().unwrap().clone(), next_cursor: None })
+        }
+        async fn fetch_contracts(&self) -> Result<Vec<Contract>, ClientError> {
+            Ok(self.contracts.lock().unwrap().clone())
         }
     }
 }
