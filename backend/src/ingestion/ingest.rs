@@ -1,6 +1,6 @@
 use crate::db::Db;
 use crate::ingestion::extract::{parse_extraction, ExtractedEntry};
-use crate::ingestion::matching::{suggest_account, suggest_instrument_for_entry};
+use crate::ingestion::matching::{resolve_account, suggest_instrument_for_entry};
 use crate::llm::claude::Part;
 use crate::llm::native::NativeLlmClient;
 use crate::repo::review_items::{self, NewReviewItem};
@@ -121,7 +121,10 @@ pub async fn ingest_batch(db: &Db, client: &NativeLlmClient, batch_id: &str, fil
         for entry in &extraction.entries {
             let payload = serde_json::to_string(entry)?;
             let sug_ins = suggest_instrument_for_entry(db, entry.symbol.as_deref(), entry.instrument_name.as_deref()).await?;
-            let sug_acc = match &entry.account_hint { Some(a) => suggest_account(db, a).await?, None => None };
+            // Resolve the account against the DB (exact name, then this
+            // instrument's history, then a single fuzzy match) so previously-seen
+            // instruments don't show up as "belum dikenali".
+            let sug_acc = resolve_account(db, entry.account_hint.as_deref(), sug_ins).await?;
             let row = review_items::create(db, &NewReviewItem {
                 batch_id,
                 source_kind: &kind,
