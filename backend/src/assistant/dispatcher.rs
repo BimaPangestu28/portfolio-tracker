@@ -659,6 +659,13 @@ async fn list_pending_reviews(db: &Db) -> Result<String, String> {
         }
         out.push('\n');
     }
+    // The instrument/account above are auto-detected from the photo, not
+    // authoritative — signal that the assistant may correct a wrong one rather
+    // than treat the detection as final.
+    out.push_str(
+        "(instrumen & akun di atas hasil deteksi otomatis dari foto, bukan final — \
+         kalau ada yang salah, override dengan account_id/instrument_id yang benar saat confirm_review)\n",
+    );
     Ok(out)
 }
 
@@ -1003,6 +1010,67 @@ mod tests {
         let item = crate::repo::review_items::get(&db, id).await.unwrap();
         assert_eq!(item.status, "confirmed");
         assert!(item.created_txn_id.is_some());
+    }
+
+    /// The account was already auto-detected (wrongly) as Stockbit at ingest;
+    /// passing the right account must override it, not be refused because the
+    /// item isn't 'belum dikenali'. Locks the mechanism the affordance relies on.
+    #[tokio::test]
+    async fn confirm_review_overrides_an_already_detected_wrong_account() {
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        let instrument = crate::repo::instruments::create(&db, &crate::repo::instruments::NewInstrument {
+            symbol: "VXUS".into(), name: "Vanguard Total Intl".into(), instrument_type: "etf".into(),
+            native_currency: "USD".into(), category_id: None, price_source: "manual".into(),
+            decimals: Some(8), note: None,
+        }).await.unwrap();
+        let stockbit = crate::repo::accounts::create(&db, &crate::repo::accounts::NewAccount {
+            name: "Stockbit".into(), account_type: "broker".into(), institution: None,
+            native_currency: "IDR".into(), note: None,
+        }).await.unwrap();
+        let nanovest = crate::repo::accounts::create(&db, &crate::repo::accounts::NewAccount {
+            name: "Nanovest".into(), account_type: "broker".into(), institution: None,
+            native_currency: "IDR".into(), note: None,
+        }).await.unwrap();
+        // OCR read "Stockbit" → account resolved to the wrong one at ingest.
+        let id = seed_pending_item(&db, Some(stockbit.id), Some(instrument.id)).await;
+
+        let out = dispatch(&db, "confirm_review", &serde_json::json!({
+            "review_id": id, "account_id": nanovest.id
+        })).await.unwrap();
+        assert!(out.contains("dibuat"), "{out}");
+
+        let txns = crate::repo::transactions::list_all(&db).await.unwrap();
+        assert_eq!(txns.len(), 1);
+        assert_eq!(txns[0].account_id, nanovest.id, "override must switch Stockbit -> Nanovest");
+        let item = crate::repo::review_items::get(&db, id).await.unwrap();
+        assert_eq!(item.suggested_account_id, Some(nanovest.id));
+    }
+
+    /// list_pending_reviews must hint that the shown account/instrument is an OCR
+    /// guess the assistant can correct — otherwise a confidently-wrong account
+    /// looks authoritative and the assistant won't override it.
+    #[tokio::test]
+    async fn list_pending_reviews_notes_detected_values_are_correctable() {
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        let instrument = crate::repo::instruments::create(&db, &crate::repo::instruments::NewInstrument {
+            symbol: "VXUS".into(), name: "Vanguard Total Intl".into(), instrument_type: "etf".into(),
+            native_currency: "USD".into(), category_id: None, price_source: "manual".into(),
+            decimals: Some(8), note: None,
+        }).await.unwrap();
+        let acc = crate::repo::accounts::create(&db, &crate::repo::accounts::NewAccount {
+            name: "Stockbit".into(), account_type: "broker".into(), institution: None,
+            native_currency: "IDR".into(), note: None,
+        }).await.unwrap();
+        seed_pending_item(&db, Some(acc.id), Some(instrument.id)).await;
+
+        let out = dispatch(&db, "list_pending_reviews", &serde_json::json!({}))
+            .await
+            .unwrap()
+            .to_lowercase();
+        assert!(
+            out.contains("override"),
+            "listing should hint detected account/instrument is correctable: {out}"
+        );
     }
 
     #[tokio::test]
