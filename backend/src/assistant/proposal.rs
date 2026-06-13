@@ -28,6 +28,53 @@ pub fn build_data_block(job_text: &str, notes: Option<&str>, facts: &[MemoryFact
     block
 }
 
+use crate::assistant::memory::MemoryClient;
+use crate::llm::claude::{ClaudeClient, Part};
+
+/// How many memory facts to pull for tailoring.
+const FACT_LIMIT: u32 = 8;
+/// Cap the memory query length; a long job description is noise for retrieval.
+const QUERY_MAX_CHARS: usize = 500;
+
+/// The message returned when the LLM cannot produce a draft. Plain text the
+/// agent relays as-is — never a partial proposal, never an auto-submit.
+fn fallback() -> String {
+    "⚠️ Couldn't draft the proposal right now (LLM unavailable). Please try again in a bit.".to_string()
+}
+
+/// Draft a proposal for `job_text`. Pulls memory facts (best-effort), builds the
+/// data block, and makes one focused LLM call. Degrades to `fallback()` on any
+/// LLM failure; degrades to no-facts on any memory failure (both logged).
+pub async fn draft(job_text: &str, notes: Option<&str>) -> String {
+    let facts = match MemoryClient::from_env() {
+        Some(client) => {
+            let query: String = job_text.chars().take(QUERY_MAX_CHARS).collect();
+            client.search(&query, FACT_LIMIT).await
+        }
+        None => Vec::new(),
+    };
+    let block = build_data_block(job_text, notes, &facts);
+
+    let client = match ClaudeClient::from_env() {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::warn!("proposal draft: llm unavailable ({e}); using fallback");
+            return fallback();
+        }
+    };
+    match client.complete(PROPOSAL_SYSTEM, &[Part::Text(block)]).await {
+        Ok(text) if !text.trim().is_empty() => text,
+        Ok(_) => {
+            tracing::warn!("proposal draft: empty reply; using fallback");
+            fallback()
+        }
+        Err(e) => {
+            tracing::warn!("proposal draft failed ({e}); using fallback");
+            fallback()
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -69,5 +116,12 @@ mod tests {
         assert!(lower.contains("english"));
         assert!(lower.contains("never invent"));
         assert!(lower.contains("no markdown"));
+    }
+
+    #[test]
+    fn fallback_is_plain_and_non_committal() {
+        let msg = fallback();
+        assert!(msg.contains("Couldn't draft"));
+        assert!(!msg.to_lowercase().contains("submitted"));
     }
 }
