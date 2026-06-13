@@ -522,7 +522,7 @@ mod tests {
     #[tokio::test]
     async fn todo_done_text_completes_open_todos_once() {
         let db = crate::db::connect("sqlite::memory:").await.unwrap();
-        let todo = crate::repo::todos::create(&db, "bayar listrik", None, None).await.unwrap();
+        let todo = crate::repo::todos::create(&db, "bayar listrik", None, None, None, None).await.unwrap();
         let first = todo_done_text(&db, todo.id).await;
         assert!(first.contains("selesai"), "{first}");
         let again = todo_done_text(&db, todo.id).await;

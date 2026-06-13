@@ -83,7 +83,7 @@ async fn create_todo(db: &Db, input: &serde_json::Value) -> Result<String, Strin
         }
         None => None,
     };
-    let todo = crate::repo::todos::create(db, title, str_arg(input, "notes"), due_at.as_deref())
+    let todo = crate::repo::todos::create(db, title, str_arg(input, "notes"), due_at.as_deref(), None, None)
         .await
         .map_err(|e| format!("db error: {e}"))?;
     Ok(format!("created todo #{} '{}'", todo.id, todo.title))
@@ -619,7 +619,7 @@ mod tests {
     async fn list_todos_renders_rows_or_empty_note() {
         let db = mem_db().await;
         assert_eq!(dispatch(&db, "list_todos", &serde_json::json!({})).await.unwrap(), "no open todos");
-        crate::repo::todos::create(&db, "beli kado", None, None).await.unwrap();
+        crate::repo::todos::create(&db, "beli kado", None, None, None, None).await.unwrap();
         let out = dispatch(&db, "list_todos", &serde_json::json!({})).await.unwrap();
         assert!(out.contains("beli kado"), "{out}");
     }
@@ -627,7 +627,7 @@ mod tests {
     #[tokio::test]
     async fn complete_todo_round_trips_and_errors_when_done() {
         let db = mem_db().await;
-        let todo = crate::repo::todos::create(&db, "x", None, None).await.unwrap();
+        let todo = crate::repo::todos::create(&db, "x", None, None, None, None).await.unwrap();
         let out = dispatch(&db, "complete_todo", &serde_json::json!({ "id": todo.id })).await.unwrap();
         assert!(out.contains("done"), "{out}");
         let err = dispatch(&db, "complete_todo", &serde_json::json!({ "id": todo.id })).await.unwrap_err();

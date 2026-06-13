@@ -409,6 +409,8 @@ mod tests {
             status: "open".into(),
             created_at: String::new(),
             completed_at: None,
+            priority: None,
+            estimate_minutes: None,
         }];
         d.pending_reviews = 2;
         d.memory_facts = vec![crate::assistant::memory::MemoryFact {
@@ -464,6 +466,8 @@ mod tests {
             status: "open".into(),
             created_at: String::new(),
             completed_at: None,
+            priority: None,
+            estimate_minutes: None,
         }
     }
 

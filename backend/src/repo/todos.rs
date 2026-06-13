@@ -12,6 +12,8 @@ pub struct TodoRow {
     pub status: String,
     pub created_at: String,
     pub completed_at: Option<String>,
+    pub priority: Option<String>,
+    pub estimate_minutes: Option<i64>,
 }
 
 pub async fn create(
@@ -19,15 +21,20 @@ pub async fn create(
     title: &str,
     notes: Option<&str>,
     due_at: Option<&str>,
+    priority: Option<&str>,
+    estimate_minutes: Option<i64>,
 ) -> anyhow::Result<TodoRow> {
     let now = chrono::Utc::now().to_rfc3339();
     let id = sqlx::query(
-        "INSERT INTO todos (title, notes, due_at, status, created_at) VALUES (?, ?, ?, 'open', ?)",
+        "INSERT INTO todos (title, notes, due_at, status, created_at, priority, estimate_minutes) \
+         VALUES (?, ?, ?, 'open', ?, ?, ?)",
     )
     .bind(title)
     .bind(notes)
     .bind(due_at)
     .bind(&now)
+    .bind(priority)
+    .bind(estimate_minutes)
     .execute(db)
     .await?
     .last_insert_rowid();
@@ -97,14 +104,23 @@ mod tests {
     #[tokio::test]
     async fn create_then_get_round_trips() {
         let db = mem_db().await;
-        let todo = create(&db, "bayar listrik", Some("token PLN"), Some("2026-06-12T02:00:00Z"))
-            .await
-            .unwrap();
+        let todo = create(
+            &db,
+            "bayar listrik",
+            Some("token PLN"),
+            Some("2026-06-12T02:00:00Z"),
+            Some("high"),
+            Some(30),
+        )
+        .await
+        .unwrap();
         assert_eq!(todo.title, "bayar listrik");
         assert_eq!(todo.notes.as_deref(), Some("token PLN"));
         assert_eq!(todo.due_at.as_deref(), Some("2026-06-12T02:00:00Z"));
         assert_eq!(todo.status, "open");
         assert!(todo.completed_at.is_none());
+        assert_eq!(todo.priority.as_deref(), Some("high"));
+        assert_eq!(todo.estimate_minutes, Some(30));
         let fetched = get(&db, todo.id).await.unwrap();
         assert_eq!(fetched.id, todo.id);
     }
@@ -112,10 +128,10 @@ mod tests {
     #[tokio::test]
     async fn list_open_orders_by_due_then_id_and_excludes_done() {
         let db = mem_db().await;
-        let no_due = create(&db, "no due", None, None).await.unwrap();
-        let later = create(&db, "later", None, Some("2026-06-20T00:00:00Z")).await.unwrap();
-        let sooner = create(&db, "sooner", None, Some("2026-06-12T00:00:00Z")).await.unwrap();
-        let finished = create(&db, "done already", None, None).await.unwrap();
+        let no_due = create(&db, "no due", None, None, None, None).await.unwrap();
+        let later = create(&db, "later", None, Some("2026-06-20T00:00:00Z"), None, None).await.unwrap();
+        let sooner = create(&db, "sooner", None, Some("2026-06-12T00:00:00Z"), None, None).await.unwrap();
+        let finished = create(&db, "done already", None, None, None, None).await.unwrap();
         complete(&db, finished.id).await.unwrap();
 
         let open = list_open(&db).await.unwrap();
@@ -127,7 +143,7 @@ mod tests {
     #[tokio::test]
     async fn complete_marks_done_once() {
         let db = mem_db().await;
-        let todo = create(&db, "x", None, None).await.unwrap();
+        let todo = create(&db, "x", None, None, None, None).await.unwrap();
         assert!(complete(&db, todo.id).await.unwrap());
         let done = get(&db, todo.id).await.unwrap();
         assert_eq!(done.status, "done");
@@ -145,9 +161,9 @@ mod tests {
     #[tokio::test]
     async fn completed_since_and_created_count() {
         let db = mem_db().await;
-        let a = create(&db, "old done", None, None).await.unwrap();
+        let a = create(&db, "old done", None, None, None, None).await.unwrap();
         complete(&db, a.id).await.unwrap();
-        let b = create(&db, "new open", None, None).await.unwrap();
+        let b = create(&db, "new open", None, None, None, None).await.unwrap();
         let _ = b;
         // Everything above happened "now", so a since-bound in the past
         // includes them and a future bound excludes them.
