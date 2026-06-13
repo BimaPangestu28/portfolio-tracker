@@ -6,6 +6,7 @@ pub mod crud;
 pub mod goals;
 pub mod google;
 pub mod ingest;
+pub mod upwork;
 pub mod portfolio;
 pub mod telegram;
 pub mod whatsapp;
@@ -23,7 +24,8 @@ pub fn router(state: AppState) -> Router {
     let public = Router::new()
         .route("/health", get(|| async { "ok" }))
         .route("/auth/login", post(auth::login))
-        .route("/google/oauth/callback", get(google::callback));
+        .route("/google/oauth/callback", get(google::callback))
+        .route("/upwork/oauth/callback", get(upwork::callback));
 
     // Authenticated by the shared x-gateway-token (checked inside the handlers).
     let gateway = Router::new()
@@ -45,6 +47,10 @@ pub fn router(state: AppState) -> Router {
         .route("/google/oauth/start", get(google::start))
         .route("/google/status", get(google::status))
         .route("/google/disconnect", post(google::disconnect))
+        .route("/upwork/oauth/start", get(upwork::start))
+        .route("/upwork/status", get(upwork::status))
+        .route("/upwork/sync", post(upwork::sync))
+        .route("/upwork/disconnect", post(upwork::disconnect))
         .route(
             "/accounts",
             get(crud::list_accounts).post(crud::create_account),
