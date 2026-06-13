@@ -11,6 +11,7 @@ import BudgetPage from "./pages/BudgetPage";
 import DataPage from "./pages/DataPage";
 import ChatPage from "./pages/ChatPage";
 import SettingsPage from "./pages/SettingsPage";
+import AgendaPage from "./pages/AgendaPage";
 
 export default function App() {
   const { isUnlocked } = useAuth();
@@ -31,6 +32,7 @@ export default function App() {
         <Route path="planner" element={<PlannerPage />} />
         <Route path="budget" element={<BudgetPage />} />
         <Route path="data" element={<DataPage />} />
+        <Route path="agenda" element={<AgendaPage />} />
         <Route path="chat" element={<ChatPage />} />
         <Route path="settings" element={<SettingsPage />} />
 
