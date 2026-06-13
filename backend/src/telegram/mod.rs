@@ -57,20 +57,15 @@ pub enum AttachmentPick {
 /// A parsed inline-button press.
 #[derive(Debug, PartialEq, Eq)]
 pub enum CallbackAction {
-    Confirm(i64),
-    Reject(i64),
     /// "✅ Selesai" on a reminder notification: mark its todo done.
     TodoDone(i64),
 }
 
-/// Parse callback_data ("confirm:<review_id>" / "reject:<review_id>" /
-/// "tododone:<todo_id>").
+/// Parse callback_data ("tododone:<todo_id>").
 pub fn parse_callback(data: &str) -> Option<CallbackAction> {
     let (action, id) = data.split_once(':')?;
     let id: i64 = id.parse().ok()?;
     match action {
-        "confirm" => Some(CallbackAction::Confirm(id)),
-        "reject" => Some(CallbackAction::Reject(id)),
         "tododone" => Some(CallbackAction::TodoDone(id)),
         _ => None,
     }
@@ -154,50 +149,6 @@ fn seed_entry_line(entry: Option<&ExtractedEntry>) -> String {
     }
     out.push_str(&format!(" — {}", e.executed_at.as_deref().unwrap_or("hari ini")));
     out
-}
-
-/// One-message summary of a staged review item for the confirmation prompt.
-fn item_summary(
-    item: &ReviewItemRow,
-    entry: Option<&ExtractedEntry>,
-    account: Option<&str>,
-    instrument: Option<&str>,
-) -> String {
-    let mut out = format!("🧾 Review #{}", item.id);
-    if let Some(e) = entry {
-        out.push_str(&format!(" — {}", e.entry_type));
-        if let Some(symbol) = &e.symbol {
-            out.push_str(&format!(" {symbol}"));
-        }
-        out.push('\n');
-        if let Some(qty) = &e.quantity {
-            out.push_str(&format!("Qty: {}\n", fmt_payload_num(qty)));
-        }
-        if let Some(price) = &e.price_native {
-            let currency = e.currency.as_deref().unwrap_or("");
-            out.push_str(&format!("Harga: {currency} {}\n", fmt_payload_num(price)));
-        }
-        // Amount-only fund entries have no qty/price; show the nominal instead.
-        if e.quantity.is_none() && e.price_native.is_none() {
-            if let Some(amount) = &e.amount_native {
-                let currency = e.currency.as_deref().unwrap_or("");
-                out.push_str(&format!("Nominal: {currency} {}\n", fmt_payload_num(amount)));
-            }
-        }
-        out.push_str(&format!(
-            "Tanggal: {}\n",
-            e.executed_at.as_deref().unwrap_or("hari ini")
-        ));
-    } else {
-        out.push('\n');
-    }
-    if let Some(name) = account {
-        out.push_str(&format!("Akun: {name}\n"));
-    }
-    if let Some(label) = instrument {
-        out.push_str(&format!("Instrumen: {label}\n"));
-    }
-    out.trim_end().to_string()
 }
 
 /// Pick the ingestable attachment from a message, if any. Photos use the
@@ -399,62 +350,6 @@ async fn ingest_attachment(
     Ok(result.items)
 }
 
-/// Send one confirmation prompt per staged item: confirmable items get
-/// Konfirmasi/Tolak buttons, incomplete ones get Tolak plus a web-UI note.
-async fn send_review_prompts(
-    client: &TelegramClient,
-    db: &Db,
-    chat_id: i64,
-    items: &[ReviewItemRow],
-) {
-    if items.is_empty() {
-        send_or_log(client, chat_id, "Tidak ada transaksi yang terbaca dari file itu.").await;
-        return;
-    }
-    for item in items {
-        let entry: Option<ExtractedEntry> = serde_json::from_str(&item.payload_json).ok();
-        let account_name = match item.suggested_account_id {
-            Some(id) => crate::repo::accounts::get(db, id).await.ok().map(|a| a.name),
-            None => None,
-        };
-        let instrument_label = match item.suggested_instrument_id {
-            Some(id) => crate::repo::instruments::get(db, id)
-                .await
-                .ok()
-                .map(|i| format!("{} ({})", i.symbol, i.name)),
-            None => None,
-        };
-        let summary = item_summary(
-            item,
-            entry.as_ref(),
-            account_name.as_deref(),
-            instrument_label.as_deref(),
-        );
-        let confirm_data = format!("confirm:{}", item.id);
-        let reject_data = format!("reject:{}", item.id);
-        let send_result = match crate::ingestion::review::build_confirm_payload(item) {
-            Ok(_) => {
-                client
-                    .send_message_with_buttons(
-                        chat_id,
-                        &summary,
-                        &[("✅ Konfirmasi", &confirm_data), ("❌ Tolak", &reject_data)],
-                    )
-                    .await
-            }
-            Err(reason) => {
-                let text = format!("{summary}\n\n⚠️ {reason} — lengkapi di web UI → Data.");
-                client
-                    .send_message_with_buttons(chat_id, &text, &[("❌ Tolak", &reject_data)])
-                    .await
-            }
-        };
-        if let Err(e) = send_result {
-            tracing::error!("telegram: review prompt for #{} failed: {e:#}", item.id);
-        }
-    }
-}
-
 /// Handle an inline-button press: only the linked owner chat may act, the
 /// existing review confirm/reject guards prevent double-processing, and the
 /// prompt message is edited in place (which also retires its buttons).
@@ -477,37 +372,11 @@ async fn handle_callback(client: &TelegramClient, db: &Db, callback: TgCallbackQ
     }
     let Some(action) = callback.data.as_deref().and_then(parse_callback) else { return };
     let text = match action {
-        CallbackAction::Confirm(item_id) => {
-            review_callback_text(item_id, confirm_item(db, item_id).await)
-        }
-        CallbackAction::Reject(item_id) => {
-            review_callback_text(item_id, reject_item(db, item_id).await)
-        }
         CallbackAction::TodoDone(todo_id) => todo_done_text(db, todo_id).await,
     };
     if let Err(e) = client.edit_message_text(chat_id, message.message_id, &text).await {
         tracing::error!("telegram: editMessageText failed: {e:#}");
     }
-}
-
-/// Confirm a staged item using its suggested account/instrument.
-async fn confirm_item(db: &Db, item_id: i64) -> anyhow::Result<String> {
-    let item = crate::repo::review_items::get(db, item_id).await?;
-    let payload = crate::ingestion::review::build_confirm_payload(&item)
-        .map_err(|reason| anyhow::anyhow!("{reason} — lengkapi di web UI → Data"))?;
-    let txn_id = crate::ingestion::review::confirm(db, item_id, &payload).await?;
-    Ok(format!("✅ Transaksi #{txn_id} dibuat."))
-}
-
-async fn reject_item(db: &Db, item_id: i64) -> anyhow::Result<String> {
-    crate::ingestion::review::reject(db, item_id).await?;
-    Ok("❌ Ditolak.".to_string())
-}
-
-/// Result line for review confirm/reject button presses.
-fn review_callback_text(item_id: i64, outcome: anyhow::Result<String>) -> String {
-    let status = outcome.unwrap_or_else(|e| format!("⚠️ {e:#}"));
-    format!("🧾 Review #{item_id} — {status}")
 }
 
 /// Result line for the "✅ Selesai" button on a reminder notification.
@@ -599,13 +468,13 @@ mod tests {
     // ── Inline confirmation ────────────────────────────────────────────────
 
     #[test]
-    fn parses_confirm_and_reject_callbacks() {
-        assert_eq!(parse_callback("confirm:42"), Some(CallbackAction::Confirm(42)));
-        assert_eq!(parse_callback("reject:7"), Some(CallbackAction::Reject(7)));
+    fn parses_tododone_callback() {
         assert_eq!(parse_callback("tododone:9"), Some(CallbackAction::TodoDone(9)));
+        assert_eq!(parse_callback("confirm:42"), None);
+        assert_eq!(parse_callback("reject:7"), None);
         assert_eq!(parse_callback("nope:1"), None);
-        assert_eq!(parse_callback("confirm:abc"), None);
-        assert_eq!(parse_callback("confirm"), None);
+        assert_eq!(parse_callback("tododone:abc"), None);
+        assert_eq!(parse_callback("tododone"), None);
     }
 
     #[tokio::test]
@@ -618,65 +487,4 @@ mod tests {
         assert!(again.contains("sudah") || again.contains("tidak ditemukan"), "{again}");
     }
 
-    // Helpers for the item_summary tests below (private copies; the authoritative
-    // build_confirm_payload tests live in ingestion::review).
-    fn review_item(payload_json: &str) -> crate::repo::review_items::ReviewItemRow {
-        crate::repo::review_items::ReviewItemRow {
-            id: 42,
-            batch_id: "tg-1".into(),
-            source_kind: "image".into(),
-            source_filename: "telegram-photo.jpg".into(),
-            source_path: "".into(),
-            doc_type: "txn_history".into(),
-            status: "pending".into(),
-            needs_attention: 0,
-            payload_json: payload_json.into(),
-            raw_llm_json: "{}".into(),
-            suggested_instrument_id: Some(9),
-            suggested_account_id: Some(2),
-            created_txn_id: None,
-            created_at: "2026-06-05T00:00:00Z".into(),
-            confirmed_at: None,
-        }
-    }
-
-    const FULL_PAYLOAD: &str = r#"{
-        "entry_type": "buy", "symbol": "BTC", "quantity": "0.00128248",
-        "price_native": "1169608882", "fee_native": "0", "currency": "IDR",
-        "executed_at": "2026-06-04", "confidence": 0.95
-    }"#;
-
-    const AMOUNT_ONLY_PAYLOAD: &str = r#"{
-        "entry_type": "buy", "instrument_name": "Sucorinvest Bond Fund",
-        "amount_native": "13000000", "currency": "IDR", "confidence": 0.72
-    }"#;
-
-    #[test]
-    fn amount_only_summary_shows_the_nominal() {
-        let item = review_item(AMOUNT_ONLY_PAYLOAD);
-        let entry: crate::ingestion::extract::ExtractedEntry =
-            serde_json::from_str(AMOUNT_ONLY_PAYLOAD).unwrap();
-        let summary = item_summary(
-            &item,
-            Some(&entry),
-            Some("Pendidikan Noah"),
-            Some("Sucorinvest Bond Fund"),
-        );
-        assert!(summary.contains("Nominal: IDR 13.000.000"), "{summary}");
-        assert!(!summary.contains("Qty:"), "{summary}");
-    }
-
-    #[test]
-    fn summary_shows_the_extracted_details() {
-        let item = review_item(FULL_PAYLOAD);
-        let entry: crate::ingestion::extract::ExtractedEntry =
-            serde_json::from_str(FULL_PAYLOAD).unwrap();
-        let summary = item_summary(&item, Some(&entry), Some("Pluang"), Some("BTC (Bitcoin)"));
-        assert!(summary.contains("Review #42"), "{summary}");
-        assert!(summary.contains("buy BTC"), "{summary}");
-        assert!(summary.contains("0,00128248"), "{summary}");
-        assert!(summary.contains("1.169.608.882"), "{summary}");
-        assert!(summary.contains("Akun: Pluang"), "{summary}");
-        assert!(summary.contains("Instrumen: BTC (Bitcoin)"), "{summary}");
-    }
 }
