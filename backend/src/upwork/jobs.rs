@@ -53,6 +53,58 @@ pub fn parse_queries(resp: &str, max: usize) -> Vec<String> {
     out
 }
 
+use crate::upwork::client::MarketplaceJob;
+
+/// A relevance verdict for one job.
+#[derive(Debug, Clone, PartialEq)]
+pub struct JobScore {
+    pub id: String,
+    pub score: u8,   // 0..=10
+    pub reason: String,
+}
+
+/// Build the batch relevance-scoring prompt. Asks for one `id|score|reason`
+/// line per job, scored 0-10 against the owner's skills only.
+pub fn build_scoring_prompt(jobs: &[MarketplaceJob], facts: &[MemoryFact]) -> String {
+    let mut listing = String::new();
+    for j in jobs {
+        listing.push_str(&format!(
+            "JOB id={}\nTitle: {}\nSkills: {}\nDescription: {}\n\n",
+            j.id, j.title, j.skills.join(", "), j.description,
+        ));
+    }
+    format!(
+        "Score how well each job below fits the owner's skills, in English, using ONLY the \
+skills/experience facts provided — never assume skills not listed. For EACH job output exactly \
+one line: the job id, a score 0-10, and a one-sentence reason, separated by ' | ' (a pipe). \
+No header, no extra lines.\n\nOWNER SKILLS:{}\n\nJOBS:\n{}",
+        render_facts_block(facts), listing,
+    )
+}
+
+/// Parse `id | score | reason` lines. Lines that don't parse are dropped (that
+/// job is simply not notified). Scores are clamped to 0..=10.
+pub fn parse_scores(resp: &str) -> Vec<JobScore> {
+    let mut out = Vec::new();
+    for line in resp.lines() {
+        let parts: Vec<&str> = line.splitn(3, '|').map(|s| s.trim()).collect();
+        if parts.len() < 3 {
+            continue;
+        }
+        let id = parts[0].trim_start_matches("id=").trim();
+        let Ok(raw) = parts[1].parse::<i64>() else { continue };
+        if id.is_empty() {
+            continue;
+        }
+        out.push(JobScore {
+            id: id.to_string(),
+            score: raw.clamp(0, 10) as u8,
+            reason: parts[2].to_string(),
+        });
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -84,5 +136,30 @@ mod tests {
     fn parse_queries_preserves_numeric_prefixed_terms() {
         let q = parse_queries("3D modeling\n2D artist", 5);
         assert_eq!(q, vec!["3D modeling", "2D artist"]);
+    }
+
+    fn job(id: &str, title: &str) -> MarketplaceJob {
+        MarketplaceJob {
+            id: id.into(), title: title.into(), description: "d".into(),
+            budget: None, url: "u".into(), skills: vec!["Rust".into()],
+        }
+    }
+
+    #[test]
+    fn scoring_prompt_demands_score_and_only_listed_skills() {
+        let p = build_scoring_prompt(&[job("1", "Rust API")], &[fact("Rust expert")]);
+        let lower = p.to_lowercase();
+        assert!(lower.contains("0-10"));
+        assert!(lower.contains("only"));
+        assert!(p.contains("Rust API"));
+    }
+
+    #[test]
+    fn parse_scores_reads_pipe_rows_and_drops_garbage() {
+        let resp = "1 | 8 | Strong Rust fit\ngarbage line\n2 | 99 | clamped high\n3 | x | bad score";
+        let scores = parse_scores(resp);
+        assert_eq!(scores.len(), 2);
+        assert_eq!(scores[0], JobScore { id: "1".into(), score: 8, reason: "Strong Rust fit".into() });
+        assert_eq!(scores[1].score, 10); // 99 clamped
     }
 }
