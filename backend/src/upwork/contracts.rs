@@ -64,6 +64,66 @@ pub async fn run_pass<U: UpworkClient, C: ClickUpApi, N: Notifier>(
     Ok(created)
 }
 
+use crate::repo::{telegram_link, upwork_integration};
+use crate::upwork::client::HttpUpwork;
+use crate::upwork::jobs::TelegramNotifier;
+use crate::upwork::oauth::OAuthConfig;
+
+const DEFAULT_POLL_SECS: u64 = 3600;
+
+/// One full cycle: ensure token, build the ClickUp + Telegram clients, run a pass.
+pub async fn sync_cycle(db: &Db) -> anyhow::Result<usize> {
+    let cfg = OAuthConfig::from_env()?;
+    let key = crate::upwork::crypto::key_from_env()?;
+    let token = match crate::upwork::engine::ensure_access_token(db, &cfg, &key).await {
+        Ok(t) => t,
+        Err(e) => {
+            upwork_integration::set_status(db, "error", Some(&e.to_string())).await?;
+            return Ok(0);
+        }
+    };
+    let clickup = match crate::clickup::client::ClickUpClient::from_env() {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::info!("clickup not configured; contract sync skipped: {e}");
+            return Ok(0);
+        }
+    };
+    let tg_token = std::env::var("TELEGRAM_BOT_TOKEN").ok();
+    let owner_chat = match (telegram_link::get(db).await?, &tg_token) {
+        (Some(link), Some(_)) => Some(link.chat_id),
+        _ => None,
+    };
+    let notifier = TelegramNotifier {
+        client: crate::telegram::client::TelegramClient::new(tg_token.unwrap_or_default()),
+    };
+    let upwork = HttpUpwork::new(token);
+    run_pass(db, &upwork, &clickup, &notifier, owner_chat).await
+}
+
+/// Independent polling loop. No-op when Upwork OAuth env is unset.
+pub fn spawn(db: Db) {
+    if OAuthConfig::from_env().is_err() {
+        tracing::info!("UPWORK_CLIENT_* not set; contract sync disabled");
+        return;
+    }
+    let secs = std::env::var("UPWORK_CONTRACTS_POLL_SECS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(DEFAULT_POLL_SECS);
+    let period = std::time::Duration::from_secs(secs);
+    tokio::spawn(async move {
+        loop {
+            match sync_cycle(&db).await {
+                Ok(n) if n > 0 => tracing::info!("upwork contract sync: created {n} ClickUp lists"),
+                Ok(_) => {}
+                Err(e) => tracing::warn!("upwork contract sync cycle failed: {e:#}"),
+            }
+            tokio::time::sleep(period).await;
+        }
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
