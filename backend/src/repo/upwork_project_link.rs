@@ -30,6 +30,8 @@ pub async fn link(db: &Db, contract_id: &str, clickup_list_id: &str, name: &str)
     Ok(())
 }
 
+/// Used by tests now; reserved for a future task-sync sub-project (spec §7).
+#[cfg_attr(not(test), allow(dead_code))]
 pub async fn list_all(db: &Db) -> anyhow::Result<Vec<LinkRow>> {
     Ok(sqlx::query_as::<_, LinkRow>("SELECT * FROM upwork_project_link ORDER BY created_at")
         .fetch_all(db).await?)
