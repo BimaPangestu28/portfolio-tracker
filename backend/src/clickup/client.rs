@@ -314,9 +314,10 @@ impl ClickUpApi for ClickUpClient {
         let status = resp.status();
         let body = resp.text().await.map_err(|e| ClickUpError::Http(e.to_string()))?;
         if !status.is_success() {
-            // ClickUp returns an error when no timer is running — treat the
-            // "no running timer" case as a clean None rather than an error.
-            if body.to_lowercase().contains("running") {
+            // ClickUp returns 400 with a "no running timer" message for this case
+            // — map only that to a clean None. Gating on 400 avoids swallowing
+            // genuine 5xx/429 errors whose body might also mention "running".
+            if status.as_u16() == 400 && body.to_lowercase().contains("running") {
                 return Ok(None);
             }
             return Err(Self::classify(status, body));
