@@ -85,7 +85,7 @@ pub async fn sync_cycle(db: &Db) -> anyhow::Result<usize> {
     let clickup = match crate::clickup::client::ClickUpClient::from_env() {
         Ok(c) => c,
         Err(e) => {
-            tracing::info!("clickup not configured; contract sync skipped: {e}");
+            tracing::debug!("clickup not configured; contract sync skipped: {e}");
             return Ok(0);
         }
     };
