@@ -220,6 +220,18 @@ pub fn definitions() -> serde_json::Value {
                 "properties": { "task_id": { "type": "string", "description": "ClickUp task id from list_tasks" } },
                 "required": ["task_id"]
             }
+        },
+        {
+            "name": "draft_proposal",
+            "description": "Draft an Upwork job proposal in professional English from a job description the user pastes. Pulls the owner's skills and experience from long-term memory to tailor it. Returns the draft for the user to review and submit manually — it never submits anything. Use when the owner pastes a job and asks for a proposal.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "job_text": { "type": "string", "description": "The full Upwork job description the user pasted." },
+                    "notes": { "type": "string", "description": "Optional emphasis or constraints, e.g. 'emphasize React, bid $30/hr'." }
+                },
+                "required": ["job_text"]
+            }
         }
     ])
 }
@@ -251,6 +263,7 @@ mod tests {
                 "create_task",
                 "list_tasks",
                 "complete_task",
+                "draft_proposal",
             ]
         );
         for tool in defs.as_array().unwrap() {
@@ -289,5 +302,6 @@ mod tests {
         assert_eq!(find("create_project")["input_schema"]["required"], serde_json::json!(["name"]));
         assert_eq!(find("create_task")["input_schema"]["required"], serde_json::json!(["project", "title"]));
         assert_eq!(find("complete_task")["input_schema"]["required"], serde_json::json!(["task_id"]));
+        assert_eq!(find("draft_proposal")["input_schema"]["required"], serde_json::json!(["job_text"]));
     }
 }
