@@ -93,6 +93,47 @@ pub async fn complete(db: &Db, id: i64) -> anyhow::Result<bool> {
     Ok(result.rows_affected() > 0)
 }
 
+/// Move open todos forward one day. With `ids = None`, rolls every open todo
+/// whose due date (WIB) is today or earlier. With explicit `ids`, rolls only
+/// those — still skipping undated or future-dated todos. Time-of-day and the
+/// stored Z-format are preserved. Returns the moved rows (in id order).
+pub async fn rollover(
+    db: &Db,
+    ids: Option<&[i64]>,
+    now_utc: chrono::DateTime<chrono::Utc>,
+) -> anyhow::Result<Vec<TodoRow>> {
+    let today_wib = now_utc
+        .with_timezone(&crate::assistant::time::wib())
+        .format("%Y-%m-%d")
+        .to_string();
+    let mut moved = Vec::new();
+    for todo in list_open(db).await? {
+        if let Some(allow) = ids {
+            if !allow.contains(&todo.id) {
+                continue;
+            }
+        }
+        let Some(due_at) = &todo.due_at else { continue };
+        let Ok(parsed) = chrono::DateTime::parse_from_rfc3339(due_at) else { continue };
+        let due_date_wib = parsed
+            .with_timezone(&crate::assistant::time::wib())
+            .format("%Y-%m-%d")
+            .to_string();
+        if due_date_wib.as_str() > today_wib.as_str() {
+            continue; // future due dates are left untouched
+        }
+        let new_due = parsed.with_timezone(&chrono::Utc) + chrono::Duration::days(1);
+        let new_due_db = crate::assistant::time::to_db_utc(new_due);
+        sqlx::query("UPDATE todos SET due_at = ? WHERE id = ? AND status = 'open'")
+            .bind(&new_due_db)
+            .bind(todo.id)
+            .execute(db)
+            .await?;
+        moved.push(get(db, todo.id).await?);
+    }
+    Ok(moved)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -156,6 +197,47 @@ mod tests {
     async fn complete_unknown_id_returns_false() {
         let db = mem_db().await;
         assert!(!complete(&db, 999).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn rollover_shifts_overdue_and_today_by_one_day_only() {
+        let db = mem_db().await;
+        // "now" = 2026-06-12T05:00:00Z == 12:00 WIB.
+        let now = chrono::DateTime::parse_from_rfc3339("2026-06-12T05:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        let overdue = create(&db, "overdue", None, Some("2026-06-10T02:00:00Z"), None, None).await.unwrap();
+        let today = create(&db, "today", None, Some("2026-06-12T02:00:00Z"), None, None).await.unwrap();
+        let future = create(&db, "future", None, Some("2026-06-20T02:00:00Z"), None, None).await.unwrap();
+        let undated = create(&db, "undated", None, None, None, None).await.unwrap();
+
+        let moved = rollover(&db, None, now).await.unwrap();
+        let moved_ids: Vec<i64> = moved.iter().map(|t| t.id).collect();
+        assert_eq!(moved_ids, vec![overdue.id, today.id]);
+
+        // due_at advanced by exactly one day, time-of-day preserved.
+        let today_after = get(&db, today.id).await.unwrap();
+        assert_eq!(today_after.due_at.as_deref(), Some("2026-06-13T02:00:00Z"));
+        // future + undated untouched.
+        assert_eq!(get(&db, future.id).await.unwrap().due_at.as_deref(), Some("2026-06-20T02:00:00Z"));
+        assert_eq!(get(&db, undated.id).await.unwrap().due_at, None);
+    }
+
+    #[tokio::test]
+    async fn rollover_with_explicit_ids_skips_others_and_future() {
+        let db = mem_db().await;
+        let now = chrono::DateTime::parse_from_rfc3339("2026-06-12T05:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        let a = create(&db, "a", None, Some("2026-06-10T02:00:00Z"), None, None).await.unwrap();
+        let b = create(&db, "b", None, Some("2026-06-10T02:00:00Z"), None, None).await.unwrap();
+        let future = create(&db, "future", None, Some("2026-06-20T02:00:00Z"), None, None).await.unwrap();
+
+        let moved = rollover(&db, Some(&[a.id, future.id]), now).await.unwrap();
+        let moved_ids: Vec<i64> = moved.iter().map(|t| t.id).collect();
+        // a moved; future skipped (future due); b not in id list.
+        assert_eq!(moved_ids, vec![a.id]);
+        assert_eq!(get(&db, b.id).await.unwrap().due_at.as_deref(), Some("2026-06-10T02:00:00Z"));
     }
 
     #[tokio::test]
