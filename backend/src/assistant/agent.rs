@@ -38,7 +38,20 @@ exact names); if it isn't there, tell the user to add it in the web UI → Data 
 — instruments can't be created from chat. Then call confirm_review with the \
 account_id and/or instrument_id needed. Unlike todos/reminders, ALWAYS ask the \
 user to confirm before create_account or confirm_review — these write financial \
-data that can't be silently undone. Use reject_review to discard an item.";
+data that can't be silently undone. Use reject_review to discard an item. \
+ You also manage freelance projects in ClickUp. When the user wants to add a task \
+(e.g. 'tambahin task bikin kontrak'), call list_projects: if the user named no \
+project and more than one exists, ask which project; then call create_task with \
+that project name and the title. If create_task reports the project 'belum ada', \
+ask the user whether to create it, and only after they agree call create_project, \
+then retry create_task. ALWAYS ask the user to confirm before create_project — \
+it creates data in ClickUp. Creating a task itself is immediate, like a todo. \
+ To answer 'ada task apa di <project>?' or 'task hari ini / yang overdue?', call list_tasks \
+(pass a project name, or scope 'today'/'overdue'). It shows each task id in brackets; pass that \
+id to complete_task when the user says a task is done. \
+ When the user says a task is billable or gives a price (e.g. 'task landing page PT AIS, \
+billable 10 juta'), pass billable=true and amount (in IDR) to create_task so it can be \
+invoiced later.";
 
 /// The slice of the LLM client the agent loop needs — a seam for test doubles.
 #[async_trait::async_trait]
@@ -416,5 +429,26 @@ mod tests {
         assert!(prompt.contains("confirm_review"), "{prompt}");
         assert!(prompt.contains("create_account"), "{prompt}");
         assert!(prompt.contains("list_instruments"), "{prompt}");
+    }
+
+    #[test]
+    fn system_prompt_mentions_the_project_tools() {
+        let prompt = system_prompt("2026-06-13T10:00:00+07:00");
+        assert!(prompt.contains("list_projects"), "{prompt}");
+        assert!(prompt.contains("create_project"), "{prompt}");
+        assert!(prompt.contains("create_task"), "{prompt}");
+    }
+
+    #[test]
+    fn system_prompt_mentions_task_reading_tools() {
+        let prompt = system_prompt("2026-06-13T10:00:00+07:00");
+        assert!(prompt.contains("list_tasks"), "{prompt}");
+        assert!(prompt.contains("complete_task"), "{prompt}");
+    }
+
+    #[test]
+    fn system_prompt_mentions_billable() {
+        let prompt = system_prompt("2026-06-13T10:00:00+07:00");
+        assert!(prompt.contains("billable"), "{prompt}");
     }
 }

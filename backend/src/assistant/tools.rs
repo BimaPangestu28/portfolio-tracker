@@ -171,6 +171,55 @@ pub fn definitions() -> serde_json::Value {
             "name": "list_instruments",
             "description": "List the owner's known instruments (id, symbol, name, type). Use to find an instrument_id for confirm_review when a review item's instrument shows 'belum dikenali' but the instrument may already exist under a slightly different name. If it genuinely doesn't exist, tell the user to add it in the web UI → Data (instruments can't be created from chat).",
             "input_schema": { "type": "object", "properties": {} }
+        },
+        {
+            "name": "list_projects",
+            "description": "List the owner's freelance projects (ClickUp lists). Use to find which project a task belongs to, and before create_project to avoid duplicates.",
+            "input_schema": { "type": "object", "properties": {} }
+        },
+        {
+            "name": "create_project",
+            "description": "Create a new freelance project (a ClickUp list) in the configured space. Always ask the user to confirm before calling — this creates data in ClickUp.",
+            "input_schema": {
+                "type": "object",
+                "properties": { "name": { "type": "string", "description": "Project name, e.g. PT AIS" } },
+                "required": ["name"]
+            }
+        },
+        {
+            "name": "create_task",
+            "description": "Add a task to a freelance project (ClickUp). Pass the project name; if you don't know which project the user means and there is more than one, ask first. If the named project doesn't exist, offer to create it with create_project before retrying.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "project": { "type": "string", "description": "Project (ClickUp list) name the task belongs to" },
+                    "title": { "type": "string", "description": "What the task is" },
+                    "due": { "type": "string", "description": "Optional due date, RFC3339 with +07:00 offset, e.g. 2026-06-14T17:00:00+07:00" },
+                    "billable": { "type": "boolean", "description": "Mark the task billable (sets the ClickUp Billable field, if it exists)" },
+                    "amount": { "type": "number", "description": "Billable amount in IDR (sets the ClickUp Amount field, if it exists)" }
+                },
+                "required": ["project", "title"]
+            }
+        },
+        {
+            "name": "list_tasks",
+            "description": "List freelance tasks from ClickUp. Pass a project name to list that project's open tasks; or pass scope 'today' / 'overdue' to list due/overdue tasks across all projects. Default scope 'open' lists all open tasks.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "project": { "type": "string", "description": "Optional project (list) name to filter to" },
+                    "scope": { "type": "string", "enum": ["open", "today", "overdue"], "description": "open (default), today (due today), or overdue" }
+                }
+            }
+        },
+        {
+            "name": "complete_task",
+            "description": "Mark a freelance task complete in ClickUp. Get the task_id from list_tasks (shown in brackets).",
+            "input_schema": {
+                "type": "object",
+                "properties": { "task_id": { "type": "string", "description": "ClickUp task id from list_tasks" } },
+                "required": ["task_id"]
+            }
         }
     ])
 }
@@ -197,6 +246,11 @@ mod tests {
                 "create_event", "list_events", "cancel_event",
                 "reject_review", "list_accounts", "create_account",
                 "list_pending_reviews", "confirm_review", "list_instruments",
+                "list_projects",
+                "create_project",
+                "create_task",
+                "list_tasks",
+                "complete_task",
             ]
         );
         for tool in defs.as_array().unwrap() {
@@ -232,5 +286,8 @@ mod tests {
             find("create_account")["input_schema"]["required"],
             serde_json::json!(["name", "account_type", "native_currency"])
         );
+        assert_eq!(find("create_project")["input_schema"]["required"], serde_json::json!(["name"]));
+        assert_eq!(find("create_task")["input_schema"]["required"], serde_json::json!(["project", "title"]));
+        assert_eq!(find("complete_task")["input_schema"]["required"], serde_json::json!(["task_id"]));
     }
 }
