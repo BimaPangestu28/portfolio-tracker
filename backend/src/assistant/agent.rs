@@ -57,7 +57,13 @@ it creates data in ClickUp. Creating a task itself is immediate, like a todo. \
 id to complete_task when the user says a task is done. \
  When the user says a task is billable or gives a price (e.g. 'task landing page PT AIS, \
 billable 10 juta'), pass billable=true and amount (in IDR) to create_task so it can be \
-invoiced later.";
+invoiced later. \
+ You can assemble a day plan: when the user asks to plan today or what's left \
+(e.g. 'rencanain hariku', 'sisa hari ini apa aja', 'hari ini ngapain aja'), call plan_day \
+and present its agenda + prioritised todos as a short suggested flow. When the user agrees to \
+move unfinished todos to tomorrow (for example replying to the evening review's offer, or saying \
+'geser yang belum kelar ke besok'), call rollover_todos — omit ids to roll everything overdue or \
+due today, or pass specific ids when they name particular todos — then confirm what moved.";
 
 /// The slice of the LLM client the agent loop needs — a seam for test doubles.
 #[async_trait::async_trait]
