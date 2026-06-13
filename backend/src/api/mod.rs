@@ -190,6 +190,27 @@ mod router_tests {
 
     #[serial]
     #[tokio::test]
+    async fn upwork_start_is_protected_but_callback_is_public() {
+        std::env::set_var("AUTH_PASSWORD", "pw");
+        std::env::set_var("JWT_SECRET", "router-test-upwork");
+
+        let app = router(test_state().await);
+        let res = app.clone().oneshot(
+            Request::builder().uri("/upwork/oauth/start").body(Body::empty()).unwrap()
+        ).await.unwrap();
+        assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+
+        let res = app.oneshot(
+            Request::builder().uri("/upwork/oauth/callback").body(Body::empty()).unwrap()
+        ).await.unwrap();
+        assert_ne!(res.status(), StatusCode::UNAUTHORIZED);
+
+        std::env::remove_var("AUTH_PASSWORD");
+        std::env::remove_var("JWT_SECRET");
+    }
+
+    #[serial]
+    #[tokio::test]
     async fn health_and_login_are_public_when_configured() {
         std::env::set_var("AUTH_PASSWORD", "pw");
         std::env::set_var("JWT_SECRET", "router-test-secret2");
