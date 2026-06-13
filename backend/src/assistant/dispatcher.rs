@@ -12,6 +12,7 @@ pub async fn dispatch(db: &Db, name: &str, input: &serde_json::Value) -> Result<
         "list_todos" => list_todos(db).await,
         "complete_todo" => complete_todo(db, input).await,
         "plan_day" => plan_day(db).await,
+        "rollover_todos" => rollover_todos(db, input).await,
         "create_reminder" => create_reminder(db, input).await,
         "list_reminders" => list_reminders(db).await,
         "cancel_reminder" => cancel_reminder(db, input).await,
@@ -148,6 +149,29 @@ async fn plan_day(db: &Db) -> Result<String, String> {
         .await
         .map_err(|e| format!("db error: {e}"))?;
     Ok(crate::assistant::proactive::plan::render_plan_block(&plan))
+}
+
+async fn rollover_todos(db: &Db, input: &serde_json::Value) -> Result<String, String> {
+    let ids: Option<Vec<i64>> = match input.get("ids") {
+        None | Some(serde_json::Value::Null) => None,
+        Some(serde_json::Value::Array(arr)) => Some(
+            arr.iter()
+                .map(|v| v.as_i64().ok_or_else(|| format!("ids must be integers, got {v}")))
+                .collect::<Result<Vec<_>, _>>()?,
+        ),
+        Some(v) => return Err(format!("ids must be an array of integers, got {v}")),
+    };
+    let moved = crate::repo::todos::rollover(db, ids.as_deref(), chrono::Utc::now())
+        .await
+        .map_err(|e| format!("db error: {e}"))?;
+    if moved.is_empty() {
+        return Ok("nggak ada todo yang perlu digeser".into());
+    }
+    let mut out = format!("{} todo digeser ke besok:\n", moved.len());
+    for t in moved {
+        out.push_str(&format!("- #{} {}\n", t.id, t.title));
+    }
+    Ok(out)
 }
 
 async fn complete_todo(db: &Db, input: &serde_json::Value) -> Result<String, String> {
@@ -1336,6 +1360,23 @@ mod tests {
         clickup_create_task(&fake, &serde_json::json!({ "project": "PT AIS", "title": "x" })).await.unwrap();
         assert_eq!(fake.created_billables.lock().unwrap()[0], None);
         assert_eq!(fake.created_amounts.lock().unwrap()[0], None);
+    }
+
+    #[tokio::test]
+    async fn rollover_todos_default_moves_overdue_and_reports() {
+        let db = mem_db().await;
+        let yesterday = (chrono::Utc::now() - chrono::Duration::days(1)).to_rfc3339();
+        crate::repo::todos::create(&db, "kelar besok", None, Some(&yesterday), None, None).await.unwrap();
+        let out = dispatch(&db, "rollover_todos", &serde_json::json!({})).await.unwrap();
+        assert!(out.contains("kelar besok"), "{out}");
+        assert!(out.contains("digeser"), "{out}");
+    }
+
+    #[tokio::test]
+    async fn rollover_todos_reports_when_nothing_to_move() {
+        let db = mem_db().await;
+        let out = dispatch(&db, "rollover_todos", &serde_json::json!({})).await.unwrap();
+        assert!(out.contains("nggak ada"), "{out}");
     }
 
     #[tokio::test]

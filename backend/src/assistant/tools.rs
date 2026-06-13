@@ -38,6 +38,16 @@ pub fn definitions() -> serde_json::Value {
             "input_schema": { "type": "object", "properties": {} }
         },
         {
+            "name": "rollover_todos",
+            "description": "Move unfinished todos that are overdue or due today to tomorrow (preserving time of day). Call this when the user agrees to the evening review's offer, or asks to push today's leftovers to tomorrow. Omit 'ids' to roll all overdue/today todos.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "ids": { "type": "array", "items": { "type": "integer" }, "description": "Optional specific todo ids to roll; omit to roll all overdue/today todos" }
+                }
+            }
+        },
+        {
             "name": "create_reminder",
             "description": "Schedule a reminder message to be sent to the user at a specific time, optionally recurring.",
             "input_schema": {
@@ -247,7 +257,7 @@ mod tests {
         assert_eq!(
             names,
             vec![
-                "create_todo", "list_todos", "complete_todo", "plan_day",
+                "create_todo", "list_todos", "complete_todo", "plan_day", "rollover_todos",
                 "create_reminder", "list_reminders", "cancel_reminder",
                 "get_portfolio_summary", "search_memory", "remember",
                 "create_event", "list_events", "cancel_event",
