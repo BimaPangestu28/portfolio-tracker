@@ -18,7 +18,7 @@ pub struct CashflowRow {
 
 /// User-supplied fields for a new cashflow entry. Provenance (`source`,
 /// `external_ref`) is set by the connector via `insert_sourced`, not the user.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, PartialEq)]
 pub struct NewCashflow {
     pub account_id: Option<i64>,
     pub occurred_on: String,
