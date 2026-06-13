@@ -11,6 +11,7 @@ pub async fn dispatch(db: &Db, name: &str, input: &serde_json::Value) -> Result<
         "create_todo" => create_todo(db, input).await,
         "list_todos" => list_todos(db).await,
         "complete_todo" => complete_todo(db, input).await,
+        "plan_day" => plan_day(db).await,
         "create_reminder" => create_reminder(db, input).await,
         "list_reminders" => list_reminders(db).await,
         "cancel_reminder" => cancel_reminder(db, input).await,
@@ -140,6 +141,13 @@ async fn list_todos(db: &Db) -> Result<String, String> {
         out.push('\n');
     }
     Ok(out)
+}
+
+async fn plan_day(db: &Db) -> Result<String, String> {
+    let plan = crate::assistant::proactive::plan::gather(db, chrono::Utc::now())
+        .await
+        .map_err(|e| format!("db error: {e}"))?;
+    Ok(crate::assistant::proactive::plan::render_plan_block(&plan))
 }
 
 async fn complete_todo(db: &Db, input: &serde_json::Value) -> Result<String, String> {
@@ -1328,6 +1336,18 @@ mod tests {
         clickup_create_task(&fake, &serde_json::json!({ "project": "PT AIS", "title": "x" })).await.unwrap();
         assert_eq!(fake.created_billables.lock().unwrap()[0], None);
         assert_eq!(fake.created_amounts.lock().unwrap()[0], None);
+    }
+
+    #[tokio::test]
+    async fn plan_day_returns_block_with_ordered_todos() {
+        let db = mem_db().await;
+        crate::repo::todos::create(&db, "kerja low", None, None, Some("low"), None).await.unwrap();
+        crate::repo::todos::create(&db, "kerja high", None, None, Some("high"), None).await.unwrap();
+        let out = dispatch(&db, "plan_day", &serde_json::json!({})).await.unwrap();
+        assert!(out.contains("Rencana hari"), "{out}");
+        let hi = out.find("kerja high").unwrap();
+        let lo = out.find("kerja low").unwrap();
+        assert!(hi < lo, "{out}");
     }
 
     #[tokio::test]

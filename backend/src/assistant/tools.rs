@@ -33,6 +33,11 @@ pub fn definitions() -> serde_json::Value {
             }
         },
         {
+            "name": "plan_day",
+            "description": "Assemble today's plan: agenda events at their times plus open todos ordered by priority. Use when the user asks to plan the day or what's left today (e.g. 'rencanain hariku', 'sisa hari ini apa aja').",
+            "input_schema": { "type": "object", "properties": {} }
+        },
+        {
             "name": "create_reminder",
             "description": "Schedule a reminder message to be sent to the user at a specific time, optionally recurring.",
             "input_schema": {
@@ -242,7 +247,7 @@ mod tests {
         assert_eq!(
             names,
             vec![
-                "create_todo", "list_todos", "complete_todo",
+                "create_todo", "list_todos", "complete_todo", "plan_day",
                 "create_reminder", "list_reminders", "cancel_reminder",
                 "get_portfolio_summary", "search_memory", "remember",
                 "create_event", "list_events", "cancel_event",
