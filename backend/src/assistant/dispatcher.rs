@@ -46,6 +46,18 @@ pub async fn dispatch(db: &Db, name: &str, input: &serde_json::Value) -> Result<
             Ok(api) => clickup_complete_task(&api, input).await,
             Err(e) => Err(format!("clickup belum dikonfigurasi: {e}")),
         },
+        "start_timer" => match crate::clickup::ClickUpClient::from_env() {
+            Ok(api) => clickup_start_timer(&api, input).await,
+            Err(e) => Err(format!("clickup belum dikonfigurasi: {e}")),
+        },
+        "stop_timer" => match crate::clickup::ClickUpClient::from_env() {
+            Ok(api) => clickup_stop_timer(&api).await,
+            Err(e) => Err(format!("clickup belum dikonfigurasi: {e}")),
+        },
+        "current_timer" => match crate::clickup::ClickUpClient::from_env() {
+            Ok(api) => clickup_current_timer(&api).await,
+            Err(e) => Err(format!("clickup belum dikonfigurasi: {e}")),
+        },
         "list_clients" => invoice_list_clients(db).await,
         "create_invoice" => invoice_create(db, input).await,
         _ => Err(format!("unknown tool: {name}")),
@@ -472,6 +484,64 @@ async fn clickup_list_projects(api: &dyn crate::clickup::ClickUpApi) -> Result<S
         out.push_str(&format!("#{} {}\n", p.id, p.name));
     }
     Ok(out)
+}
+
+/// Resolve a task name to (task_id, task_name, project_name) by scanning open
+/// tasks across all projects. Exact (case-insensitive) matches win; otherwise
+/// fall back to substring matches. Errors on no match or ambiguity so the model
+/// asks the user instead of guessing.
+async fn resolve_clickup_task(
+    api: &dyn crate::clickup::ClickUpApi,
+    name: &str,
+) -> Result<(String, String, String), String> {
+    let needle = name.to_lowercase();
+    let projects = api.list_projects().await.map_err(|e| format!("{e}"))?;
+    let mut exact = Vec::new();
+    let mut partial = Vec::new();
+    for project in &projects {
+        for task in api.list_tasks(&project.id).await.map_err(|e| format!("{e}"))? {
+            let hay = task.name.to_lowercase();
+            if hay == needle {
+                exact.push((task.id.clone(), task.name.clone(), project.name.clone()));
+            } else if hay.contains(&needle) {
+                partial.push((task.id.clone(), task.name.clone(), project.name.clone()));
+            }
+        }
+    }
+    let mut hits = if !exact.is_empty() { exact } else { partial };
+    match hits.len() {
+        0 => Err(format!("task '{name}' nggak ketemu — sebutin nama task yang ada ya")),
+        1 => Ok(hits.remove(0)),
+        _ => Err(format!("ada beberapa task yang cocok '{name}' — sebutin lebih spesifik")),
+    }
+}
+
+async fn clickup_start_timer(
+    api: &dyn crate::clickup::ClickUpApi,
+    input: &serde_json::Value,
+) -> Result<String, String> {
+    let name = str_arg(input, "task").ok_or("missing required argument 'task'")?;
+    let (task_id, task_name, project) = resolve_clickup_task(api, name).await?;
+    api.start_timer(&task_id).await.map_err(|e| format!("{e}"))?;
+    Ok(format!("timer jalan buat '{task_name}' ({project})"))
+}
+
+async fn clickup_stop_timer(api: &dyn crate::clickup::ClickUpApi) -> Result<String, String> {
+    match api.stop_timer().await.map_err(|e| format!("{e}"))? {
+        Some(entry) => Ok(format!(
+            "timer '{}' distop — {}",
+            entry.task_name,
+            crate::clickup::report::format_duration(entry.duration_ms)
+        )),
+        None => Ok("nggak ada timer yang jalan".into()),
+    }
+}
+
+async fn clickup_current_timer(api: &dyn crate::clickup::ClickUpApi) -> Result<String, String> {
+    match api.current_timer().await.map_err(|e| format!("{e}"))? {
+        Some(running) => Ok(format!("lagi ngerjain '{}'", running.task_name)),
+        None => Ok("lagi nggak ada timer yang jalan".into()),
+    }
 }
 
 async fn invoice_list_clients(db: &Db) -> Result<String, String> {
@@ -1449,6 +1519,44 @@ mod tests {
         let client = crate::repo::clients::get_by_name(&db, "Klien Baru").await.unwrap();
         assert!(client.is_some(), "client not created");
         assert!(crate::repo::invoices::max_seq_for_prefix(&db, "INV/").await.unwrap().is_some());
+    }
+
+    #[tokio::test]
+    async fn start_timer_resolves_task_and_starts() {
+        let fake = FakeClickUp::default();
+        fake.projects.lock().unwrap().push(Project { id: "l1".into(), name: "PT AIS".into() });
+        fake.tasks.lock().unwrap().insert("l1".into(), vec![Task {
+            id: "t9".into(), name: "landing page".into(), status: "open".into(), due_date_ms: None,
+        }]);
+        let out = clickup_start_timer(&fake, &serde_json::json!({ "task": "landing page" })).await.unwrap();
+        assert!(out.to_lowercase().contains("landing page"), "{out}");
+        assert_eq!(fake.started.lock().unwrap().as_slice(), &["t9".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn start_timer_unknown_task_errors() {
+        let fake = FakeClickUp::default();
+        fake.projects.lock().unwrap().push(Project { id: "l1".into(), name: "PT AIS".into() });
+        let err = clickup_start_timer(&fake, &serde_json::json!({ "task": "ghost" })).await.unwrap_err();
+        assert!(err.to_lowercase().contains("ghost") || err.to_lowercase().contains("ketemu"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn stop_timer_running_then_none() {
+        let fake = FakeClickUp::default();
+        *fake.running.lock().unwrap() = Some(RunningEntry { task_name: "landing".into(), started_ms: 0 });
+        let out = clickup_stop_timer(&fake).await.unwrap();
+        assert!(out.to_lowercase().contains("landing"), "{out}");
+        let out2 = clickup_stop_timer(&fake).await.unwrap();
+        assert!(out2.to_lowercase().contains("nggak ada"), "{out2}");
+    }
+
+    #[tokio::test]
+    async fn current_timer_reports_running_or_idle() {
+        let fake = FakeClickUp::default();
+        assert!(clickup_current_timer(&fake).await.unwrap().to_lowercase().contains("nggak ada"));
+        *fake.running.lock().unwrap() = Some(RunningEntry { task_name: "kontrak".into(), started_ms: 0 });
+        assert!(clickup_current_timer(&fake).await.unwrap().to_lowercase().contains("kontrak"));
     }
 
     #[tokio::test]
