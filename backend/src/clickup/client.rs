@@ -7,11 +7,15 @@ pub struct Project {
     pub name: String,
 }
 
-/// Fields for creating a task. Phase 1 uses title + optional due (epoch ms).
+/// Fields for creating a task.
 #[derive(Debug, Clone, Default)]
 pub struct NewTask {
     pub name: String,
     pub due_date_ms: Option<i64>,
+    /// Sets the ClickUp `Billable` checkbox custom field when present.
+    pub billable: Option<bool>,
+    /// Sets the ClickUp `Amount` money custom field (IDR) when present.
+    pub amount: Option<f64>,
 }
 
 /// A ClickUp task as read back from the API.
@@ -63,6 +67,8 @@ pub struct ClickUpClient {
     token: String,
     space_id: String,
     done_status: String,
+    billable_field: String,
+    amount_field: String,
 }
 
 impl ClickUpClient {
@@ -77,11 +83,34 @@ impl ClickUpClient {
         let space_id = std::env::var("CLICKUP_SPACE_ID")
             .map_err(|_| ClickUpError::Api { status: 0, body: "CLICKUP_SPACE_ID tidak diset".into() })?;
         let done_status = std::env::var("CLICKUP_DONE_STATUS").unwrap_or_else(|_| "complete".into());
-        Ok(Self { http: reqwest::Client::new(), token, space_id, done_status })
+        let billable_field = std::env::var("CLICKUP_BILLABLE_FIELD").unwrap_or_else(|_| "Billable".into());
+        let amount_field = std::env::var("CLICKUP_AMOUNT_FIELD").unwrap_or_else(|_| "Amount".into());
+        Ok(Self { http: reqwest::Client::new(), token, space_id, done_status, billable_field, amount_field })
     }
 
     fn classify(status: reqwest::StatusCode, body: String) -> ClickUpError {
         ClickUpError::Api { status: status.as_u16(), body }
+    }
+
+    /// (id, name) of every custom field visible on a list.
+    async fn list_fields(&self, list_id: &str) -> Result<Vec<(String, String)>, ClickUpError> {
+        let url = format!("https://api.clickup.com/api/v2/list/{list_id}/field");
+        let resp = self.http.get(&url)
+            .header(reqwest::header::AUTHORIZATION, &self.token)
+            .send().await.map_err(|e| ClickUpError::Http(e.to_string()))?;
+        let status = resp.status();
+        let body = resp.text().await.map_err(|e| ClickUpError::Http(e.to_string()))?;
+        if !status.is_success() {
+            return Err(Self::classify(status, body));
+        }
+        let parsed: serde_json::Value =
+            serde_json::from_str(&body).map_err(|e| ClickUpError::Http(e.to_string()))?;
+        let fields = parsed["fields"].as_array().map(|arr| {
+            arr.iter().filter_map(|f| {
+                Some((f["id"].as_str()?.to_string(), f["name"].as_str()?.to_string()))
+            }).collect()
+        }).unwrap_or_default();
+        Ok(fields)
     }
 }
 
@@ -134,6 +163,23 @@ impl ClickUpApi for ClickUpClient {
         let mut payload = serde_json::json!({ "name": task.name });
         if let Some(ms) = task.due_date_ms {
             payload["due_date"] = serde_json::json!(ms);
+        }
+        if task.billable.is_some() || task.amount.is_some() {
+            let fields = self.list_fields(list_id).await?;
+            let mut custom = Vec::new();
+            if let Some(b) = task.billable {
+                if let Some((id, _)) = fields.iter().find(|(_, n)| n.eq_ignore_ascii_case(&self.billable_field)) {
+                    custom.push(serde_json::json!({ "id": id, "value": b }));
+                }
+            }
+            if let Some(a) = task.amount {
+                if let Some((id, _)) = fields.iter().find(|(_, n)| n.eq_ignore_ascii_case(&self.amount_field)) {
+                    custom.push(serde_json::json!({ "id": id, "value": a }));
+                }
+            }
+            if !custom.is_empty() {
+                payload["custom_fields"] = serde_json::json!(custom);
+            }
         }
         let resp = self.http.post(&url)
             .header(reqwest::header::AUTHORIZATION, &self.token)

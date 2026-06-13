@@ -405,7 +405,9 @@ async fn clickup_create_task(
         }
         None => None,
     };
-    let task = crate::clickup::NewTask { name: title.to_string(), due_date_ms };
+    let billable = input.get("billable").and_then(|v| v.as_bool());
+    let amount = input.get("amount").and_then(|v| v.as_f64());
+    let task = crate::clickup::NewTask { name: title.to_string(), due_date_ms, billable, amount };
     api.create_task(&matched.id, &task).await.map_err(|e| format!("{e}"))?;
     Ok(format!("task '{title}' ditambahkan ke project '{}'", matched.name))
 }
@@ -1034,6 +1036,8 @@ mod tests {
         projects: Mutex<Vec<Project>>,
         created_tasks: Mutex<Vec<(String, String)>>, // (list_id, title)
         created_dues: Mutex<Vec<Option<i64>>>,       // due_date_ms per created task
+        created_billables: Mutex<Vec<Option<bool>>>,
+        created_amounts: Mutex<Vec<Option<f64>>>,
         tasks: Mutex<std::collections::HashMap<String, Vec<crate::clickup::client::Task>>>,
         completed: Mutex<Vec<String>>,
     }
@@ -1051,6 +1055,8 @@ mod tests {
         async fn create_task(&self, list_id: &str, task: &NewTask) -> Result<String, ClickUpError> {
             self.created_tasks.lock().unwrap().push((list_id.to_string(), task.name.clone()));
             self.created_dues.lock().unwrap().push(task.due_date_ms);
+            self.created_billables.lock().unwrap().push(task.billable);
+            self.created_amounts.lock().unwrap().push(task.amount);
             Ok(format!("task_{}", task.name))
         }
         async fn list_tasks(&self, list_id: &str) -> Result<Vec<crate::clickup::client::Task>, ClickUpError> {
@@ -1209,6 +1215,26 @@ mod tests {
         let fake = FakeClickUp::default();
         let err = clickup_complete_task(&fake, &serde_json::json!({})).await.unwrap_err();
         assert!(err.contains("task_id"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn create_task_passes_billable_and_amount() {
+        let fake = FakeClickUp::default();
+        fake.projects.lock().unwrap().push(Project { id: "l1".into(), name: "PT AIS".into() });
+        clickup_create_task(&fake, &serde_json::json!({
+            "project": "PT AIS", "title": "landing page", "billable": true, "amount": 10000000
+        })).await.unwrap();
+        assert_eq!(fake.created_billables.lock().unwrap()[0], Some(true));
+        assert_eq!(fake.created_amounts.lock().unwrap()[0], Some(10_000_000.0));
+    }
+
+    #[tokio::test]
+    async fn create_task_without_billable_is_none() {
+        let fake = FakeClickUp::default();
+        fake.projects.lock().unwrap().push(Project { id: "l1".into(), name: "PT AIS".into() });
+        clickup_create_task(&fake, &serde_json::json!({ "project": "PT AIS", "title": "x" })).await.unwrap();
+        assert_eq!(fake.created_billables.lock().unwrap()[0], None);
+        assert_eq!(fake.created_amounts.lock().unwrap()[0], None);
     }
 
     #[tokio::test]

@@ -194,7 +194,9 @@ pub fn definitions() -> serde_json::Value {
                 "properties": {
                     "project": { "type": "string", "description": "Project (ClickUp list) name the task belongs to" },
                     "title": { "type": "string", "description": "What the task is" },
-                    "due": { "type": "string", "description": "Optional due date, RFC3339 with +07:00 offset, e.g. 2026-06-14T17:00:00+07:00" }
+                    "due": { "type": "string", "description": "Optional due date, RFC3339 with +07:00 offset, e.g. 2026-06-14T17:00:00+07:00" },
+                    "billable": { "type": "boolean", "description": "Mark the task billable (sets the ClickUp Billable field, if it exists)" },
+                    "amount": { "type": "number", "description": "Billable amount in IDR (sets the ClickUp Amount field, if it exists)" }
                 },
                 "required": ["project", "title"]
             }
