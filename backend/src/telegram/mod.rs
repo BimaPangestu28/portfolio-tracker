@@ -262,7 +262,7 @@ async fn handle_update(client: &TelegramClient, db: &Db, tg: &SharedTgState, upd
         Action::Answer => {
             if let Some(voice) = &message.voice {
                 match transcribe_voice(client, voice).await {
-                    Ok(transcript) if !transcript.trim().is_empty() => {
+                    Ok(transcript) if !transcript.is_empty() => {
                         send_or_log(client, chat_id, &format!("Aku denger: {transcript}")).await;
                         let reply = answer(db, &transcript).await.unwrap_or_else(|e| {
                             tracing::error!("telegram: voice answer failed: {e:#}");
@@ -361,6 +361,19 @@ async fn kickoff_upload(db: &Db, seed: &str, marker: &str) -> anyhow::Result<Str
     crate::assistant::agent::handle_upload_event(db, &llm, "telegram", seed, marker).await
 }
 
+/// Whisper infers the audio format from the filename extension, so map the
+/// Telegram MIME type to a matching extension (default ogg — Telegram's usual).
+fn derive_voice_filename(mime: &str) -> String {
+    let ext = match mime {
+        "audio/mp4" | "audio/m4a" | "audio/x-m4a" => "mp4",
+        "audio/webm" => "webm",
+        "audio/mpeg" | "audio/mp3" => "mp3",
+        "audio/wav" | "audio/x-wav" => "wav",
+        _ => "ogg", // audio/ogg, audio/opus, unknown
+    };
+    format!("voice.{ext}")
+}
+
 /// Download a voice note and transcribe it via Whisper.
 async fn transcribe_voice(
     client: &TelegramClient,
@@ -368,10 +381,11 @@ async fn transcribe_voice(
 ) -> anyhow::Result<String> {
     let file_path = client.get_file_path(&voice.file_id).await?;
     let bytes = client.download_file(&file_path).await?;
-    let mime = voice.mime_type.clone().unwrap_or_else(|| "audio/ogg".into());
+    let mime = voice.mime_type.as_deref().unwrap_or("audio/ogg");
+    let filename = derive_voice_filename(mime);
     let llm = crate::llm::native::NativeLlmClient::from_env()
-        .map_err(|e| anyhow::anyhow!("transcription unavailable: {e}"))?;
-    Ok(llm.transcribe(bytes, "voice.ogg", &mime).await?)
+        .map_err(|e| anyhow::anyhow!("transcription unavailable (check OPENAI_API_KEY): {e}"))?;
+    Ok(llm.transcribe(bytes, &filename, mime).await?)
 }
 
 /// Download an attachment and run it through the shared ingestion pipeline
@@ -560,6 +574,14 @@ mod tests {
     #[test]
     fn seed_entry_line_handles_unreadable_entry() {
         assert_eq!(seed_entry_line(None), "(tidak terbaca)");
+    }
+
+    #[test]
+    fn voice_filename_extension_follows_mime() {
+        assert_eq!(derive_voice_filename("audio/ogg"), "voice.ogg");
+        assert_eq!(derive_voice_filename("audio/mp4"), "voice.mp4");
+        assert_eq!(derive_voice_filename("audio/webm"), "voice.webm");
+        assert_eq!(derive_voice_filename("application/weird"), "voice.ogg");
     }
 
     #[tokio::test]
