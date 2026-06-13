@@ -12,7 +12,7 @@ fn spell(n: u64) -> String {
         12..=19 => format!("{} belas", UNITS[(n - 10) as usize]),
         20..=99 => {
             let tens = format!("{} puluh", UNITS[(n / 10) as usize]);
-            if n % 10 == 0 { tens } else { format!("{tens} {}", UNITS[(n % 10) as usize]) }
+            if n.is_multiple_of(10) { tens } else { format!("{tens} {}", UNITS[(n % 10) as usize]) }
         }
         100..=199 => {
             let rest = n % 100;

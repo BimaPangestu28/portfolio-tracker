@@ -495,7 +495,8 @@ fn parse_line_items(input: &serde_json::Value) -> Result<Vec<crate::invoice::ass
     for it in arr {
         let title = it.get("title").and_then(|v| v.as_str()).filter(|s| !s.trim().is_empty()).ok_or("setiap item butuh 'title'")?;
         let amount = it.get("amount").and_then(|v| v.as_i64()).ok_or("setiap item butuh 'amount' (angka IDR)")?;
-        let qty = it.get("qty").and_then(|v| v.as_i64()).unwrap_or(1);
+        // Clamp once here so the rendered PDF and the persisted JSON agree.
+        let qty = it.get("qty").and_then(|v| v.as_i64()).unwrap_or(1).max(1);
         let body = it.get("body").and_then(|v| v.as_str()).filter(|s| !s.trim().is_empty()).map(|s| s.to_string());
         items.push(crate::invoice::assemble::ParsedItem { title: title.to_string(), body, qty, amount_idr: amount });
     }
