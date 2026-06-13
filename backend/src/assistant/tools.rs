@@ -11,7 +11,9 @@ pub fn definitions() -> serde_json::Value {
                 "properties": {
                     "title": { "type": "string", "description": "Short task title in the user's words" },
                     "notes": { "type": "string", "description": "Optional extra detail" },
-                    "due_at": { "type": "string", "description": "Optional deadline, RFC3339 with +07:00 offset, e.g. 2026-06-12T09:00:00+07:00" }
+                    "due_at": { "type": "string", "description": "Optional deadline, RFC3339 with +07:00 offset, e.g. 2026-06-12T09:00:00+07:00" },
+                    "priority": { "type": "string", "enum": ["high", "normal", "low"], "description": "Optional importance; default normal" },
+                    "estimate_minutes": { "type": "integer", "description": "Optional rough effort estimate in minutes, for day planning" }
                 },
                 "required": ["title"]
             }

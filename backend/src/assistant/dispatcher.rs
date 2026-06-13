@@ -83,9 +83,29 @@ async fn create_todo(db: &Db, input: &serde_json::Value) -> Result<String, Strin
         }
         None => None,
     };
-    let todo = crate::repo::todos::create(db, title, str_arg(input, "notes"), due_at.as_deref(), None, None)
-        .await
-        .map_err(|e| format!("db error: {e}"))?;
+    let priority = match str_arg(input, "priority") {
+        Some(p) if matches!(p, "high" | "normal" | "low") => Some(p),
+        Some(p) => return Err(format!("invalid priority '{p}' — use high/normal/low")),
+        None => None,
+    };
+    let estimate_minutes = match input.get("estimate_minutes") {
+        None | Some(serde_json::Value::Null) => None,
+        Some(v) => Some(
+            v.as_i64()
+                .filter(|m| *m > 0)
+                .ok_or_else(|| format!("estimate_minutes must be a positive integer, got {v}"))?,
+        ),
+    };
+    let todo = crate::repo::todos::create(
+        db,
+        title,
+        str_arg(input, "notes"),
+        due_at.as_deref(),
+        priority,
+        estimate_minutes,
+    )
+    .await
+    .map_err(|e| format!("db error: {e}"))?;
     Ok(format!("created todo #{} '{}'", todo.id, todo.title))
 }
 
@@ -99,6 +119,14 @@ async fn list_todos(db: &Db) -> Result<String, String> {
         out.push_str(&format!("#{} {}", t.id, t.title));
         if let Some(due) = &t.due_at {
             out.push_str(&format!(" (due {})", to_wib_display(due)));
+        }
+        if let Some(p) = &t.priority {
+            if p != "normal" {
+                out.push_str(&format!(" [{p}]"));
+            }
+        }
+        if let Some(est) = t.estimate_minutes {
+            out.push_str(&format!(" ~{est}m"));
         }
         if let Some(notes) = &t.notes {
             out.push_str(&format!(" — {notes}"));
@@ -948,6 +976,28 @@ mod tests {
         let listed = dispatch(&db, "list_accounts", &serde_json::json!({})).await.unwrap();
         assert!(listed.contains("Nanovest"), "{listed}");
         assert!(listed.contains("broker"), "{listed}");
+    }
+
+    #[tokio::test]
+    async fn create_todo_stores_priority_and_estimate() {
+        let db = mem_db().await;
+        dispatch(&db, "create_todo", &serde_json::json!({
+            "title": "siapin deck",
+            "priority": "high",
+            "estimate_minutes": 45
+        })).await.unwrap();
+        let todos = crate::repo::todos::list_open(&db).await.unwrap();
+        assert_eq!(todos[0].priority.as_deref(), Some("high"));
+        assert_eq!(todos[0].estimate_minutes, Some(45));
+    }
+
+    #[tokio::test]
+    async fn create_todo_rejects_bad_priority() {
+        let db = mem_db().await;
+        let err = dispatch(&db, "create_todo", &serde_json::json!({
+            "title": "x", "priority": "urgent"
+        })).await.unwrap_err();
+        assert!(err.contains("priority"), "{err}");
     }
 
     #[tokio::test]
