@@ -977,6 +977,7 @@ mod tests {
     struct FakeClickUp {
         projects: Mutex<Vec<Project>>,
         created_tasks: Mutex<Vec<(String, String)>>, // (list_id, title)
+        created_dues: Mutex<Vec<Option<i64>>>,       // due_date_ms per created task
     }
 
     #[async_trait::async_trait]
@@ -991,6 +992,7 @@ mod tests {
         }
         async fn create_task(&self, list_id: &str, task: &NewTask) -> Result<String, ClickUpError> {
             self.created_tasks.lock().unwrap().push((list_id.to_string(), task.name.clone()));
+            self.created_dues.lock().unwrap().push(task.due_date_ms);
             Ok(format!("task_{}", task.name))
         }
     }
@@ -1016,6 +1018,54 @@ mod tests {
         let out = clickup_create_project(&fake, &serde_json::json!({ "name": "Klien Baru" })).await.unwrap();
         assert!(out.contains("Klien Baru"), "{out}");
         assert!(fake.projects.lock().unwrap().iter().any(|p| p.name == "Klien Baru"));
+    }
+
+    #[tokio::test]
+    async fn create_task_parses_due_into_ms() {
+        let fake = FakeClickUp::default();
+        fake.projects.lock().unwrap().push(Project { id: "l1".into(), name: "PT AIS".into() });
+        clickup_create_task(&fake, &serde_json::json!({
+            "project": "PT AIS", "title": "kirim invoice", "due": "2026-06-14T17:00:00+07:00"
+        })).await.unwrap();
+        // The same instant in epoch ms; proves parse_tool_datetime -> timestamp_millis ran.
+        let expected = chrono::DateTime::parse_from_rfc3339("2026-06-14T17:00:00+07:00")
+            .unwrap()
+            .timestamp_millis();
+        assert_eq!(fake.created_dues.lock().unwrap()[0], Some(expected));
+    }
+
+    #[tokio::test]
+    async fn create_task_without_due_records_none() {
+        let fake = FakeClickUp::default();
+        fake.projects.lock().unwrap().push(Project { id: "l1".into(), name: "PT AIS".into() });
+        clickup_create_task(&fake, &serde_json::json!({ "project": "PT AIS", "title": "x" }))
+            .await.unwrap();
+        assert_eq!(fake.created_dues.lock().unwrap()[0], None);
+    }
+
+    #[tokio::test]
+    async fn create_task_bad_due_errors_and_creates_nothing() {
+        let fake = FakeClickUp::default();
+        fake.projects.lock().unwrap().push(Project { id: "l1".into(), name: "PT AIS".into() });
+        let err = clickup_create_task(&fake, &serde_json::json!({
+            "project": "PT AIS", "title": "x", "due": "besok pagi"
+        })).await.unwrap_err();
+        assert!(err.contains("tidak terbaca"), "{err}");
+        assert!(fake.created_tasks.lock().unwrap().is_empty(), "no task on bad due");
+    }
+
+    #[tokio::test]
+    async fn create_project_then_create_task_completes_the_recovery_loop() {
+        let fake = FakeClickUp::default();
+        // Agent flow: project missing -> create it -> retry create_task against it.
+        clickup_create_project(&fake, &serde_json::json!({ "name": "Klien Baru" })).await.unwrap();
+        let out = clickup_create_task(&fake, &serde_json::json!({
+            "project": "klien baru", "title": "bikin kontrak"
+        })).await.unwrap();
+        assert!(out.contains("bikin kontrak"), "{out}");
+        let created = fake.created_tasks.lock().unwrap();
+        assert_eq!(created.len(), 1);
+        assert_eq!(created[0].0, "list_Klien Baru", "task routed to the freshly created list");
     }
 
     #[tokio::test]
