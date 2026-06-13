@@ -1380,6 +1380,15 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn rollover_todos_rejects_malformed_ids() {
+        let db = mem_db().await;
+        let scalar = dispatch(&db, "rollover_todos", &serde_json::json!({ "ids": 5 })).await.unwrap_err();
+        assert!(scalar.contains("ids"), "{scalar}");
+        let bad_elem = dispatch(&db, "rollover_todos", &serde_json::json!({ "ids": ["x"] })).await.unwrap_err();
+        assert!(bad_elem.contains("ids"), "{bad_elem}");
+    }
+
+    #[tokio::test]
     async fn plan_day_returns_block_with_ordered_todos() {
         let db = mem_db().await;
         crate::repo::todos::create(&db, "kerja low", None, None, Some("low"), None).await.unwrap();

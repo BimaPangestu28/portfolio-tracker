@@ -131,6 +131,7 @@ pub async fn rollover(
             .await?;
         moved.push(get(db, todo.id).await?);
     }
+    moved.sort_by_key(|t| t.id);
     Ok(moved)
 }
 
