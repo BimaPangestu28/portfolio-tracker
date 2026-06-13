@@ -3,4 +3,4 @@
 pub mod client;
 pub mod report;
 
-pub use client::{ClickUpApi, ClickUpClient, NewTask, Project, RunningEntry, TimeEntry};
+pub use client::{ClickUpApi, ClickUpClient, NewTask, Project};
