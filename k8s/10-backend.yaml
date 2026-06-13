@@ -107,6 +107,21 @@ spec:
                   name: portfolio-secrets
                   key: GOOGLE_TOKEN_ENC_KEY
                   optional: true
+            # Optional: ClickUp freelance project tools. Omit the keys from the
+            # secret to disable (tools return "belum dikonfigurasi", briefing
+            # section omitted). Both come from the secret — this is a public repo.
+            - name: CLICKUP_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: portfolio-secrets
+                  key: CLICKUP_API_TOKEN
+                  optional: true
+            - name: CLICKUP_SPACE_ID
+              valueFrom:
+                secretKeyRef:
+                  name: portfolio-secrets
+                  key: CLICKUP_SPACE_ID
+                  optional: true
             # Optional: Upwork OAuth sync. Leave unset / omit from secret to disable.
             - name: UPWORK_REDIRECT_URI
               value: "https://portfolio.catalystlabs.id/api/upwork/oauth/callback"
