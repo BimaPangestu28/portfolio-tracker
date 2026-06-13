@@ -46,6 +46,8 @@ pub async fn dispatch(db: &Db, name: &str, input: &serde_json::Value) -> Result<
             Ok(api) => clickup_complete_task(&api, input).await,
             Err(e) => Err(format!("clickup belum dikonfigurasi: {e}")),
         },
+        "list_clients" => invoice_list_clients(db).await,
+        "create_invoice" => invoice_create(db, input).await,
         _ => Err(format!("unknown tool: {name}")),
     }
 }
@@ -470,6 +472,104 @@ async fn clickup_list_projects(api: &dyn crate::clickup::ClickUpApi) -> Result<S
         out.push_str(&format!("#{} {}\n", p.id, p.name));
     }
     Ok(out)
+}
+
+async fn invoice_list_clients(db: &Db) -> Result<String, String> {
+    let clients = crate::repo::clients::list(db).await.map_err(|e| format!("db error: {e}"))?;
+    if clients.is_empty() {
+        return Ok("belum ada klien tersimpan".into());
+    }
+    let mut out = String::new();
+    for c in clients {
+        out.push_str(&format!("#{} {}\n", c.id, c.name));
+    }
+    Ok(out)
+}
+
+fn parse_line_items(input: &serde_json::Value) -> Result<Vec<crate::invoice::assemble::ParsedItem>, String> {
+    let arr = input.get("line_items").and_then(|v| v.as_array()).ok_or("line_items harus berupa array")?;
+    if arr.is_empty() {
+        return Err("line_items kosong".into());
+    }
+    let mut items = Vec::new();
+    for it in arr {
+        let title = it.get("title").and_then(|v| v.as_str()).filter(|s| !s.trim().is_empty()).ok_or("setiap item butuh 'title'")?;
+        let amount = it.get("amount").and_then(|v| v.as_i64()).ok_or("setiap item butuh 'amount' (angka IDR)")?;
+        // Clamp once here so the rendered PDF and the persisted JSON agree.
+        let qty = it.get("qty").and_then(|v| v.as_i64()).unwrap_or(1).max(1);
+        let body = it.get("body").and_then(|v| v.as_str()).filter(|s| !s.trim().is_empty()).map(|s| s.to_string());
+        items.push(crate::invoice::assemble::ParsedItem { title: title.to_string(), body, qty, amount_idr: amount });
+    }
+    Ok(items)
+}
+
+async fn invoice_create(db: &Db, input: &serde_json::Value) -> Result<String, String> {
+    let client_name = str_arg(input, "client_name").ok_or("missing required argument 'client_name'")?;
+    let items = parse_line_items(input)?;
+
+    let existing = crate::repo::clients::get_by_name(db, client_name)
+        .await
+        .map_err(|e| format!("db error: {e}"))?;
+    // A new client with no details: bail before reading config or writing
+    // anything (keeps this path independent of the invoice env vars).
+    if existing.is_none() && input.get("client_details").is_none() {
+        return Err(format!("klien '{client_name}' belum ada — minta detail klien (sub_name/website) ke user dulu, lalu kirim lewat client_details"));
+    }
+
+    // We will create an invoice now, so config is required. Read it BEFORE
+    // creating any client row so a config failure never leaves an orphan client.
+    let mut config = crate::invoice::config::from_env()?;
+    if let Some(days) = input.get("due_days").and_then(|v| v.as_i64()) {
+        config.due_days = days;
+    }
+
+    let client = match existing {
+        Some(c) => c,
+        None => {
+            let details = input.get("client_details");
+            let sub = details.and_then(|d| d.get("sub_name")).and_then(|v| v.as_str());
+            let web = details.and_then(|d| d.get("website")).and_then(|v| v.as_str());
+            crate::repo::clients::create(db, &crate::repo::clients::NewClient { name: client_name, sub_name: sub, website: web })
+                .await.map_err(|e| format!("db error: {e}"))?
+        }
+    };
+
+    let now = chrono::Utc::now();
+    let number = crate::invoice::number::next_number(db, now).await.map_err(|e| format!("db error: {e}"))?;
+    let issue_date = now.with_timezone(&crate::assistant::time::wib()).date_naive();
+    let due_date = issue_date + chrono::Duration::days(config.due_days);
+    let data = crate::invoice::assemble::assemble_invoice_data(number.clone(), issue_date, &config, &client, &items);
+    let pdf = crate::invoice::render::render_pdf(&data).map_err(|e| format!("gagal render invoice: {e}"))?;
+
+    let issue_date_iso = issue_date.format("%Y-%m-%d").to_string();
+    let due_date_iso = due_date.format("%Y-%m-%d").to_string();
+    let line_items_json = serde_json::to_string(
+        &items.iter().map(|it| serde_json::json!({ "title": it.title, "body": it.body, "qty": it.qty, "amount": it.amount_idr })).collect::<Vec<_>>()
+    ).unwrap_or_else(|_| "[]".into());
+    crate::repo::invoices::insert(db, &crate::repo::invoices::NewInvoice {
+        number: &number, client_id: client.id,
+        issue_date: &issue_date_iso, due_date: &due_date_iso,
+        subtotal: &data.subtotal, total: &data.total, line_items_json: &line_items_json,
+    }).await.map_err(|e| format!("db error: {e}"))?;
+
+    let sent = send_invoice_pdf(db, &number, pdf).await;
+    let suffix = match sent {
+        Ok(true) => " dan dikirim ke Telegram".to_string(),
+        Ok(false) => " (tersimpan; Telegram belum tertaut, jadi PDF tidak dikirim)".to_string(),
+        Err(e) => format!(" (tersimpan, tapi gagal kirim PDF: {e})"),
+    };
+    Ok(format!("Invoice {number} dibuat — total {}{suffix}", data.total))
+}
+
+/// Send the rendered PDF to the linked owner chat. Ok(false) = no link/token.
+async fn send_invoice_pdf(db: &Db, number: &str, pdf: Vec<u8>) -> Result<bool, String> {
+    let Ok(token) = std::env::var("TELEGRAM_BOT_TOKEN") else { return Ok(false); };
+    if token.trim().is_empty() { return Ok(false); }
+    let Some(link) = crate::repo::telegram_link::get(db).await.map_err(|e| format!("db error: {e}"))? else { return Ok(false); };
+    let client = crate::telegram::client::TelegramClient::new(token);
+    let filename = crate::telegram::client::document_filename(number);
+    client.send_document(link.chat_id, &filename, pdf, &format!("Invoice {number}")).await.map_err(|e| format!("{e}"))?;
+    Ok(true)
 }
 
 async fn list_instruments(db: &Db) -> Result<String, String> {
@@ -1256,6 +1356,64 @@ mod tests {
         clickup_create_task(&fake, &serde_json::json!({ "project": "PT AIS", "title": "x" })).await.unwrap();
         assert_eq!(fake.created_billables.lock().unwrap()[0], None);
         assert_eq!(fake.created_amounts.lock().unwrap()[0], None);
+    }
+
+    #[tokio::test]
+    async fn list_clients_lists_saved() {
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        crate::repo::clients::create(&db, &crate::repo::clients::NewClient { name: "PT AIS", sub_name: None, website: None }).await.unwrap();
+        let out = invoice_list_clients(&db).await.unwrap();
+        assert!(out.contains("PT AIS"), "{out}");
+    }
+
+    #[tokio::test]
+    async fn create_invoice_persists_and_reports_number() {
+        std::env::set_var("INVOICE_ISSUER_NAME", "Bima");
+        std::env::set_var("INVOICE_ACCOUNT_NO", "123");
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        crate::repo::clients::create(&db, &crate::repo::clients::NewClient { name: "PT AIS", sub_name: None, website: None }).await.unwrap();
+        let out = invoice_create(&db, &serde_json::json!({
+            "client_name": "PT AIS",
+            "line_items": [{ "title": "Landing page", "amount": 10000000 }]
+        })).await.unwrap();
+        std::env::remove_var("INVOICE_ISSUER_NAME");
+        std::env::remove_var("INVOICE_ACCOUNT_NO");
+        assert!(out.contains("INV/"), "should report the invoice number: {out}");
+        let seq = crate::repo::invoices::max_seq_for_prefix(&db, "INV/").await.unwrap();
+        assert!(seq.is_some(), "invoice not persisted");
+    }
+
+    #[tokio::test]
+    async fn create_invoice_unknown_client_asks_for_details() {
+        // No env vars needed — the unknown-client check short-circuits before
+        // config is read, so this test is immune to env-var race conditions.
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        let err = invoice_create(&db, &serde_json::json!({
+            "client_name": "Klien Baru",
+            "line_items": [{ "title": "x", "amount": 1000 }]
+        })).await.unwrap_err();
+        assert!(err.contains("Klien Baru"), "{err}");
+        assert!(err.contains("detail") || err.contains("belum ada"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn create_invoice_new_client_with_details_creates_both() {
+        std::env::set_var("INVOICE_ISSUER_NAME", "Bima");
+        std::env::set_var("INVOICE_ACCOUNT_NO", "123");
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        let out = invoice_create(&db, &serde_json::json!({
+            "client_name": "Klien Baru",
+            "client_details": { "sub_name": "PT Baru", "website": "baru.id" },
+            "line_items": [{ "title": "Konsultasi", "amount": 5_000_000 }],
+            "due_days": 30
+        })).await.unwrap();
+        std::env::remove_var("INVOICE_ISSUER_NAME");
+        std::env::remove_var("INVOICE_ACCOUNT_NO");
+        assert!(out.contains("INV/"), "{out}");
+        // Both the client and the invoice were persisted.
+        let client = crate::repo::clients::get_by_name(&db, "Klien Baru").await.unwrap();
+        assert!(client.is_some(), "client not created");
+        assert!(crate::repo::invoices::max_seq_for_prefix(&db, "INV/").await.unwrap().is_some());
     }
 
     #[tokio::test]
