@@ -3,6 +3,7 @@
 //! income; the portfolio domain is never touched. Mirrors the `google` module.
 
 pub mod client;
+pub mod contracts;
 pub mod crypto;
 pub mod engine;
 pub mod jobs;

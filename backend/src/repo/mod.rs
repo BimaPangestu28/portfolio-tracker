@@ -2,6 +2,7 @@ pub mod accounts;
 pub mod events;
 pub mod google_integration;
 pub mod upwork_integration;
+pub mod upwork_project_link;
 pub mod proactive_log;
 pub mod cashflow;
 pub mod cashflow_categories;
