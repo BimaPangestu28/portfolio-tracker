@@ -242,6 +242,71 @@ pub async fn run_pass<C: UpworkClient, I: JobIntel, N: Notifier>(
     Ok(sent)
 }
 
+use crate::repo::{telegram_link, upwork_integration};
+use crate::upwork::client::HttpUpwork;
+use crate::upwork::oauth::OAuthConfig;
+
+const DEFAULT_POLL_SECS: u64 = 1800;
+const DEFAULT_THRESHOLD: u8 = 7;
+const DEFAULT_MAX_QUERIES: usize = 3;
+const FACT_LIMIT: u32 = 8;
+
+fn env_u8(key: &str, default: u8) -> u8 {
+    std::env::var(key).ok().and_then(|v| v.parse().ok()).map(|n: u8| n.min(10)).unwrap_or(default)
+}
+fn env_usize(key: &str, default: usize) -> usize {
+    std::env::var(key).ok().and_then(|v| v.parse().ok()).unwrap_or(default)
+}
+
+/// One full notification cycle: resolve owner + token, pull skills, run a pass.
+pub async fn notify_cycle(db: &Db) -> anyhow::Result<usize> {
+    let Some(link) = telegram_link::get(db).await? else { return Ok(0) };
+    let cfg = OAuthConfig::from_env()?;
+    let key = crate::upwork::crypto::key_from_env()?;
+    let token = match crate::upwork::engine::ensure_access_token(db, &cfg, &key).await {
+        Ok(t) => t,
+        Err(e) => {
+            upwork_integration::set_status(db, "error", Some(&e.to_string())).await?;
+            return Ok(0);
+        }
+    };
+    let Ok(tg_token) = std::env::var("TELEGRAM_BOT_TOKEN") else { return Ok(0) };
+
+    let facts = match crate::assistant::memory::MemoryClient::from_env() {
+        Some(m) => m.search("skills experience expertise", FACT_LIMIT).await,
+        None => Vec::new(),
+    };
+
+    let client = HttpUpwork::new(token);
+    let intel = LlmJobIntel;
+    let notifier = TelegramNotifier { client: crate::telegram::client::TelegramClient::new(tg_token) };
+    run_pass(
+        db, &client, &intel, &notifier, link.chat_id, &facts,
+        env_u8("UPWORK_JOB_SCORE_THRESHOLD", DEFAULT_THRESHOLD),
+        env_usize("UPWORK_MAX_WATCH_QUERIES", DEFAULT_MAX_QUERIES),
+    ).await
+}
+
+/// Independent polling loop. No-op when Upwork OAuth env is unset.
+pub fn spawn(db: Db) {
+    if OAuthConfig::from_env().is_err() {
+        tracing::info!("UPWORK_CLIENT_* not set; job notifications disabled");
+        return;
+    }
+    let secs = std::env::var("UPWORK_JOBS_POLL_SECS").ok().and_then(|v| v.parse().ok()).unwrap_or(DEFAULT_POLL_SECS);
+    let period = std::time::Duration::from_secs(secs);
+    tokio::spawn(async move {
+        loop {
+            match notify_cycle(&db).await {
+                Ok(n) if n > 0 => tracing::info!("upwork job notif: sent {n}"),
+                Ok(_) => {}
+                Err(e) => tracing::warn!("upwork job notif cycle failed: {e:#}"),
+            }
+            tokio::time::sleep(period).await;
+        }
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
