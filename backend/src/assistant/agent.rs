@@ -523,7 +523,7 @@ mod tests {
         handle_message(&db, &model2, "telegram", "iya").await.unwrap();
         let seen = model2.messages_of_call(0);
         assert!(
-            seen.iter().any(|m| m["content"].as_str().map_or(false, |c| c.contains("IBKR"))),
+            seen.iter().any(|m| m["content"].as_str().is_some_and(|c| c.contains("IBKR"))),
             "follow-up turn should include the prior assistant question: {seen:?}"
         );
     }
