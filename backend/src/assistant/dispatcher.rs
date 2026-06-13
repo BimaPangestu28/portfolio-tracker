@@ -1128,7 +1128,7 @@ mod tests {
 
     // ── ClickUp fake ─────────────────────────────────────────────────────────
 
-    use crate::clickup::client::{ClickUpApi, ClickUpError, NewTask, Project, Task};
+    use crate::clickup::client::{ClickUpApi, ClickUpError, NewTask, Project, RunningEntry, Task, TimeEntry};
     use std::sync::Mutex;
 
     #[derive(Default)]
@@ -1140,6 +1140,11 @@ mod tests {
         created_amounts: Mutex<Vec<Option<f64>>>,
         tasks: Mutex<std::collections::HashMap<String, Vec<crate::clickup::client::Task>>>,
         completed: Mutex<Vec<String>>,
+        running: Mutex<Option<RunningEntry>>,
+        entries: Mutex<Vec<TimeEntry>>,
+        started: Mutex<Vec<String>>,       // task_ids passed to start_timer
+        stopped: Mutex<u32>,
+        added: Mutex<Vec<(String, i64)>>,  // (task_id, duration_ms)
     }
 
     #[async_trait::async_trait]
@@ -1168,6 +1173,36 @@ mod tests {
             for tasks in self.tasks.lock().unwrap().values_mut() {
                 tasks.retain(|t| t.id != task_id);
             }
+            Ok(())
+        }
+        async fn start_timer(&self, task_id: &str) -> Result<(), ClickUpError> {
+            self.started.lock().unwrap().push(task_id.to_string());
+            *self.running.lock().unwrap() = Some(RunningEntry {
+                task_name: task_id.to_string(),
+                started_ms: 0,
+            });
+            Ok(())
+        }
+        async fn stop_timer(&self) -> Result<Option<TimeEntry>, ClickUpError> {
+            *self.stopped.lock().unwrap() += 1;
+            let running = self.running.lock().unwrap().take();
+            Ok(running.map(|r| TimeEntry {
+                task_id: r.task_name.clone(),
+                task_name: r.task_name,
+                project_name: "(test)".into(),
+                duration_ms: 3_600_000,
+                start_ms: 0,
+                billable: false,
+            }))
+        }
+        async fn current_timer(&self) -> Result<Option<RunningEntry>, ClickUpError> {
+            Ok(self.running.lock().unwrap().clone())
+        }
+        async fn time_entries(&self, _start_ms: i64, _end_ms: i64) -> Result<Vec<TimeEntry>, ClickUpError> {
+            Ok(self.entries.lock().unwrap().clone())
+        }
+        async fn add_time_entry(&self, task_id: &str, duration_ms: i64, _start_ms: i64) -> Result<(), ClickUpError> {
+            self.added.lock().unwrap().push((task_id.to_string(), duration_ms));
             Ok(())
         }
     }
