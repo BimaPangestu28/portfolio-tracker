@@ -722,14 +722,16 @@ async fn list_inbox(db: &Db) -> Result<String, String> {
 }
 
 async fn gmail_list_emails(api: &dyn crate::google::gmail::GmailApi, input: &serde_json::Value) -> Result<String, String> {
-    let max = input.get("max").and_then(|v| v.as_u64()).unwrap_or(10) as u32;
+    let max = input.get("max").and_then(|v| v.as_u64()).unwrap_or(10).min(25) as u32;
     let emails = api.list_important_unread(max).await.map_err(|e| format!("{e}"))?;
     if emails.is_empty() {
         return Ok("nggak ada email penting yang belum dibaca".into());
     }
     let mut out = String::new();
     for e in emails {
-        out.push_str(&format!("[{}] {} — {} — {}\n", e.id, e.from, e.subject, e.snippet));
+        let subject = e.subject.replace('\n', " ");
+        let snippet = e.snippet.replace('\n', " ");
+        out.push_str(&format!("[{}] {} — {} — {}\n", e.id, e.from, subject, snippet));
     }
     Ok(out)
 }

@@ -250,4 +250,33 @@ mod tests {
         assert!(text.contains("Subject: Re: Hi"), "{text}");
         assert!(text.ends_with("isi balasan"), "{text}");
     }
+
+    #[test]
+    fn parse_detail_finds_nested_plain_part() {
+        let data = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(b"nested body");
+        let msg = serde_json::json!({
+            "id": "m2", "threadId": "t2", "snippet": "snip",
+            "payload": {
+                "mimeType": "multipart/mixed",
+                "headers": [],
+                "parts": [
+                    { "mimeType": "multipart/alternative", "parts": [
+                        { "mimeType": "text/html", "body": { "data": "PGh0bWw" } },
+                        { "mimeType": "text/plain", "body": { "data": data } }
+                    ] }
+                ]
+            }
+        });
+        assert_eq!(parse_detail(&msg).body, "nested body");
+    }
+
+    #[test]
+    fn parse_detail_falls_back_to_snippet_when_no_text_part() {
+        // No text/plain part and no decodable top-level body → snippet is used.
+        let msg = serde_json::json!({
+            "id": "m3", "threadId": "t3", "snippet": "just a snippet",
+            "payload": { "mimeType": "text/html", "headers": [], "body": {} }
+        });
+        assert_eq!(parse_detail(&msg).body, "just a snippet");
+    }
 }
