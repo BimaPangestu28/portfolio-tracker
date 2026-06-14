@@ -42,6 +42,11 @@ pub async fn insert(db: &Db, inv: &NewInvoice<'_>) -> anyhow::Result<InvoiceRow>
 
 /// Highest NNN among invoices whose number starts with `prefix`
 /// (e.g. "INV/2026/VI/"); None when the month has no invoices yet.
+pub async fn list_all(db: &Db) -> anyhow::Result<Vec<InvoiceRow>> {
+    Ok(sqlx::query_as::<_, InvoiceRow>("SELECT * FROM invoice ORDER BY issue_date DESC, id DESC")
+        .fetch_all(db).await?)
+}
+
 pub async fn max_seq_for_prefix(db: &Db, prefix: &str) -> anyhow::Result<Option<u32>> {
     // Prefix is app-built (`INV/<year>/<roman>/`) and never contains LIKE
     // wildcards, so no ESCAPE handling is needed.

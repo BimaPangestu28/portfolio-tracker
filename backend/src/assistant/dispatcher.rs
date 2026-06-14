@@ -64,6 +64,8 @@ pub async fn dispatch(db: &Db, name: &str, input: &serde_json::Value) -> Result<
             Ok(token) => gmail_draft_reply(&crate::google::gmail::HttpGmail::new(token), input).await,
             Err(_) => Err("Gmail belum tersambung — sambungin Google dulu di web UI".into()),
         },
+        "cashflow_summary" => cashflow_summary(db, input).await,
+        "portfolio_insights" => portfolio_insights(db).await,
         _ => Err(format!("unknown tool: {name}")),
     }
 }
@@ -748,6 +750,205 @@ async fn gmail_draft_reply(api: &dyn crate::google::gmail::GmailApi, input: &ser
     let m = api.get_message(id).await.map_err(|e| format!("{e}"))?;
     api.create_draft(&m.thread_id, &m.from, &m.subject, body).await.map_err(|e| format!("{e}"))?;
     Ok(format!("draft balasan ke {} disimpan di Gmail — cek & kirim dari sana", m.from))
+}
+
+/// Returns `true` when `m` looks like a valid YYYY-MM month string.
+///
+/// Accepts exactly 7 characters: four ASCII digits, a hyphen, two ASCII
+/// digits — e.g. "2026-06". Does not validate calendar range (that is
+/// enforced downstream by the DB query or the service layer).
+fn valid_month(m: &str) -> bool {
+    m.len() == 7
+        && m.as_bytes()[4] == b'-'
+        && m[..4].bytes().all(|b| b.is_ascii_digit())
+        && m[5..].bytes().all(|b| b.is_ascii_digit())
+}
+
+/// Summarise the current (or given) month's cashflow: money in, money out,
+/// net, top 3 expense categories, and total freelance invoiced that month.
+/// Invoiced amount is shown separately — not added to income — because it
+/// represents amounts billed, not necessarily received.
+async fn cashflow_summary(db: &Db, input: &serde_json::Value) -> Result<String, String> {
+    // Resolve the target month: explicit arg or current WIB month.
+    let month: String = match str_arg(input, "month") {
+        Some(m) => {
+            if !valid_month(m) {
+                return Err("format bulan harus YYYY-MM, mis. 2026-06".into());
+            }
+            m.to_string()
+        }
+        None => chrono::Utc::now()
+            .with_timezone(&super::time::wib())
+            .format("%Y-%m")
+            .to_string(),
+    };
+
+    // Load cashflow rows for the month.
+    let cashflow_rows = crate::repo::cashflow::list_for_month(db, &month)
+        .await
+        .map_err(|e| format!("db error: {e}"))?;
+
+    // Load cashflow categories (income/expense, with optional monthly budget).
+    let category_rows = crate::repo::cashflow_categories::list(db)
+        .await
+        .map_err(|e| format!("db error: {e}"))?;
+
+    // Map CashflowRow → CfRow (the service layer struct).
+    // Use unwrap_or(ZERO) so a malformed amount string never silently drops a
+    // row from the totals — consistent with how portfolio_insights handles it.
+    let cf_rows: Vec<crate::service::cashflow::CfRow> = cashflow_rows
+        .iter()
+        .map(|row| crate::service::cashflow::CfRow {
+            direction: row.direction.clone(),
+            amount: crate::repo::dec(&row.amount).unwrap_or(rust_decimal::Decimal::ZERO),
+            category_id: row.category_id,
+        })
+        .collect();
+
+    // Map CashflowCategoryRow → CatRow with the real kind and optional budget.
+    let cat_rows: Vec<crate::service::cashflow::CatRow> = category_rows
+        .iter()
+        .map(|cat| crate::service::cashflow::CatRow {
+            id: cat.id,
+            name: cat.name.clone(),
+            kind: cat.kind.clone(),
+            budget: cat.monthly_budget.as_deref().and_then(|s| s.parse::<rust_decimal::Decimal>().ok()),
+        })
+        .collect();
+
+    let summary = crate::service::cashflow::month_summary(&month, &cf_rows, &cat_rows);
+
+    // Sum invoices issued in this month.
+    let all_invoices = crate::repo::invoices::list_all(db)
+        .await
+        .map_err(|e| format!("db error: {e}"))?;
+    let invoiced_total: rust_decimal::Decimal = all_invoices
+        .iter()
+        .filter(|inv| inv.issue_date.starts_with(&month))
+        .filter_map(|inv| crate::repo::dec(&inv.total).ok())
+        .fold(rust_decimal::Decimal::ZERO, |acc, amount| acc + amount);
+
+    // Render the summary using Indonesian number formatting.
+    let format_amount = |d: &rust_decimal::Decimal| {
+        crate::service::chat::group_id(&d.round_dp(0))
+    };
+
+    let mut output = format!(
+        "Bulan {month}: masuk Rp {}, kepake Rp {}, net Rp {}\n",
+        format_amount(&summary.total_in),
+        format_amount(&summary.total_out),
+        format_amount(&summary.net),
+    );
+
+    // Top 3 expense categories sorted by actual spending (descending).
+    // Categories with zero actual spend are excluded so an empty category
+    // never produces a misleading "- Health: Rp 0" line.
+    let mut expense_categories: Vec<&crate::service::cashflow::CategoryLine> = summary
+        .categories
+        .iter()
+        .filter(|cat| cat.kind == "expense" && cat.actual > rust_decimal::Decimal::ZERO)
+        .collect();
+    expense_categories.sort_by(|a, b| b.actual.cmp(&a.actual));
+    for category in expense_categories.iter().take(3) {
+        output.push_str(&format!(
+            "- {}: Rp {}\n",
+            category.name,
+            format_amount(&category.actual),
+        ));
+    }
+
+    // Show freelance invoiced total only when it is non-zero.
+    if invoiced_total > rust_decimal::Decimal::ZERO {
+        output.push_str(&format!(
+            "Freelance diinvoice: Rp {}\n",
+            format_amount(&invoiced_total),
+        ));
+    }
+
+    Ok(output)
+}
+
+/// Compute a portfolio health snapshot: net worth in IDR, biggest position
+/// concentration as a percentage of net worth, and the current month's savings
+/// rate derived from cashflow rows.
+///
+/// Returns at minimum the net-worth line so an empty database still produces a
+/// non-empty, human-readable result.
+async fn portfolio_insights(db: &Db) -> Result<String, String> {
+    let summary = crate::service::portfolio::build_summary(db)
+        .await
+        .map_err(|e| format!("db error: {e}"))?;
+
+    let net = summary.net_worth_idr;
+    let mut output = format!(
+        "Net worth: Rp {}\n",
+        crate::service::chat::group_id(&net.round_dp(0))
+    );
+
+    // Build (symbol, market_value_idr) pairs using the instrument list for
+    // symbol resolution — Position only carries instrument_id.
+    let instruments = crate::repo::instruments::list(db)
+        .await
+        .map_err(|e| format!("db error: {e}"))?;
+    let instrument_symbol_map: std::collections::HashMap<i64, String> = instruments
+        .iter()
+        .map(|i| (i.id, i.symbol.clone()))
+        .collect();
+
+    let symbol_values: Vec<(String, rust_decimal::Decimal)> = summary
+        .positions
+        .iter()
+        .filter_map(|p| {
+            instrument_symbol_map
+                .get(&p.instrument_id)
+                .map(|symbol| (symbol.clone(), p.market_value_idr))
+        })
+        .collect();
+
+    // Only show concentration when net worth is non-zero — concentration() can
+    // return Some with pct=0 when net worth is zero, which would print a
+    // misleading "X (0%)" line on an empty/zero portfolio.
+    if !net.is_zero() {
+        if let Some(concentration) =
+            crate::service::insights::concentration(&symbol_values, net)
+        {
+            output.push_str(&format!(
+                "Konsentrasi terbesar: {} ({}%)\n",
+                concentration.symbol,
+                concentration.pct.round_dp(0),
+            ));
+        }
+    }
+
+    // Savings rate from cashflow rows for the current WIB month.
+    let current_month = chrono::Utc::now()
+        .with_timezone(&crate::assistant::time::wib())
+        .format("%Y-%m")
+        .to_string();
+
+    let cashflow_rows = crate::repo::cashflow::list_for_month(db, &current_month)
+        .await
+        .map_err(|e| format!("db error: {e}"))?;
+    let mut total_income = rust_decimal::Decimal::ZERO;
+    let mut total_expense = rust_decimal::Decimal::ZERO;
+    for row in &cashflow_rows {
+        let amount = crate::repo::dec(&row.amount).unwrap_or(rust_decimal::Decimal::ZERO);
+        if row.direction == "in" {
+            total_income += amount;
+        } else if row.direction == "out" {
+            total_expense += amount;
+        }
+    }
+    if total_income > rust_decimal::Decimal::ZERO {
+        let savings_rate =
+            crate::service::insights::savings_rate(total_income, total_expense);
+        output.push_str(&format!(
+            "Savings rate bulan ini: {}%\n",
+            savings_rate.round_dp(0),
+        ));
+    }
+
+    Ok(output)
 }
 
 async fn resolve_inbox(db: &Db, input: &serde_json::Value) -> Result<String, String> {
@@ -1660,6 +1861,139 @@ mod tests {
         let out = gmail_draft_reply(&fake, &serde_json::json!({ "id": "m1", "body": "ok meeting jam 3" })).await.unwrap();
         assert!(out.to_lowercase().contains("draft"), "{out}");
         assert_eq!(fake.drafts.lock().unwrap()[0], ("t_m1".to_string(), "ok meeting jam 3".to_string()));
+    }
+
+    #[tokio::test]
+    async fn portfolio_insights_runs_on_empty_db() {
+        let db = mem_db().await;
+        let out = dispatch(&db, "portfolio_insights", &serde_json::json!({})).await.unwrap();
+        assert!(!out.is_empty(), "{out}");
+        assert!(out.to_lowercase().contains("net worth"), "{out}");
+    }
+
+    #[tokio::test]
+    async fn cashflow_summary_reports_in_out_net() {
+        let db = mem_db().await;
+        let month = chrono::Utc::now().with_timezone(&crate::assistant::time::wib()).format("%Y-%m").to_string();
+        // Create a real cashflow expense category so the 'out' row can be tied to it.
+        let cat = crate::repo::cashflow_categories::create(
+            &db,
+            &crate::repo::cashflow_categories::NewCashflowCategory {
+                name: "Makan".into(),
+                kind: "expense".into(),
+                monthly_budget: None,
+                color: None,
+            },
+        ).await.unwrap();
+        // Insert one 'in' 1_000_000 cashflow row dated within `month`.
+        crate::repo::cashflow::create(&db, &crate::repo::cashflow::NewCashflow {
+            account_id: None,
+            occurred_on: format!("{month}-15"),
+            direction: "in".into(),
+            amount: "1000000".into(),
+            currency: "IDR".into(),
+            category_id: None,
+            note: None,
+        }).await.unwrap();
+        // Insert one 'out' 400_000 row tied to the "Makan" category.
+        crate::repo::cashflow::create(&db, &crate::repo::cashflow::NewCashflow {
+            account_id: None,
+            occurred_on: format!("{month}-15"),
+            direction: "out".into(),
+            amount: "400000".into(),
+            currency: "IDR".into(),
+            category_id: Some(cat.id),
+            note: None,
+        }).await.unwrap();
+        let out = dispatch(&db, "cashflow_summary", &serde_json::json!({})).await.unwrap();
+        assert!(out.to_lowercase().contains("masuk"), "{out}");
+        assert!(out.to_lowercase().contains("net"), "{out}");
+        assert!(out.contains("1.000.000") || out.contains("600.000"), "{out}"); // in or net
+        assert!(out.contains("Makan"), "category name must appear in expense breakdown: {out}");
+    }
+
+    /// cashflow_summary must reject a month arg that is not YYYY-MM format.
+    #[tokio::test]
+    async fn cashflow_summary_rejects_bad_month_format() {
+        let db = mem_db().await;
+        let err = dispatch(&db, "cashflow_summary", &serde_json::json!({ "month": "2026-1" }))
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_lowercase().contains("yyyy-mm") || err.to_lowercase().contains("format bulan"),
+            "error must mention expected format: {err}"
+        );
+    }
+
+    /// cashflow_summary must not emit a "Rp 0" line for a category that had
+    /// no activity this month.
+    #[tokio::test]
+    async fn cashflow_summary_omits_zero_spend_categories() {
+        let db = mem_db().await;
+        let month = chrono::Utc::now()
+            .with_timezone(&crate::assistant::time::wib())
+            .format("%Y-%m")
+            .to_string();
+
+        // "Makan" — has actual spend; "Kesehatan" — zero activity this month.
+        let cat_makan = crate::repo::cashflow_categories::create(
+            &db,
+            &crate::repo::cashflow_categories::NewCashflowCategory {
+                name: "Makan".into(),
+                kind: "expense".into(),
+                monthly_budget: None,
+                color: None,
+            },
+        )
+        .await
+        .unwrap();
+        crate::repo::cashflow_categories::create(
+            &db,
+            &crate::repo::cashflow_categories::NewCashflowCategory {
+                name: "Kesehatan".into(),
+                kind: "expense".into(),
+                monthly_budget: None,
+                color: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        crate::repo::cashflow::create(&db, &crate::repo::cashflow::NewCashflow {
+            account_id: None,
+            occurred_on: format!("{month}-10"),
+            direction: "out".into(),
+            amount: "200000".into(),
+            currency: "IDR".into(),
+            category_id: Some(cat_makan.id),
+            note: None,
+        })
+        .await
+        .unwrap();
+
+        let out = dispatch(&db, "cashflow_summary", &serde_json::json!({})).await.unwrap();
+        assert!(out.contains("Makan"), "active category must appear: {out}");
+        assert!(
+            !out.contains("Kesehatan"),
+            "zero-spend category must not appear in top expenses: {out}"
+        );
+    }
+
+    /// portfolio_insights on an empty DB must show net worth and must NOT show
+    /// a concentration line (net worth is zero so concentration is suppressed).
+    #[tokio::test]
+    async fn portfolio_insights_empty_db_no_concentration_line() {
+        let db = mem_db().await;
+        let out = dispatch(&db, "portfolio_insights", &serde_json::json!({})).await.unwrap();
+        assert!(out.to_lowercase().contains("net worth"), "net worth line required: {out}");
+        assert!(
+            !out.to_lowercase().contains("konsentrasi"),
+            "concentration line must be absent when net worth is zero: {out}"
+        );
+        assert!(
+            !out.to_lowercase().contains("savings rate"),
+            "savings rate line must be absent when no cashflow rows: {out}"
+        );
     }
 
     #[tokio::test]

@@ -15,6 +15,7 @@ const RECAP_MONDAY_GRACE_END_HOUR: u32 = 9;
 pub struct ProactiveConfig {
     pub briefing_hour: Option<u32>,
     pub recap_hour: Option<u32>,
+    pub monthly_recap_hour: Option<u32>,
     pub mover_alert_pct: f64,
     pub milestone_step_idr: i64,
 }
@@ -39,6 +40,7 @@ impl ProactiveConfig {
         Self {
             briefing_hour: parse_hour(std::env::var("BRIEFING_HOUR_WIB").ok(), 7),
             recap_hour: parse_hour(std::env::var("RECAP_HOUR_WIB").ok(), 17),
+            monthly_recap_hour: parse_hour(std::env::var("MONTHLY_RECAP_HOUR_WIB").ok(), 8),
             mover_alert_pct: std::env::var("MOVER_ALERT_PCT")
                 .ok()
                 .and_then(|v| v.parse().ok())
@@ -113,6 +115,14 @@ pub async fn run_once(
         }
     }
 
+    if let Some(key) = monthly_recap_due(now_wib, config.monthly_recap_hour) {
+        if crate::repo::proactive_log::try_claim(db, "monthly_recap", &key).await? {
+            if let Err(e) = super::monthly_recap::run(db, client, link.chat_id).await {
+                tracing::warn!("monthly_recap for {key} forfeited: {e:#}");
+            }
+        }
+    }
+
     for alert in
         super::alerts::evaluate(db, config.mover_alert_pct, config.milestone_step_idr, &today).await
     {
@@ -124,6 +134,23 @@ pub async fn run_once(
     }
 
     Ok(())
+}
+
+/// Dedup key when the monthly recap is due: the 1st of the month from the
+/// configured hour for GRACE_HOURS. The key encodes the PRIOR month so the
+/// same send is never attempted twice for the same billing period.
+pub fn monthly_recap_due(
+    now_wib: DateTime<FixedOffset>,
+    hour: Option<u32>,
+) -> Option<String> {
+    let hour = hour?;
+    let h = now_wib.hour();
+    if now_wib.day() != 1 || h < hour || h >= hour + GRACE_HOURS {
+        return None;
+    }
+    // Prior month: subtract one day from the 1st to land in the prior month.
+    let prior = (now_wib - chrono::Duration::days(1)).format("%Y-%m").to_string();
+    Some(format!("monthly_recap:{prior}"))
 }
 
 /// Dedup key when the weekly recap is due: Sunday from the configured hour,
@@ -204,8 +231,39 @@ mod tests {
         let config = ProactiveConfig::from_env();
         assert_eq!(config.briefing_hour, Some(7));
         assert_eq!(config.recap_hour, Some(17));
+        assert_eq!(config.monthly_recap_hour, Some(8));
         assert!((config.mover_alert_pct - 5.0).abs() < f64::EPSILON);
         assert_eq!(config.milestone_step_idr, 50_000_000);
+    }
+
+    #[test]
+    fn monthly_recap_due_fires_on_first_in_window_only() {
+        // 2026-07-01 is a Wednesday; prior month is 2026-06.
+        assert_eq!(
+            monthly_recap_due(wib(2026, 7, 1, 8, 0), Some(8)),
+            Some("monthly_recap:2026-06".to_string())
+        );
+        assert_eq!(
+            monthly_recap_due(wib(2026, 7, 1, 12, 59), Some(8)),
+            Some("monthly_recap:2026-06".to_string())
+        );
+        // Before hour: not yet.
+        assert_eq!(monthly_recap_due(wib(2026, 7, 1, 7, 59), Some(8)), None);
+        // Past grace window.
+        assert_eq!(monthly_recap_due(wib(2026, 7, 1, 13, 0), Some(8)), None);
+        // Day 2: never.
+        assert_eq!(monthly_recap_due(wib(2026, 7, 2, 8, 0), Some(8)), None);
+        // Disabled.
+        assert_eq!(monthly_recap_due(wib(2026, 7, 1, 8, 0), None), None);
+    }
+
+    #[test]
+    fn monthly_recap_due_january_first_keys_to_december() {
+        // 2027-01-01; prior month is 2026-12.
+        assert_eq!(
+            monthly_recap_due(wib(2027, 1, 1, 8, 0), Some(8)),
+            Some("monthly_recap:2026-12".to_string())
+        );
     }
 
     #[test]
@@ -226,6 +284,7 @@ mod tests {
         let config = ProactiveConfig {
             briefing_hour: Some(0), // "always due" for this test
             recap_hour: Some(0),
+            monthly_recap_hour: Some(0),
             mover_alert_pct: 5.0,
             milestone_step_idr: 50_000_000,
         };
