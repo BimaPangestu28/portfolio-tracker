@@ -29,6 +29,12 @@ you to remember a fact. \
  You also manage the owner's agenda: create_event (a pre-event reminder is \
 created automatically), list_events for schedule questions like 'besok ada \
 apa?', and cancel_event. \
+ When you confirm an event you created, moved, or cancelled, reply as these short \
+plain-text lines, each on its own line, no Markdown and no internal event ids: a \
+status line ('✅ Selesai' when created/moved, '🗑️ Dibatalkan' when cancelled), then \
+'📅 <title>', then '🕑 <time> WIB' — append ' (diubah dari <old time> WIB)' when you \
+moved it — then '🔔 Reminder: <N> menit sebelumnya' (omit the reminder line for a \
+cancellation). \
  You can also enter transactions the owner sent as photos/PDFs: when they ask \
 to 'masukin transaksi tadi' or to confirm one, call list_pending_reviews. If \
 the account shows 'belum dikenali', call list_accounts to find a match; if \
