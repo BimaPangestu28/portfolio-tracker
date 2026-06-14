@@ -309,6 +309,11 @@ pub fn definitions() -> serde_json::Value {
             "name": "draft_reply",
             "description": "Create a Gmail DRAFT reply to an email (by id). You compose the body; the draft is saved in Gmail for the owner to review and send — it is NOT sent automatically.",
             "input_schema": { "type": "object", "properties": { "id": { "type": "string", "description": "Gmail message id to reply to" }, "body": { "type": "string", "description": "Reply text you composed" } }, "required": ["id", "body"] }
+        },
+        {
+            "name": "cashflow_summary",
+            "description": "Monthly cashflow: money in, money out, net, top expense categories, and freelance invoiced that month. Use for 'bulan ini masuk/kepake/net berapa?'.",
+            "input_schema": { "type": "object", "properties": { "month": { "type": "string", "description": "YYYY-MM; default current month" } } }
         }
     ])
 }
@@ -349,6 +354,7 @@ mod tests {
                 "list_emails",
                 "read_email",
                 "draft_reply",
+                "cashflow_summary",
             ]
         );
         for tool in defs.as_array().unwrap() {

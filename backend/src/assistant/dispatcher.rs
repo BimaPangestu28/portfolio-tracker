@@ -64,6 +64,7 @@ pub async fn dispatch(db: &Db, name: &str, input: &serde_json::Value) -> Result<
             Ok(token) => gmail_draft_reply(&crate::google::gmail::HttpGmail::new(token), input).await,
             Err(_) => Err("Gmail belum tersambung — sambungin Google dulu di web UI".into()),
         },
+        "cashflow_summary" => cashflow_summary(db, input).await,
         _ => Err(format!("unknown tool: {name}")),
     }
 }
@@ -748,6 +749,106 @@ async fn gmail_draft_reply(api: &dyn crate::google::gmail::GmailApi, input: &ser
     let m = api.get_message(id).await.map_err(|e| format!("{e}"))?;
     api.create_draft(&m.thread_id, &m.from, &m.subject, body).await.map_err(|e| format!("{e}"))?;
     Ok(format!("draft balasan ke {} disimpan di Gmail — cek & kirim dari sana", m.from))
+}
+
+/// Summarise the current (or given) month's cashflow: money in, money out,
+/// net, top 3 expense categories, and total freelance invoiced that month.
+/// Invoiced amount is shown separately — not added to income — because it
+/// represents amounts billed, not necessarily received.
+async fn cashflow_summary(db: &Db, input: &serde_json::Value) -> Result<String, String> {
+    // Resolve the target month: explicit arg or current WIB month.
+    let month: String = match str_arg(input, "month") {
+        Some(m) => m.to_string(),
+        None => chrono::Utc::now()
+            .with_timezone(&super::time::wib())
+            .format("%Y-%m")
+            .to_string(),
+    };
+
+    // Load cashflow rows for the month.
+    let cashflow_rows = crate::repo::cashflow::list_for_month(db, &month)
+        .await
+        .map_err(|e| format!("db error: {e}"))?;
+
+    // Load categories from the DB.
+    let category_rows = crate::repo::categories::list(db)
+        .await
+        .map_err(|e| format!("db error: {e}"))?;
+
+    // Map CashflowRow → CfRow (the service layer struct).
+    let cf_rows: Vec<crate::service::cashflow::CfRow> = cashflow_rows
+        .iter()
+        .filter_map(|row| {
+            let amount = crate::repo::dec(&row.amount).ok()?;
+            Some(crate::service::cashflow::CfRow {
+                direction: row.direction.clone(),
+                amount,
+                category_id: row.category_id,
+            })
+        })
+        .collect();
+
+    // Map CategoryRow → CatRow. The DB category table is for investment
+    // allocation (target_pct) and has no kind/budget columns; default
+    // kind to "expense" so they appear in the expense breakdown.
+    let cat_rows: Vec<crate::service::cashflow::CatRow> = category_rows
+        .iter()
+        .map(|cat| crate::service::cashflow::CatRow {
+            id: cat.id,
+            name: cat.name.clone(),
+            kind: "expense".to_string(),
+            budget: None,
+        })
+        .collect();
+
+    let summary = crate::service::cashflow::month_summary(&month, &cf_rows, &cat_rows);
+
+    // Sum invoices issued in this month.
+    let all_invoices = crate::repo::invoices::list_all(db)
+        .await
+        .map_err(|e| format!("db error: {e}"))?;
+    let invoiced_total: rust_decimal::Decimal = all_invoices
+        .iter()
+        .filter(|inv| inv.issue_date.starts_with(&month))
+        .filter_map(|inv| crate::repo::dec(&inv.total).ok())
+        .fold(rust_decimal::Decimal::ZERO, |acc, amount| acc + amount);
+
+    // Render the summary using Indonesian number formatting.
+    let format_amount = |d: &rust_decimal::Decimal| {
+        crate::service::chat::group_id(&d.round_dp(0))
+    };
+
+    let mut output = format!(
+        "Bulan {month}: masuk Rp {}, kepake Rp {}, net Rp {}\n",
+        format_amount(&summary.total_in),
+        format_amount(&summary.total_out),
+        format_amount(&summary.net),
+    );
+
+    // Top 3 expense categories sorted by actual spending (descending).
+    let mut expense_categories: Vec<&crate::service::cashflow::CategoryLine> = summary
+        .categories
+        .iter()
+        .filter(|cat| cat.kind == "expense")
+        .collect();
+    expense_categories.sort_by(|a, b| b.actual.cmp(&a.actual));
+    for category in expense_categories.iter().take(3) {
+        output.push_str(&format!(
+            "- {}: Rp {}\n",
+            category.name,
+            format_amount(&category.actual),
+        ));
+    }
+
+    // Show freelance invoiced total only when it is non-zero.
+    if invoiced_total > rust_decimal::Decimal::ZERO {
+        output.push_str(&format!(
+            "Freelance diinvoice: Rp {}\n",
+            format_amount(&invoiced_total),
+        ));
+    }
+
+    Ok(output)
 }
 
 async fn resolve_inbox(db: &Db, input: &serde_json::Value) -> Result<String, String> {
@@ -1660,6 +1761,35 @@ mod tests {
         let out = gmail_draft_reply(&fake, &serde_json::json!({ "id": "m1", "body": "ok meeting jam 3" })).await.unwrap();
         assert!(out.to_lowercase().contains("draft"), "{out}");
         assert_eq!(fake.drafts.lock().unwrap()[0], ("t_m1".to_string(), "ok meeting jam 3".to_string()));
+    }
+
+    #[tokio::test]
+    async fn cashflow_summary_reports_in_out_net() {
+        let db = mem_db().await;
+        let month = chrono::Utc::now().with_timezone(&crate::assistant::time::wib()).format("%Y-%m").to_string();
+        // Insert one 'in' 1_000_000 and one 'out' 400_000 cashflow row dated within `month`.
+        crate::repo::cashflow::create(&db, &crate::repo::cashflow::NewCashflow {
+            account_id: None,
+            occurred_on: format!("{month}-15"),
+            direction: "in".into(),
+            amount: "1000000".into(),
+            currency: "IDR".into(),
+            category_id: None,
+            note: None,
+        }).await.unwrap();
+        crate::repo::cashflow::create(&db, &crate::repo::cashflow::NewCashflow {
+            account_id: None,
+            occurred_on: format!("{month}-15"),
+            direction: "out".into(),
+            amount: "400000".into(),
+            currency: "IDR".into(),
+            category_id: None,
+            note: None,
+        }).await.unwrap();
+        let out = dispatch(&db, "cashflow_summary", &serde_json::json!({})).await.unwrap();
+        assert!(out.to_lowercase().contains("masuk"), "{out}");
+        assert!(out.to_lowercase().contains("net"), "{out}");
+        assert!(out.contains("1.000.000") || out.contains("600.000"), "{out}"); // in or net
     }
 
     #[tokio::test]
