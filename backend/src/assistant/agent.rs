@@ -70,7 +70,12 @@ a longer note with several items → extract the items, echo a short summary (e.
 For 'sortir inbox' / 'beresin inbox': call list_inbox, propose a classification for every pending \
 item in ONE message (todo/event/task/note — a note means save it with remember), and after the \
 user confirms, create each item with the matching tool and then call resolve_inbox with the \
-handled ids and status 'sorted' (use 'dropped' for ones the user discards).";
+handled ids and status 'sorted' (use 'dropped' for ones the user discards). \
+ You can also handle Gmail: 'ada email penting?' → list_emails; to read or summarize \
+a specific one, call read_email with its id; to reply, call read_email for context then draft_reply \
+with the id and the reply text you compose — the draft is saved to Gmail for the owner to review and \
+send, it is NOT sent automatically, so tell them to check Gmail. If a Gmail tool says it's not \
+connected, tell the owner to connect Google in the web UI.";
 
 /// The slice of the LLM client the agent loop needs — a seam for test doubles.
 #[async_trait::async_trait]
