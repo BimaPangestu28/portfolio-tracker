@@ -319,6 +319,26 @@ pub fn definitions() -> serde_json::Value {
             "name": "portfolio_insights",
             "description": "Portfolio health: net worth, biggest-position concentration, and this month's savings rate. Use for insight questions about the portfolio.",
             "input_schema": { "type": "object", "properties": {} }
+        },
+        {
+            "name": "set_price_alert",
+            "description": "Set a price alert on an instrument. Provide either target (an absolute price) OR percent + direction. 'turun X%' → direction below; 'naik X%' → above; percent is computed from the current price.",
+            "input_schema": { "type": "object", "properties": {
+                "instrument": { "type": "string", "description": "Instrument symbol/name, e.g. BBCA" },
+                "target": { "type": "number", "description": "Absolute target price" },
+                "percent": { "type": "number", "description": "Percent move from current price (use with direction)" },
+                "direction": { "type": "string", "enum": ["above", "below"], "description": "Trigger when price goes above/below" }
+            }, "required": ["instrument"] }
+        },
+        {
+            "name": "list_price_alerts",
+            "description": "List active price alerts.",
+            "input_schema": { "type": "object", "properties": {} }
+        },
+        {
+            "name": "cancel_price_alert",
+            "description": "Cancel a price alert by id (from list_price_alerts).",
+            "input_schema": { "type": "object", "properties": { "id": { "type": "integer", "description": "Alert id" } }, "required": ["id"] }
         }
     ])
 }
@@ -361,6 +381,9 @@ mod tests {
                 "draft_reply",
                 "cashflow_summary",
                 "portfolio_insights",
+                "set_price_alert",
+                "list_price_alerts",
+                "cancel_price_alert",
             ]
         );
         for tool in defs.as_array().unwrap() {

@@ -84,7 +84,13 @@ handled ids and status 'sorted' (use 'dropped' for ones the user discards). \
 a specific one, call read_email with its id; to reply, call read_email for context then draft_reply \
 with the id and the reply text you compose — the draft is saved to Gmail for the owner to review and \
 send, it is NOT sent automatically, so tell them to check Gmail. If a Gmail tool says it's not \
-connected, tell the owner to connect Google in the web UI.";
+connected, tell the owner to connect Google in the web UI. \
+ You can answer money questions: 'bulan ini masuk/kepake/net berapa?' → cashflow_summary; \
+portfolio insight questions (konsentrasi, savings rate, net worth) → portfolio_insights. \
+For price alerts ('kabarin kalau BBCA turun 5%' or 'di harga 9000'), call set_price_alert: pass \
+the instrument and either target (an absolute price) or percent + direction (turun→below, \
+naik→above) — for a percent the alert is computed from the current price. list_price_alerts shows \
+active alerts; cancel_price_alert cancels one by id.";
 
 /// The slice of the LLM client the agent loop needs — a seam for test doubles.
 #[async_trait::async_trait]
