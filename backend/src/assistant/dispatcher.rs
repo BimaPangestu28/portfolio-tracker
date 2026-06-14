@@ -66,6 +66,9 @@ pub async fn dispatch(db: &Db, name: &str, input: &serde_json::Value) -> Result<
         },
         "cashflow_summary" => cashflow_summary(db, input).await,
         "portfolio_insights" => portfolio_insights(db).await,
+        "set_price_alert" => set_price_alert(db, input).await,
+        "list_price_alerts" => list_price_alerts(db).await,
+        "cancel_price_alert" => cancel_price_alert(db, input).await,
         _ => Err(format!("unknown tool: {name}")),
     }
 }
@@ -949,6 +952,123 @@ async fn portfolio_insights(db: &Db) -> Result<String, String> {
     }
 
     Ok(output)
+}
+
+/// Resolve an instrument by name/symbol (case-insensitive).
+///
+/// Returns `(id, symbol)` if found, or an error message in Indonesian.
+async fn resolve_instrument(db: &Db, name: &str) -> Result<(i64, String), String> {
+    let instruments =
+        crate::repo::instruments::list(db).await.map_err(|e| format!("db error: {e}"))?;
+    let matched = instruments.iter().find(|i| {
+        i.symbol.eq_ignore_ascii_case(name) || i.name.eq_ignore_ascii_case(name)
+    });
+    match matched {
+        Some(i) => Ok((i.id, i.symbol.clone())),
+        None => Err(format!("instrumen '{name}' nggak ketemu")),
+    }
+}
+
+/// Set a price alert on an instrument.
+///
+/// Accepts either an absolute `target` price or a `percent` offset from the
+/// current price (requires a `direction` of "above" or "below").
+async fn set_price_alert(db: &Db, input: &serde_json::Value) -> Result<String, String> {
+    let instrument_name =
+        str_arg(input, "instrument").ok_or("missing required argument 'instrument'")?;
+    let (instrument_id, symbol) = resolve_instrument(db, instrument_name).await?;
+
+    // Resolve direction: explicit arg wins; otherwise error — we never silently default.
+    let direction = match str_arg(input, "direction") {
+        Some(d) if d == "above" || d == "below" => d.to_string(),
+        Some(other) => {
+            return Err(format!(
+                "direction '{other}' tidak valid — gunakan 'above' atau 'below'"
+            ))
+        }
+        None => {
+            return Err(
+                "direction wajib diisi — gunakan 'above' (naik) atau 'below' (turun)".into(),
+            )
+        }
+    };
+
+    // Compute target price.
+    let target: rust_decimal::Decimal = if let Some(target_val) = input.get("target").and_then(|v| v.as_f64()) {
+        rust_decimal::Decimal::try_from(target_val)
+            .map_err(|_| format!("target '{target_val}' tidak valid"))?
+    } else if let Some(pct_val) = input.get("percent").and_then(|v| v.as_f64()) {
+        let current_price = match crate::repo::prices::latest(db, instrument_id)
+            .await
+            .map_err(|e| format!("db error: {e}"))?
+        {
+            Some(p) => p.price,
+            None => {
+                return Err(format!(
+                    "harga {symbol} belum ada, nggak bisa hitung dari persen"
+                ))
+            }
+        };
+        let pct = rust_decimal::Decimal::try_from(pct_val)
+            .map_err(|_| format!("percent '{pct_val}' tidak valid"))?;
+        let hundred = rust_decimal::Decimal::from(100u32);
+        match direction.as_str() {
+            "below" => current_price * (rust_decimal::Decimal::ONE - pct / hundred),
+            "above" => current_price * (rust_decimal::Decimal::ONE + pct / hundred),
+            _ => unreachable!(),
+        }
+    } else {
+        return Err("butuh 'target' (harga absolut) atau 'percent' (persen dari harga sekarang)".into());
+    };
+
+    crate::repo::price_alerts::create(db, instrument_id, &target.to_string(), &direction)
+        .await
+        .map_err(|e| format!("db error: {e}"))?;
+
+    Ok(format!(
+        "alert dipasang: {symbol} {direction} Rp {}",
+        crate::service::chat::group_id(&target.round_dp(0))
+    ))
+}
+
+/// List all active price alerts, resolved to their instrument symbols.
+async fn list_price_alerts(db: &Db) -> Result<String, String> {
+    let alerts =
+        crate::repo::price_alerts::list_active(db).await.map_err(|e| format!("db error: {e}"))?;
+    if alerts.is_empty() {
+        return Ok("belum ada price alert".into());
+    }
+    let mut out = String::new();
+    for alert in alerts {
+        let symbol = crate::repo::instruments::get(db, alert.instrument_id)
+            .await
+            .ok()
+            .map(|i| i.symbol)
+            .unwrap_or_else(|| format!("#{}", alert.instrument_id));
+        let target_display = alert
+            .target_price
+            .parse::<rust_decimal::Decimal>()
+            .map(|d| crate::service::chat::group_id(&d.round_dp(0)))
+            .unwrap_or_else(|_| alert.target_price.clone());
+        out.push_str(&format!(
+            "[{}] {} {} Rp {}\n",
+            alert.id, symbol, alert.direction, target_display
+        ));
+    }
+    Ok(out)
+}
+
+/// Cancel an active price alert by id.
+async fn cancel_price_alert(db: &Db, input: &serde_json::Value) -> Result<String, String> {
+    let alert_id = id_arg(input, "id")?;
+    let cancelled = crate::repo::price_alerts::cancel(db, alert_id)
+        .await
+        .map_err(|e| format!("db error: {e}"))?;
+    if cancelled {
+        Ok(format!("price alert #{alert_id} dibatalkan"))
+    } else {
+        Err(format!("price alert #{alert_id} nggak ada atau sudah tidak aktif"))
+    }
 }
 
 async fn resolve_inbox(db: &Db, input: &serde_json::Value) -> Result<String, String> {
@@ -2018,5 +2138,133 @@ mod tests {
         }).await.unwrap();
         let out = dispatch(&db, "list_pending_reviews", &serde_json::json!({})).await.unwrap();
         assert!(out.contains("nominal 13000000"), "{out}");
+    }
+
+    // ── Price alert helpers ───────────────────────────────────────────────────
+
+    /// Insert a minimal instrument and return it (id + symbol).
+    async fn seed_instrument(db: &Db, symbol: &str) -> crate::repo::instruments::InstrumentRow {
+        crate::repo::instruments::create(
+            db,
+            &crate::repo::instruments::NewInstrument {
+                symbol: symbol.to_string(),
+                name: format!("{symbol} Corp"),
+                instrument_type: "stock".into(),
+                native_currency: "IDR".into(),
+                category_id: None,
+                price_source: "manual".into(),
+                decimals: Some(0),
+                note: None,
+            },
+        )
+        .await
+        .unwrap()
+    }
+
+    // ── Price alert dispatcher tests ──────────────────────────────────────────
+
+    #[tokio::test]
+    async fn set_price_alert_with_absolute_target_stores_active_alert() {
+        let db = mem_db().await;
+        seed_instrument(&db, "BBCA").await;
+
+        let out = dispatch(
+            &db,
+            "set_price_alert",
+            &serde_json::json!({ "instrument": "BBCA", "target": 9000, "direction": "below" }),
+        )
+        .await
+        .unwrap();
+        assert!(out.contains("BBCA"), "{out}");
+        assert!(out.contains("below"), "{out}");
+
+        let active = crate::repo::price_alerts::list_active(&db).await.unwrap();
+        assert_eq!(active.len(), 1, "should have one active alert");
+        assert_eq!(active[0].direction, "below");
+        // target is stored as a Decimal string; "9000" is the canonical form.
+        let stored: rust_decimal::Decimal = active[0].target_price.parse().unwrap();
+        assert_eq!(stored, rust_decimal::Decimal::from(9000u32));
+    }
+
+    #[tokio::test]
+    async fn set_price_alert_with_percent_computes_target_from_current_price() {
+        let db = mem_db().await;
+        let ins = seed_instrument(&db, "BBCA").await;
+        // Seed current price at 10000.
+        crate::repo::prices::upsert_latest(
+            &db, ins.id, rust_decimal::Decimal::from(10000u32), "IDR", "manual", "2026-06-15",
+        )
+        .await
+        .unwrap();
+
+        dispatch(
+            &db,
+            "set_price_alert",
+            &serde_json::json!({ "instrument": "BBCA", "percent": 5, "direction": "below" }),
+        )
+        .await
+        .unwrap();
+
+        let active = crate::repo::price_alerts::list_active(&db).await.unwrap();
+        assert_eq!(active.len(), 1);
+        // 10000 * (1 - 5/100) = 9500
+        let stored: rust_decimal::Decimal = active[0].target_price.parse().unwrap();
+        assert_eq!(stored, rust_decimal::Decimal::from(9500u32));
+    }
+
+    #[tokio::test]
+    async fn set_price_alert_unknown_instrument_returns_error() {
+        let db = mem_db().await;
+        let err = dispatch(
+            &db,
+            "set_price_alert",
+            &serde_json::json!({ "instrument": "ZZZNOPE", "target": 1000, "direction": "below" }),
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            err.contains("ZZZNOPE") || err.contains("nggak ketemu"),
+            "error should mention instrument name: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn list_price_alerts_shows_symbol_and_target() {
+        let db = mem_db().await;
+        let ins = seed_instrument(&db, "TLKM").await;
+        crate::repo::price_alerts::create(&db, ins.id, "4500", "above").await.unwrap();
+
+        let out = dispatch(&db, "list_price_alerts", &serde_json::json!({})).await.unwrap();
+        assert!(out.contains("TLKM"), "{out}");
+        assert!(out.contains("above"), "{out}");
+        // Formatted IDR number.
+        assert!(out.contains("4.500") || out.contains("4500"), "{out}");
+    }
+
+    #[tokio::test]
+    async fn list_price_alerts_empty_shows_placeholder() {
+        let db = mem_db().await;
+        let out = dispatch(&db, "list_price_alerts", &serde_json::json!({})).await.unwrap();
+        assert!(
+            out.contains("belum ada") || out.contains("(belum ada alert)"),
+            "should indicate no alerts: {out}"
+        );
+    }
+
+    #[tokio::test]
+    async fn cancel_price_alert_removes_from_active() {
+        let db = mem_db().await;
+        let ins = seed_instrument(&db, "ASII").await;
+        let alert = crate::repo::price_alerts::create(&db, ins.id, "6000", "below").await.unwrap();
+
+        let out = dispatch(
+            &db,
+            "cancel_price_alert",
+            &serde_json::json!({ "id": alert.id }),
+        )
+        .await
+        .unwrap();
+        assert!(out.contains("dibatalkan") || out.contains("cancelled"), "{out}");
+        assert!(crate::repo::price_alerts::list_active(&db).await.unwrap().is_empty());
     }
 }
