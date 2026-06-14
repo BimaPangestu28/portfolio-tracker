@@ -770,8 +770,8 @@ async fn cashflow_summary(db: &Db, input: &serde_json::Value) -> Result<String, 
         .await
         .map_err(|e| format!("db error: {e}"))?;
 
-    // Load categories from the DB.
-    let category_rows = crate::repo::categories::list(db)
+    // Load cashflow categories (income/expense, with optional monthly budget).
+    let category_rows = crate::repo::cashflow_categories::list(db)
         .await
         .map_err(|e| format!("db error: {e}"))?;
 
@@ -788,16 +788,14 @@ async fn cashflow_summary(db: &Db, input: &serde_json::Value) -> Result<String, 
         })
         .collect();
 
-    // Map CategoryRow → CatRow. The DB category table is for investment
-    // allocation (target_pct) and has no kind/budget columns; default
-    // kind to "expense" so they appear in the expense breakdown.
+    // Map CashflowCategoryRow → CatRow with the real kind and optional budget.
     let cat_rows: Vec<crate::service::cashflow::CatRow> = category_rows
         .iter()
         .map(|cat| crate::service::cashflow::CatRow {
             id: cat.id,
             name: cat.name.clone(),
-            kind: "expense".to_string(),
-            budget: None,
+            kind: cat.kind.clone(),
+            budget: cat.monthly_budget.as_deref().and_then(|s| s.parse::<rust_decimal::Decimal>().ok()),
         })
         .collect();
 
@@ -1767,7 +1765,17 @@ mod tests {
     async fn cashflow_summary_reports_in_out_net() {
         let db = mem_db().await;
         let month = chrono::Utc::now().with_timezone(&crate::assistant::time::wib()).format("%Y-%m").to_string();
-        // Insert one 'in' 1_000_000 and one 'out' 400_000 cashflow row dated within `month`.
+        // Create a real cashflow expense category so the 'out' row can be tied to it.
+        let cat = crate::repo::cashflow_categories::create(
+            &db,
+            &crate::repo::cashflow_categories::NewCashflowCategory {
+                name: "Makan".into(),
+                kind: "expense".into(),
+                monthly_budget: None,
+                color: None,
+            },
+        ).await.unwrap();
+        // Insert one 'in' 1_000_000 cashflow row dated within `month`.
         crate::repo::cashflow::create(&db, &crate::repo::cashflow::NewCashflow {
             account_id: None,
             occurred_on: format!("{month}-15"),
@@ -1777,19 +1785,21 @@ mod tests {
             category_id: None,
             note: None,
         }).await.unwrap();
+        // Insert one 'out' 400_000 row tied to the "Makan" category.
         crate::repo::cashflow::create(&db, &crate::repo::cashflow::NewCashflow {
             account_id: None,
             occurred_on: format!("{month}-15"),
             direction: "out".into(),
             amount: "400000".into(),
             currency: "IDR".into(),
-            category_id: None,
+            category_id: Some(cat.id),
             note: None,
         }).await.unwrap();
         let out = dispatch(&db, "cashflow_summary", &serde_json::json!({})).await.unwrap();
         assert!(out.to_lowercase().contains("masuk"), "{out}");
         assert!(out.to_lowercase().contains("net"), "{out}");
         assert!(out.contains("1.000.000") || out.contains("600.000"), "{out}"); // in or net
+        assert!(out.contains("Makan"), "category name must appear in expense breakdown: {out}");
     }
 
     #[tokio::test]
