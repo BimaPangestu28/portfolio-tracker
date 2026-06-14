@@ -13,6 +13,7 @@ pub mod goals;
 pub mod inbox;
 pub mod instruments;
 pub mod transactions;
+pub mod price_alerts;
 pub mod prices;
 pub mod snapshots;
 pub mod review_items;
