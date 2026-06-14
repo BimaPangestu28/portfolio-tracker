@@ -294,6 +294,21 @@ pub fn definitions() -> serde_json::Value {
                 },
                 "required": ["ids", "status"]
             }
+        },
+        {
+            "name": "list_emails",
+            "description": "List important unread Gmail (sender, subject, snippet, id). Use for 'ada email penting?'.",
+            "input_schema": { "type": "object", "properties": { "max": { "type": "integer", "description": "Max emails, default 10" } } }
+        },
+        {
+            "name": "read_email",
+            "description": "Read the full body of one email by id (from list_emails) to summarize it or to draft a reply.",
+            "input_schema": { "type": "object", "properties": { "id": { "type": "string", "description": "Gmail message id" } }, "required": ["id"] }
+        },
+        {
+            "name": "draft_reply",
+            "description": "Create a Gmail DRAFT reply to an email (by id). You compose the body; the draft is saved in Gmail for the owner to review and send — it is NOT sent automatically.",
+            "input_schema": { "type": "object", "properties": { "id": { "type": "string", "description": "Gmail message id to reply to" }, "body": { "type": "string", "description": "Reply text you composed" } }, "required": ["id", "body"] }
         }
     ])
 }
@@ -331,6 +346,9 @@ mod tests {
                 "capture_to_inbox",
                 "list_inbox",
                 "resolve_inbox",
+                "list_emails",
+                "read_email",
+                "draft_reply",
             ]
         );
         for tool in defs.as_array().unwrap() {

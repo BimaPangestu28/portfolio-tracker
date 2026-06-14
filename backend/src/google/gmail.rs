@@ -124,7 +124,7 @@ pub fn reply_subject(subject: &str) -> String {
 }
 
 #[async_trait]
-pub trait GmailApi {
+pub trait GmailApi: Send + Sync {
     async fn list_important_unread(&self, max: u32) -> Result<Vec<EmailSummary>, GmailError>;
     async fn get_message(&self, id: &str) -> Result<EmailDetail, GmailError>;
     async fn create_draft(&self, thread_id: &str, to: &str, subject: &str, body: &str)

@@ -52,6 +52,18 @@ pub async fn dispatch(db: &Db, name: &str, input: &serde_json::Value) -> Result<
         "capture_to_inbox" => capture_to_inbox(db, input).await,
         "list_inbox" => list_inbox(db).await,
         "resolve_inbox" => resolve_inbox(db, input).await,
+        "list_emails" => match crate::google::engine::current_access_token(db).await {
+            Ok(token) => gmail_list_emails(&crate::google::gmail::HttpGmail::new(token), input).await,
+            Err(_) => Err("Gmail belum tersambung — sambungin Google dulu di web UI".into()),
+        },
+        "read_email" => match crate::google::engine::current_access_token(db).await {
+            Ok(token) => gmail_read_email(&crate::google::gmail::HttpGmail::new(token), input).await,
+            Err(_) => Err("Gmail belum tersambung — sambungin Google dulu di web UI".into()),
+        },
+        "draft_reply" => match crate::google::engine::current_access_token(db).await {
+            Ok(token) => gmail_draft_reply(&crate::google::gmail::HttpGmail::new(token), input).await,
+            Err(_) => Err("Gmail belum tersambung — sambungin Google dulu di web UI".into()),
+        },
         _ => Err(format!("unknown tool: {name}")),
     }
 }
@@ -707,6 +719,33 @@ async fn list_inbox(db: &Db) -> Result<String, String> {
         out.push_str(&format!("#{} {}\n", row.id, row.content));
     }
     Ok(out)
+}
+
+async fn gmail_list_emails(api: &dyn crate::google::gmail::GmailApi, input: &serde_json::Value) -> Result<String, String> {
+    let max = input.get("max").and_then(|v| v.as_u64()).unwrap_or(10) as u32;
+    let emails = api.list_important_unread(max).await.map_err(|e| format!("{e}"))?;
+    if emails.is_empty() {
+        return Ok("nggak ada email penting yang belum dibaca".into());
+    }
+    let mut out = String::new();
+    for e in emails {
+        out.push_str(&format!("[{}] {} — {} — {}\n", e.id, e.from, e.subject, e.snippet));
+    }
+    Ok(out)
+}
+
+async fn gmail_read_email(api: &dyn crate::google::gmail::GmailApi, input: &serde_json::Value) -> Result<String, String> {
+    let id = str_arg(input, "id").ok_or("missing required argument 'id'")?;
+    let m = api.get_message(id).await.map_err(|e| format!("{e}"))?;
+    Ok(format!("Dari: {}\nSubjek: {}\n\n{}", m.from, m.subject, m.body))
+}
+
+async fn gmail_draft_reply(api: &dyn crate::google::gmail::GmailApi, input: &serde_json::Value) -> Result<String, String> {
+    let id = str_arg(input, "id").ok_or("missing required argument 'id'")?;
+    let body = str_arg(input, "body").ok_or("missing required argument 'body'")?;
+    let m = api.get_message(id).await.map_err(|e| format!("{e}"))?;
+    api.create_draft(&m.thread_id, &m.from, &m.subject, body).await.map_err(|e| format!("{e}"))?;
+    Ok(format!("draft balasan ke {} disimpan di Gmail — cek & kirim dari sana", m.from))
 }
 
 async fn resolve_inbox(db: &Db, input: &serde_json::Value) -> Result<String, String> {
@@ -1562,6 +1601,63 @@ mod tests {
         assert!(crate::repo::inbox::list_pending(&db).await.unwrap().is_empty());
         let err = dispatch(&db, "resolve_inbox", &serde_json::json!({ "ids": [row.id], "status": "nonsense" })).await.unwrap_err();
         assert!(err.to_lowercase().contains("status"), "{err}");
+    }
+
+    // ── Gmail fake ────────────────────────────────────────────────────────────
+
+    use crate::google::gmail::{EmailDetail, EmailSummary, GmailApi, GmailError};
+    use std::sync::Mutex as StdMutex;
+
+    #[derive(Default)]
+    struct FakeGmail {
+        messages: Vec<EmailSummary>,
+        drafts: StdMutex<Vec<(String, String)>>, // (thread_id, body)
+    }
+    #[async_trait::async_trait]
+    impl GmailApi for FakeGmail {
+        async fn list_important_unread(&self, _max: u32) -> Result<Vec<EmailSummary>, GmailError> {
+            Ok(self.messages.clone())
+        }
+        async fn get_message(&self, id: &str) -> Result<EmailDetail, GmailError> {
+            let m = self.messages.iter().find(|m| m.id == id)
+                .ok_or(GmailError::Api { status: 404, body: "not found".into() })?;
+            Ok(EmailDetail { id: m.id.clone(), thread_id: m.thread_id.clone(), from: m.from.clone(),
+                subject: m.subject.clone(), body: "isi email".into() })
+        }
+        async fn create_draft(&self, thread_id: &str, _to: &str, _subject: &str, body: &str)
+            -> Result<String, GmailError> {
+            self.drafts.lock().unwrap().push((thread_id.to_string(), body.to_string()));
+            Ok("draft_1".into())
+        }
+    }
+
+    fn email(id: &str, from: &str, subject: &str) -> EmailSummary {
+        EmailSummary { id: id.into(), thread_id: format!("t_{id}"), from: from.into(),
+            subject: subject.into(), snippet: "snippet".into() }
+    }
+
+    #[tokio::test]
+    async fn list_emails_formats_or_empty() {
+        let mut fake = FakeGmail::default();
+        assert!(gmail_list_emails(&fake, &serde_json::json!({})).await.unwrap().to_lowercase().contains("nggak ada"));
+        fake.messages = vec![email("m1", "Budi", "Meeting")];
+        let out = gmail_list_emails(&fake, &serde_json::json!({})).await.unwrap();
+        assert!(out.contains("Budi") && out.contains("Meeting") && out.contains("m1"), "{out}");
+    }
+
+    #[tokio::test]
+    async fn read_email_returns_body() {
+        let fake = FakeGmail { messages: vec![email("m1", "Budi", "Meeting")], ..Default::default() };
+        let out = gmail_read_email(&fake, &serde_json::json!({ "id": "m1" })).await.unwrap();
+        assert!(out.contains("isi email"), "{out}");
+    }
+
+    #[tokio::test]
+    async fn draft_reply_creates_draft() {
+        let fake = FakeGmail { messages: vec![email("m1", "Budi", "Meeting")], ..Default::default() };
+        let out = gmail_draft_reply(&fake, &serde_json::json!({ "id": "m1", "body": "ok meeting jam 3" })).await.unwrap();
+        assert!(out.to_lowercase().contains("draft"), "{out}");
+        assert_eq!(fake.drafts.lock().unwrap()[0], ("t_m1".to_string(), "ok meeting jam 3".to_string()));
     }
 
     #[tokio::test]
