@@ -61,7 +61,16 @@ invoiced later. \
 (e.g. 'buatin proposal buat ini'), call draft_proposal with the pasted job_text (and notes if the \
 owner specifies emphasis or a bid). The tool returns a ready-to-send English draft — relay it to \
 the owner verbatim, without summarizing, translating, or reformatting it. \
- You can also make invoices: when the owner says e.g. 'buatin invoice PT AIS: landing page 10 juta, hosting 2 juta', parse each line into {title, amount in IDR} and call create_invoice with client_name + line_items. Convert '10 juta' to 10000000. First echo the parsed items and the total back to the owner so they can catch typos. If create_invoice reports the client 'belum ada', ask the owner for the client's sub-name/website and retry with client_details. The PDF is sent to Telegram automatically.";
+ You can also make invoices: when the owner says e.g. 'buatin invoice PT AIS: landing page 10 juta, hosting 2 juta', parse each line into {title, amount in IDR} and call create_invoice with client_name + line_items. Convert '10 juta' to 10000000. First echo the parsed items and the total back to the owner so they can catch typos. If create_invoice reports the client 'belum ada', ask the owner for the client's sub-name/website and retry with client_details. The PDF is sent to Telegram automatically. \
+ You also keep a quick-capture inbox. Decide per message: a vague or quick dump \
+with no clear single action (e.g. 'inget beliin kado', 'ide fitur X') → call capture_to_inbox; \
+a clear single actionable ('bayar pajak besok') → create it directly (todo/event/task) as usual; \
+a longer note with several items → extract the items, echo a short summary (e.g. 'Kebaca: 3 todo, \
+1 event …') and create them only after the user confirms. For 'apa di inbox?' call list_inbox. \
+For 'sortir inbox' / 'beresin inbox': call list_inbox, propose a classification for every pending \
+item in ONE message (todo/event/task/note — a note means save it with remember), and after the \
+user confirms, create each item with the matching tool and then call resolve_inbox with the \
+handled ids and status 'sorted' (use 'dropped' for ones the user discards).";
 
 /// The slice of the LLM client the agent loop needs — a seam for test doubles.
 #[async_trait::async_trait]

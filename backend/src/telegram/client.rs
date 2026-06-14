@@ -48,6 +48,8 @@ pub struct TgMessage {
     pub photo: Option<Vec<TgPhotoSize>>,
     /// File attachments (PDF statements, forwarded images, ...).
     pub document: Option<TgDocument>,
+    /// Voice note (Telegram sends OGG/Opus).
+    pub voice: Option<TgVoice>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -61,6 +63,12 @@ pub struct TgPhotoSize {
 pub struct TgDocument {
     pub file_id: String,
     pub file_name: Option<String>,
+    pub mime_type: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TgVoice {
+    pub file_id: String,
     pub mime_type: Option<String>,
 }
 
@@ -370,6 +378,21 @@ mod tests {
         assert_eq!(doc.file_id, "doc1");
         assert_eq!(doc.file_name.as_deref(), Some("statement.pdf"));
         assert_eq!(doc.mime_type.as_deref(), Some("application/pdf"));
+    }
+
+    #[test]
+    fn parse_updates_extracts_voice_messages() {
+        let body = serde_json::json!({
+            "ok": true,
+            "result": [{
+                "update_id": 1,
+                "message": { "chat": { "id": 7 }, "voice": { "file_id": "v1", "mime_type": "audio/ogg" } }
+            }]
+        });
+        let updates = parse_updates(&body).unwrap();
+        let voice = updates[0].message.as_ref().unwrap().voice.as_ref().unwrap();
+        assert_eq!(voice.file_id, "v1");
+        assert_eq!(voice.mime_type.as_deref(), Some("audio/ogg"));
     }
 
     #[test]

@@ -49,6 +49,9 @@ pub async fn dispatch(db: &Db, name: &str, input: &serde_json::Value) -> Result<
         "draft_proposal" => draft_proposal(input).await,
         "list_clients" => invoice_list_clients(db).await,
         "create_invoice" => invoice_create(db, input).await,
+        "capture_to_inbox" => capture_to_inbox(db, input).await,
+        "list_inbox" => list_inbox(db).await,
+        "resolve_inbox" => resolve_inbox(db, input).await,
         _ => Err(format!("unknown tool: {name}")),
     }
 }
@@ -686,6 +689,40 @@ async fn confirm_review(db: &Db, input: &serde_json::Value) -> Result<String, St
         .await
         .map_err(|e| format!("{e}"))?;
     Ok(format!("transaksi #{txn_id} dibuat dari review #{review_id}"))
+}
+
+async fn capture_to_inbox(db: &Db, input: &serde_json::Value) -> Result<String, String> {
+    let content = str_arg(input, "content").ok_or("missing required argument 'content'")?;
+    let row = crate::repo::inbox::create(db, content).await.map_err(|e| format!("db error: {e}"))?;
+    Ok(format!("dicatat ke inbox (#{})", row.id))
+}
+
+async fn list_inbox(db: &Db) -> Result<String, String> {
+    let rows = crate::repo::inbox::list_pending(db).await.map_err(|e| format!("db error: {e}"))?;
+    if rows.is_empty() {
+        return Ok("inbox kosong".into());
+    }
+    let mut out = String::new();
+    for row in rows {
+        out.push_str(&format!("#{} {}\n", row.id, row.content));
+    }
+    Ok(out)
+}
+
+async fn resolve_inbox(db: &Db, input: &serde_json::Value) -> Result<String, String> {
+    let status = str_arg(input, "status").ok_or("missing required argument 'status'")?;
+    if !matches!(status, "sorted" | "dropped") {
+        return Err(format!("invalid status '{status}' — use sorted/dropped"));
+    }
+    let ids: Vec<i64> = match input.get("ids") {
+        Some(serde_json::Value::Array(arr)) => arr
+            .iter()
+            .map(|v| v.as_i64().ok_or_else(|| format!("ids must be integers, got {v}")))
+            .collect::<Result<Vec<_>, _>>()?,
+        _ => return Err("missing required argument 'ids' (array of integers)".into()),
+    };
+    let affected = crate::repo::inbox::resolve(db, &ids, status).await.map_err(|e| format!("db error: {e}"))?;
+    Ok(format!("{affected} item inbox ditandai {status}"))
 }
 
 #[cfg(test)]
@@ -1498,6 +1535,33 @@ mod tests {
         let client = crate::repo::clients::get_by_name(&db, "Klien Baru").await.unwrap();
         assert!(client.is_some(), "client not created");
         assert!(crate::repo::invoices::max_seq_for_prefix(&db, "INV/").await.unwrap().is_some());
+    }
+
+    #[tokio::test]
+    async fn capture_to_inbox_stores_and_lists() {
+        let db = mem_db().await;
+        let out = dispatch(&db, "capture_to_inbox", &serde_json::json!({ "content": "beli kado" })).await.unwrap();
+        assert!(out.to_lowercase().contains("inbox"), "{out}");
+        let listed = dispatch(&db, "list_inbox", &serde_json::json!({})).await.unwrap();
+        assert!(listed.contains("beli kado"), "{listed}");
+    }
+
+    #[tokio::test]
+    async fn list_inbox_empty_is_explicit() {
+        let db = mem_db().await;
+        let out = dispatch(&db, "list_inbox", &serde_json::json!({})).await.unwrap();
+        assert!(out.to_lowercase().contains("kosong"), "{out}");
+    }
+
+    #[tokio::test]
+    async fn resolve_inbox_marks_sorted_and_rejects_bad_status() {
+        let db = mem_db().await;
+        let row = crate::repo::inbox::create(&db, "x").await.unwrap();
+        let out = dispatch(&db, "resolve_inbox", &serde_json::json!({ "ids": [row.id], "status": "sorted" })).await.unwrap();
+        assert!(out.contains("1"), "{out}");
+        assert!(crate::repo::inbox::list_pending(&db).await.unwrap().is_empty());
+        let err = dispatch(&db, "resolve_inbox", &serde_json::json!({ "ids": [row.id], "status": "nonsense" })).await.unwrap_err();
+        assert!(err.to_lowercase().contains("status"), "{err}");
     }
 
     #[tokio::test]
