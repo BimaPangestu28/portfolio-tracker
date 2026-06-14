@@ -313,7 +313,12 @@ pub fn definitions() -> serde_json::Value {
         {
             "name": "cashflow_summary",
             "description": "Monthly cashflow: money in, money out, net, top expense categories, and freelance invoiced that month. Use for 'bulan ini masuk/kepake/net berapa?'.",
-            "input_schema": { "type": "object", "properties": { "month": { "type": "string", "description": "YYYY-MM; default current month" } } }
+            "input_schema": { "type": "object", "properties": { "month": { "type": "string", "description": "YYYY-MM; default current month", "pattern": "^\\d{4}-\\d{2}$" } } }
+        },
+        {
+            "name": "portfolio_insights",
+            "description": "Portfolio health: net worth, biggest-position concentration, and this month's savings rate. Use for insight questions about the portfolio.",
+            "input_schema": { "type": "object", "properties": {} }
         }
     ])
 }
@@ -355,6 +360,7 @@ mod tests {
                 "read_email",
                 "draft_reply",
                 "cashflow_summary",
+                "portfolio_insights",
             ]
         );
         for tool in defs.as_array().unwrap() {
