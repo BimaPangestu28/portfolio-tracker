@@ -4,6 +4,7 @@
 pub mod alerts;
 pub mod briefing;
 pub mod compose;
+pub mod monthly_recap;
 pub mod recap;
 pub mod tick;
 
