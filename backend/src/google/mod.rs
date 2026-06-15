@@ -4,5 +4,6 @@
 pub mod calendar;
 pub mod crypto;
 pub mod engine;
+pub mod gmail;
 pub mod oauth;
 pub mod sync;

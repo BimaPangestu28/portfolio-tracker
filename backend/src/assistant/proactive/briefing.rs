@@ -1,6 +1,7 @@
 //! Morning briefing: deterministic gathering, then compose-and-send.
 
 use crate::db::Db;
+use crate::google::gmail::GmailApi;
 use crate::repo::reminders::ReminderRow;
 use crate::repo::todos::TodoRow;
 use crate::service::chat::group_id;
@@ -23,6 +24,8 @@ pub struct BriefingData {
     /// Overdue/due-today ClickUp tasks grouped by project. `None` when ClickUp
     /// isn't configured (section omitted); `Some(empty)` when nothing is due.
     pub clickup_due: Option<Vec<(String, Vec<String>)>>,
+    /// Important unread emails. `None` when Gmail isn't reachable (section omitted).
+    pub gmail_important: Option<Vec<crate::google::gmail::EmailSummary>>,
 }
 
 /// One briefing line for a task that is overdue or due today; None otherwise
@@ -168,6 +171,20 @@ pub async fn gather(db: &Db) -> anyhow::Result<BriefingData> {
         Err(_) => None, // not configured → section omitted
     };
 
+    let gmail_important = match crate::google::engine::current_access_token(db).await {
+        Ok(token) => {
+            let gmail = crate::google::gmail::HttpGmail::new(token);
+            match gmail.list_important_unread(5).await {
+                Ok(list) => Some(list),
+                Err(e) => {
+                    tracing::warn!("briefing: gmail unavailable: {e}");
+                    None
+                }
+            }
+        }
+        Err(_) => None, // not connected → section omitted
+    };
+
     Ok(BriefingData {
         date_wib: today,
         weekday: crate::assistant::time::weekday_id(now_wib.weekday()).to_string(),
@@ -181,6 +198,7 @@ pub async fn gather(db: &Db) -> anyhow::Result<BriefingData> {
         pending_reviews,
         memory_facts,
         clickup_due,
+        gmail_important,
     })
 }
 
@@ -279,6 +297,17 @@ pub fn render_data_block(d: &BriefingData) -> String {
         }
     }
 
+    if let Some(emails) = &d.gmail_important {
+        out.push_str("Email penting:\n");
+        if emails.is_empty() {
+            out.push_str("(tidak ada)\n");
+        } else {
+            for e in emails {
+                out.push_str(&format!("- {} — {}\n", e.from, e.subject));
+            }
+        }
+    }
+
     if !d.memory_facts.is_empty() {
         out.push_str("Fakta tersimpan yang mungkin relevan:\n");
         for f in &d.memory_facts {
@@ -328,6 +357,7 @@ mod tests {
             pending_reviews: 0,
             memory_facts: vec![],
             clickup_due: None,
+            gmail_important: None,
         }
     }
 
@@ -469,5 +499,18 @@ mod tests {
         );
         assert_eq!(due.iter().map(|t| t.id).collect::<Vec<_>>(), vec![2]);
         assert_eq!(overdue.iter().map(|t| t.id).collect::<Vec<_>>(), vec![1]);
+    }
+
+    #[test]
+    fn gmail_section_renders_when_present_and_omitted_when_none() {
+        let mut d = data();
+        assert!(!render_data_block(&d).contains("Email penting"));
+        d.gmail_important = Some(vec![crate::google::gmail::EmailSummary {
+            id: "m1".into(), thread_id: "t1".into(), from: "Budi".into(),
+            subject: "Invoice".into(), snippet: "..".into(),
+        }]);
+        let block = render_data_block(&d);
+        assert!(block.contains("Email penting:"), "{block}");
+        assert!(block.contains("Budi — Invoice"), "{block}");
     }
 }

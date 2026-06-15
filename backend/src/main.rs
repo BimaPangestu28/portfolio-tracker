@@ -1,3 +1,4 @@
+#![recursion_limit = "256"]
 mod api;
 mod assistant;
 mod auth;
@@ -8,6 +9,7 @@ mod db;
 mod domain;
 mod error;
 mod ingestion;
+mod invoice;
 mod llm;
 mod pricing;
 mod repo;
@@ -46,6 +48,8 @@ async fn main() -> anyhow::Result<()> {
     assistant::reminder_tick::spawn(db.clone());
     assistant::proactive::tick::spawn(db.clone());
     google::engine::spawn(db.clone());
+    upwork::jobs::spawn(db.clone());
+    upwork::contracts::spawn(db.clone());
     scheduler::spawn(db, std::time::Duration::from_secs(3600));
     let app = api::router(state);
     let bind_addr = std::env::var("BIND_ADDR").unwrap_or_else(|_| "127.0.0.1:8080".into());

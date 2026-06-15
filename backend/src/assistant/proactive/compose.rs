@@ -29,6 +29,13 @@ is still unfinished (overdue or due today). End with exactly one question offeri
 unfinished todos to tomorrow, e.g. 'Mau aku geser yang belum kelar ke besok? Balas iya ya.' If \
 nothing is unfinished, congratulate briefly and skip the question.";
 
+pub const MONTHLY_RECAP_SYSTEM: &str = "You write a short monthly recap in Indonesian for the \
+app owner, delivered over Telegram on the 1st. Use ONLY the data block provided — copy every \
+number exactly, never invent anything. Plain text only: no Markdown, no headers, no **bold**, no \
+tables. At most 15 short lines; use emoji sparingly. Structure: one opening line naming the month; \
+productivity (todos done); the month's finances (net worth change, money in/out, freelance \
+invoiced); one short grounded closing line. Skip any section whose data is empty.";
+
 /// The message sent when the LLM is unavailable or returns nothing usable.
 pub fn fallback_message(header: &str, data_block: &str) -> String {
     format!("{header}\n{data_block}")
@@ -69,7 +76,7 @@ mod tests {
 
     #[test]
     fn prompts_demand_exact_numbers_and_plain_text() {
-        for prompt in [BRIEFING_SYSTEM, RECAP_SYSTEM, REVIEW_SYSTEM] {
+        for prompt in [BRIEFING_SYSTEM, RECAP_SYSTEM, REVIEW_SYSTEM, MONTHLY_RECAP_SYSTEM] {
             let lower = prompt.to_lowercase();
             assert!(lower.contains("indonesian"), "{prompt}");
             assert!(lower.contains("exactly"), "{prompt}");

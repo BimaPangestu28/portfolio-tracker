@@ -57,20 +57,15 @@ pub enum AttachmentPick {
 /// A parsed inline-button press.
 #[derive(Debug, PartialEq, Eq)]
 pub enum CallbackAction {
-    Confirm(i64),
-    Reject(i64),
     /// "✅ Selesai" on a reminder notification: mark its todo done.
     TodoDone(i64),
 }
 
-/// Parse callback_data ("confirm:<review_id>" / "reject:<review_id>" /
-/// "tododone:<todo_id>").
+/// Parse callback_data ("tododone:<todo_id>").
 pub fn parse_callback(data: &str) -> Option<CallbackAction> {
     let (action, id) = data.split_once(':')?;
     let id: i64 = id.parse().ok()?;
     match action {
-        "confirm" => Some(CallbackAction::Confirm(id)),
-        "reject" => Some(CallbackAction::Reject(id)),
         "tododone" => Some(CallbackAction::TodoDone(id)),
         _ => None,
     }
@@ -85,48 +80,75 @@ fn fmt_payload_num(raw: &str) -> String {
         .unwrap_or_else(|_| raw.to_string())
 }
 
-/// One-message summary of a staged review item for the confirmation prompt.
-fn item_summary(
-    item: &ReviewItemRow,
-    entry: Option<&ExtractedEntry>,
-    account: Option<&str>,
-    instrument: Option<&str>,
-) -> String {
-    let mut out = format!("🧾 Review #{}", item.id);
-    if let Some(e) = entry {
-        out.push_str(&format!(" — {}", e.entry_type));
-        if let Some(symbol) = &e.symbol {
-            out.push_str(&format!(" {symbol}"));
-        }
-        out.push('\n');
-        if let Some(qty) = &e.quantity {
-            out.push_str(&format!("Qty: {}\n", fmt_payload_num(qty)));
-        }
-        if let Some(price) = &e.price_native {
-            let currency = e.currency.as_deref().unwrap_or("");
-            out.push_str(&format!("Harga: {currency} {}\n", fmt_payload_num(price)));
-        }
-        // Amount-only fund entries have no qty/price; show the nominal instead.
-        if e.quantity.is_none() && e.price_native.is_none() {
-            if let Some(amount) = &e.amount_native {
-                let currency = e.currency.as_deref().unwrap_or("");
-                out.push_str(&format!("Nominal: {currency} {}\n", fmt_payload_num(amount)));
-            }
-        }
-        out.push_str(&format!(
-            "Tanggal: {}\n",
-            e.executed_at.as_deref().unwrap_or("hari ini")
+/// Build the model-facing seed and the concise history marker for an upload.
+/// The seed lists each staged item with its DB-resolved account/instrument and
+/// tells the assistant to confirm naturally before writing; the marker is what
+/// gets stored in chat history.
+/// Errors resolving an account/instrument just yield a "belum dikenali" label; this never fails.
+async fn build_upload_seed(db: &Db, items: &[ReviewItemRow]) -> (String, String) {
+    let mut lines = String::new();
+    for item in items {
+        let entry: Option<ExtractedEntry> = serde_json::from_str(&item.payload_json).ok();
+        let instrument = match item.suggested_instrument_id {
+            Some(id) => crate::repo::instruments::get(db, id)
+                .await
+                .ok()
+                .map(|i| format!("{} ({})", i.symbol, i.name))
+                .unwrap_or_else(|| "belum dikenali".into()),
+            None => "belum dikenali".into(),
+        };
+        let account = match item.suggested_account_id {
+            Some(id) => crate::repo::accounts::get(db, id)
+                .await
+                .ok()
+                .map(|a| a.name)
+                .unwrap_or_else(|| "belum dikenali".into()),
+            None => "belum dikenali".into(),
+        };
+        lines.push_str(&format!(
+            "- #{} {} — instrumen: {instrument} — akun: {account}",
+            item.id,
+            seed_entry_line(entry.as_ref())
         ));
-    } else {
-        out.push('\n');
+        if item.needs_attention != 0 {
+            lines.push_str(" — perlu dicek (confidence rendah / data kurang)");
+        }
+        lines.push('\n');
     }
-    if let Some(name) = account {
-        out.push_str(&format!("Akun: {name}\n"));
+    let count = items.len();
+    // The seed embeds owner-controlled account/instrument names and the owner's
+    // own uploaded entry data into an instruction string — acceptable for this
+    // single-owner bot. Revisit if names ever come from a third-party feed.
+    let seed = format!(
+        "[event:upload] Owner baru mengirim bukti transaksi ({count} item). \
+         Item review yang ter-stage:\n{lines}\
+         Sapa singkat, sebut yang kamu baca, lalu minta owner mengonfirmasi akun \
+         secara natural sebelum memanggil confirm_review. Kalau akun 'belum dikenali', \
+         tanya akun mana — boleh create_account setelah owner setuju. Kalau instrumen \
+         'belum dikenali', minta owner menambahkannya di web UI -> Data (instrumen tidak \
+         bisa dibuat dari chat). JANGAN menulis transaksi tanpa 'ya' eksplisit dari owner."
+    );
+    let marker = format!("(kirim {count} bukti transaksi)");
+    (seed, marker)
+}
+
+/// One-line entry summary for the upload seed: type, symbol, qty/amount, date.
+fn seed_entry_line(entry: Option<&ExtractedEntry>) -> String {
+    let Some(e) = entry else {
+        return "(tidak terbaca)".to_string();
+    };
+    let mut out = e.entry_type.clone();
+    if let Some(symbol) = &e.symbol {
+        out.push_str(&format!(" {symbol}"));
     }
-    if let Some(label) = instrument {
-        out.push_str(&format!("Instrumen: {label}\n"));
+    let currency = e.currency.as_deref().unwrap_or("");
+    if let (Some(qty), Some(price)) = (&e.quantity, &e.price_native) {
+        out.push_str(&format!(" — {} @ {currency} {}", fmt_payload_num(qty), fmt_payload_num(price)));
+    } else if let Some(amount) = &e.amount_native {
+        out.push_str(&format!(" — nominal {currency} {}", fmt_payload_num(amount)));
     }
-    out.trim_end().to_string()
+    out.push_str(&format!(" — {}", e.executed_at.as_deref().unwrap_or("hari ini")));
+    out
 }
 
 /// Pick the ingestable attachment from a message, if any. Photos use the
@@ -164,8 +186,15 @@ const ANSWER_FAILED_REPLY: &str =
     "Maaf, lagi ada gangguan saat menjawab. Coba lagi sebentar lagi ya.";
 const INGEST_FAILED_REPLY: &str =
     "Maaf, gagal memproses file-nya. Coba kirim ulang sebentar lagi ya.";
+const REFUSED_REPLY: &str =
+    "Modelnya menolak membaca dokumen ini. Coba kirim ulang, atau potong jadi screenshot \
+     yang isinya cukup detail transaksinya saja ya.";
 const UNSUPPORTED_FILE_REPLY: &str =
     "Format file tidak didukung — kirim foto atau PDF ya.";
+const VOICE_FAILED_REPLY: &str =
+    "Maaf, gagal memproses voice note-nya. Coba lagi atau ketik aja ya.";
+const VOICE_UNCLEAR_REPLY: &str =
+    "Suaranya nggak kedengeran jelas — coba ulangi atau ketik aja ya.";
 
 /// Spawn the background poller when TELEGRAM_BOT_TOKEN is configured.
 /// Without the token the Telegram channel is simply off.
@@ -230,30 +259,67 @@ async fn handle_update(client: &TelegramClient, db: &Db, tg: &SharedTgState, upd
     };
 
     match plan_action(linked, chat_id) {
-        Action::Answer => match pick_attachment(&message) {
-            AttachmentPick::Some(attachment) => {
-                match ingest_attachment(client, db, &attachment).await {
-                    Ok(items) => send_review_prompts(client, db, chat_id, &items).await,
+        Action::Answer => {
+            if let Some(voice) = &message.voice {
+                match transcribe_voice(client, voice).await {
+                    Ok(transcript) if !transcript.is_empty() => {
+                        send_or_log(client, chat_id, &format!("Aku denger: {transcript}")).await;
+                        let reply = answer(db, &transcript).await.unwrap_or_else(|e| {
+                            tracing::error!("telegram: voice answer failed: {e:#}");
+                            ANSWER_FAILED_REPLY.to_string()
+                        });
+                        send_or_log(client, chat_id, &reply).await;
+                    }
+                    Ok(_) => send_or_log(client, chat_id, VOICE_UNCLEAR_REPLY).await,
                     Err(e) => {
-                        tracing::error!("telegram: ingest failed: {e:#}");
-                        send_or_log(client, chat_id, INGEST_FAILED_REPLY).await;
+                        tracing::error!("telegram: transcription failed: {e:#}");
+                        send_or_log(client, chat_id, VOICE_FAILED_REPLY).await;
                     }
                 }
+                return;
             }
-            AttachmentPick::Unsupported => {
-                send_or_log(client, chat_id, UNSUPPORTED_FILE_REPLY).await;
+            match pick_attachment(&message) {
+                AttachmentPick::Some(attachment) => {
+                    match ingest_attachment(client, db, &attachment).await {
+                        Ok(items) if items.is_empty() => {
+                            send_or_log(client, chat_id, "Tidak ada transaksi yang terbaca dari file itu.").await;
+                        }
+                        Ok(items) => {
+                            let (seed, marker) = build_upload_seed(db, &items).await;
+                            let reply = kickoff_upload(db, &seed, &marker).await.unwrap_or_else(|e| {
+                                tracing::error!("telegram: upload kickoff failed: {e:#}");
+                                ANSWER_FAILED_REPLY.to_string()
+                            });
+                            send_or_log(client, chat_id, &reply).await;
+                        }
+                        Err(e) => {
+                            tracing::error!("telegram: ingest failed: {e:#}");
+                            // A model refusal gets its own guidance; everything else
+                            // (download/parse/timeout) keeps the generic retry hint.
+                            let reply = if e.downcast_ref::<crate::ingestion::ingest::ModelRefused>().is_some() {
+                                REFUSED_REPLY
+                            } else {
+                                INGEST_FAILED_REPLY
+                            };
+                            send_or_log(client, chat_id, reply).await;
+                        }
+                    }
+                }
+                AttachmentPick::Unsupported => {
+                    send_or_log(client, chat_id, UNSUPPORTED_FILE_REPLY).await;
+                }
+                AttachmentPick::None => {
+                    let Some(text) = message.text.as_deref().filter(|t| !t.trim().is_empty()) else {
+                        return;
+                    };
+                    let reply = answer(db, text).await.unwrap_or_else(|e| {
+                        tracing::error!("telegram: answer failed: {e:#}");
+                        ANSWER_FAILED_REPLY.to_string()
+                    });
+                    send_or_log(client, chat_id, &reply).await;
+                }
             }
-            AttachmentPick::None => {
-                let Some(text) = message.text.as_deref().filter(|t| !t.trim().is_empty()) else {
-                    return;
-                };
-                let reply = answer(db, text).await.unwrap_or_else(|e| {
-                    tracing::error!("telegram: answer failed: {e:#}");
-                    ANSWER_FAILED_REPLY.to_string()
-                });
-                send_or_log(client, chat_id, &reply).await;
-            }
-        },
+        }
         Action::TryLink => {
             // The link handshake is text-only; media from unlinked chats is ignored.
             let Some(text) = message.text.as_deref().filter(|t| !t.trim().is_empty()) else {
@@ -287,6 +353,41 @@ async fn answer(db: &Db, text: &str) -> anyhow::Result<String> {
     crate::assistant::agent::handle_message(db, &llm, "telegram", text).await
 }
 
+/// Run the assistant kickoff for a freshly-ingested upload: build the LLM client
+/// and hand the staged-item seed to the agent. Mirrors `answer` for text turns.
+async fn kickoff_upload(db: &Db, seed: &str, marker: &str) -> anyhow::Result<String> {
+    let llm = crate::llm::claude::ClaudeClient::from_env()
+        .map_err(|e| anyhow::anyhow!("chat unavailable: {e}"))?;
+    crate::assistant::agent::handle_upload_event(db, &llm, "telegram", seed, marker).await
+}
+
+/// Whisper infers the audio format from the filename extension, so map the
+/// Telegram MIME type to a matching extension (default ogg — Telegram's usual).
+fn derive_voice_filename(mime: &str) -> String {
+    let ext = match mime {
+        "audio/mp4" | "audio/m4a" | "audio/x-m4a" => "mp4",
+        "audio/webm" => "webm",
+        "audio/mpeg" | "audio/mp3" => "mp3",
+        "audio/wav" | "audio/x-wav" => "wav",
+        _ => "ogg", // audio/ogg, audio/opus, unknown
+    };
+    format!("voice.{ext}")
+}
+
+/// Download a voice note and transcribe it via Whisper.
+async fn transcribe_voice(
+    client: &TelegramClient,
+    voice: &crate::telegram::client::TgVoice,
+) -> anyhow::Result<String> {
+    let file_path = client.get_file_path(&voice.file_id).await?;
+    let bytes = client.download_file(&file_path).await?;
+    let mime = voice.mime_type.as_deref().unwrap_or("audio/ogg");
+    let filename = derive_voice_filename(mime);
+    let llm = crate::llm::native::NativeLlmClient::from_env()
+        .map_err(|e| anyhow::anyhow!("transcription unavailable (check OPENAI_API_KEY): {e}"))?;
+    Ok(llm.transcribe(bytes, &filename, mime).await?)
+}
+
 /// Download an attachment and run it through the shared ingestion pipeline
 /// (same path as a web upload). Returns the staged review items.
 async fn ingest_attachment(
@@ -308,62 +409,6 @@ async fn ingest_attachment(
     };
     let result = crate::ingestion::ingest::ingest_batch(db, &llm, &batch_id, &[upload]).await?;
     Ok(result.items)
-}
-
-/// Send one confirmation prompt per staged item: confirmable items get
-/// Konfirmasi/Tolak buttons, incomplete ones get Tolak plus a web-UI note.
-async fn send_review_prompts(
-    client: &TelegramClient,
-    db: &Db,
-    chat_id: i64,
-    items: &[ReviewItemRow],
-) {
-    if items.is_empty() {
-        send_or_log(client, chat_id, "Tidak ada transaksi yang terbaca dari file itu.").await;
-        return;
-    }
-    for item in items {
-        let entry: Option<ExtractedEntry> = serde_json::from_str(&item.payload_json).ok();
-        let account_name = match item.suggested_account_id {
-            Some(id) => crate::repo::accounts::get(db, id).await.ok().map(|a| a.name),
-            None => None,
-        };
-        let instrument_label = match item.suggested_instrument_id {
-            Some(id) => crate::repo::instruments::get(db, id)
-                .await
-                .ok()
-                .map(|i| format!("{} ({})", i.symbol, i.name)),
-            None => None,
-        };
-        let summary = item_summary(
-            item,
-            entry.as_ref(),
-            account_name.as_deref(),
-            instrument_label.as_deref(),
-        );
-        let confirm_data = format!("confirm:{}", item.id);
-        let reject_data = format!("reject:{}", item.id);
-        let send_result = match crate::ingestion::review::build_confirm_payload(item) {
-            Ok(_) => {
-                client
-                    .send_message_with_buttons(
-                        chat_id,
-                        &summary,
-                        &[("✅ Konfirmasi", &confirm_data), ("❌ Tolak", &reject_data)],
-                    )
-                    .await
-            }
-            Err(reason) => {
-                let text = format!("{summary}\n\n⚠️ {reason} — lengkapi di web UI → Data.");
-                client
-                    .send_message_with_buttons(chat_id, &text, &[("❌ Tolak", &reject_data)])
-                    .await
-            }
-        };
-        if let Err(e) = send_result {
-            tracing::error!("telegram: review prompt for #{} failed: {e:#}", item.id);
-        }
-    }
 }
 
 /// Handle an inline-button press: only the linked owner chat may act, the
@@ -388,37 +433,11 @@ async fn handle_callback(client: &TelegramClient, db: &Db, callback: TgCallbackQ
     }
     let Some(action) = callback.data.as_deref().and_then(parse_callback) else { return };
     let text = match action {
-        CallbackAction::Confirm(item_id) => {
-            review_callback_text(item_id, confirm_item(db, item_id).await)
-        }
-        CallbackAction::Reject(item_id) => {
-            review_callback_text(item_id, reject_item(db, item_id).await)
-        }
         CallbackAction::TodoDone(todo_id) => todo_done_text(db, todo_id).await,
     };
     if let Err(e) = client.edit_message_text(chat_id, message.message_id, &text).await {
         tracing::error!("telegram: editMessageText failed: {e:#}");
     }
-}
-
-/// Confirm a staged item using its suggested account/instrument.
-async fn confirm_item(db: &Db, item_id: i64) -> anyhow::Result<String> {
-    let item = crate::repo::review_items::get(db, item_id).await?;
-    let payload = crate::ingestion::review::build_confirm_payload(&item)
-        .map_err(|reason| anyhow::anyhow!("{reason} — lengkapi di web UI → Data"))?;
-    let txn_id = crate::ingestion::review::confirm(db, item_id, &payload).await?;
-    Ok(format!("✅ Transaksi #{txn_id} dibuat."))
-}
-
-async fn reject_item(db: &Db, item_id: i64) -> anyhow::Result<String> {
-    crate::ingestion::review::reject(db, item_id).await?;
-    Ok("❌ Ditolak.".to_string())
-}
-
-/// Result line for review confirm/reject button presses.
-fn review_callback_text(item_id: i64, outcome: anyhow::Result<String>) -> String {
-    let status = outcome.unwrap_or_else(|e| format!("⚠️ {e:#}"));
-    format!("🧾 Review #{item_id} — {status}")
 }
 
 /// Result line for the "✅ Selesai" button on a reminder notification.
@@ -458,7 +477,7 @@ mod tests {
     use client::{TgChat, TgDocument, TgMessage, TgPhotoSize};
 
     fn bare_message() -> TgMessage {
-        TgMessage { chat: TgChat { id: 1 }, from: None, text: None, photo: None, document: None }
+        TgMessage { chat: TgChat { id: 1 }, from: None, text: None, photo: None, document: None, voice: None }
     }
 
     #[test]
@@ -510,13 +529,13 @@ mod tests {
     // ── Inline confirmation ────────────────────────────────────────────────
 
     #[test]
-    fn parses_confirm_and_reject_callbacks() {
-        assert_eq!(parse_callback("confirm:42"), Some(CallbackAction::Confirm(42)));
-        assert_eq!(parse_callback("reject:7"), Some(CallbackAction::Reject(7)));
+    fn parses_tododone_callback() {
         assert_eq!(parse_callback("tododone:9"), Some(CallbackAction::TodoDone(9)));
+        assert_eq!(parse_callback("confirm:42"), None);
+        assert_eq!(parse_callback("reject:7"), None);
         assert_eq!(parse_callback("nope:1"), None);
-        assert_eq!(parse_callback("confirm:abc"), None);
-        assert_eq!(parse_callback("confirm"), None);
+        assert_eq!(parse_callback("tododone:abc"), None);
+        assert_eq!(parse_callback("tododone"), None);
     }
 
     #[tokio::test]
@@ -529,65 +548,57 @@ mod tests {
         assert!(again.contains("sudah") || again.contains("tidak ditemukan"), "{again}");
     }
 
-    // Helpers for the item_summary tests below (private copies; the authoritative
-    // build_confirm_payload tests live in ingestion::review).
-    fn review_item(payload_json: &str) -> crate::repo::review_items::ReviewItemRow {
-        crate::repo::review_items::ReviewItemRow {
-            id: 42,
-            batch_id: "tg-1".into(),
-            source_kind: "image".into(),
-            source_filename: "telegram-photo.jpg".into(),
-            source_path: "".into(),
-            doc_type: "txn_history".into(),
-            status: "pending".into(),
-            needs_attention: 0,
-            payload_json: payload_json.into(),
-            raw_llm_json: "{}".into(),
-            suggested_instrument_id: Some(9),
-            suggested_account_id: Some(2),
-            created_txn_id: None,
-            created_at: "2026-06-05T00:00:00Z".into(),
-            confirmed_at: None,
-        }
-    }
-
-    const FULL_PAYLOAD: &str = r#"{
-        "entry_type": "buy", "symbol": "BTC", "quantity": "0.00128248",
-        "price_native": "1169608882", "fee_native": "0", "currency": "IDR",
-        "executed_at": "2026-06-04", "confidence": 0.95
-    }"#;
-
-    const AMOUNT_ONLY_PAYLOAD: &str = r#"{
-        "entry_type": "buy", "instrument_name": "Sucorinvest Bond Fund",
-        "amount_native": "13000000", "currency": "IDR", "confidence": 0.72
-    }"#;
-
     #[test]
-    fn amount_only_summary_shows_the_nominal() {
-        let item = review_item(AMOUNT_ONLY_PAYLOAD);
-        let entry: crate::ingestion::extract::ExtractedEntry =
-            serde_json::from_str(AMOUNT_ONLY_PAYLOAD).unwrap();
-        let summary = item_summary(
-            &item,
-            Some(&entry),
-            Some("Pendidikan Noah"),
-            Some("Sucorinvest Bond Fund"),
-        );
-        assert!(summary.contains("Nominal: IDR 13.000.000"), "{summary}");
-        assert!(!summary.contains("Qty:"), "{summary}");
+    fn seed_entry_line_renders_qty_and_price() {
+        let entry: ExtractedEntry = serde_json::from_str(
+            r#"{"entry_type":"buy","symbol":"QQQM","quantity":"3","price_native":"200","currency":"USD","executed_at":"2026-06-11"}"#,
+        ).unwrap();
+        let line = seed_entry_line(Some(&entry));
+        assert!(line.contains("buy QQQM"), "{line}");
+        assert!(line.contains("@ USD"), "{line}");
+        assert!(line.contains("2026-06-11"), "{line}");
+        assert!(!line.contains("nominal"), "{line}");
     }
 
     #[test]
-    fn summary_shows_the_extracted_details() {
-        let item = review_item(FULL_PAYLOAD);
-        let entry: crate::ingestion::extract::ExtractedEntry =
-            serde_json::from_str(FULL_PAYLOAD).unwrap();
-        let summary = item_summary(&item, Some(&entry), Some("Pluang"), Some("BTC (Bitcoin)"));
-        assert!(summary.contains("Review #42"), "{summary}");
-        assert!(summary.contains("buy BTC"), "{summary}");
-        assert!(summary.contains("0,00128248"), "{summary}");
-        assert!(summary.contains("1.169.608.882"), "{summary}");
-        assert!(summary.contains("Akun: Pluang"), "{summary}");
-        assert!(summary.contains("Instrumen: BTC (Bitcoin)"), "{summary}");
+    fn seed_entry_line_renders_amount_only_nominal() {
+        let entry: ExtractedEntry = serde_json::from_str(
+            r#"{"entry_type":"buy","instrument_name":"Sucorinvest Bond Fund","amount_native":"13000000","currency":"IDR"}"#,
+        ).unwrap();
+        let line = seed_entry_line(Some(&entry));
+        assert!(line.contains("nominal IDR"), "{line}");
+        assert!(line.contains("13.000.000"), "{line}");
+        assert!(!line.contains('@'), "{line}");
     }
+
+    #[test]
+    fn seed_entry_line_handles_unreadable_entry() {
+        assert_eq!(seed_entry_line(None), "(tidak terbaca)");
+    }
+
+    #[test]
+    fn voice_filename_extension_follows_mime() {
+        assert_eq!(derive_voice_filename("audio/ogg"), "voice.ogg");
+        assert_eq!(derive_voice_filename("audio/mp4"), "voice.mp4");
+        assert_eq!(derive_voice_filename("audio/webm"), "voice.webm");
+        assert_eq!(derive_voice_filename("application/weird"), "voice.ogg");
+    }
+
+    #[tokio::test]
+    async fn build_upload_seed_labels_unknown_and_flags_attention() {
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        let item = crate::repo::review_items::create(&db, &crate::repo::review_items::NewReviewItem {
+            batch_id: "b", source_kind: "image", source_filename: "f.png", source_path: "p",
+            doc_type: "txn_history", needs_attention: true,
+            payload_json: r#"{"entry_type":"buy","symbol":"QQQM","amount_native":"2000000","currency":"IDR"}"#,
+            raw_llm_json: "{}", suggested_instrument_id: None, suggested_account_id: None,
+        }).await.unwrap();
+        let (seed, marker) = build_upload_seed(&db, std::slice::from_ref(&item)).await;
+        assert!(seed.contains("akun: belum dikenali"), "{seed}");
+        assert!(seed.contains("instrumen: belum dikenali"), "{seed}");
+        assert!(seed.contains("perlu dicek"), "{seed}");
+        assert!(seed.contains("confirm_review"), "{seed}");
+        assert_eq!(marker, "(kirim 1 bukti transaksi)");
+    }
+
 }

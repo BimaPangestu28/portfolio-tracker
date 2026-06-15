@@ -7,7 +7,9 @@ use serde::{Deserialize, Serialize};
 const AUTH_ENDPOINT: &str = "https://accounts.google.com/o/oauth2/v2/auth";
 const TOKEN_ENDPOINT: &str = "https://oauth2.googleapis.com/token";
 const REVOKE_ENDPOINT: &str = "https://oauth2.googleapis.com/revoke";
-pub const SCOPE: &str = "https://www.googleapis.com/auth/calendar.events";
+pub const SCOPE: &str = "https://www.googleapis.com/auth/calendar.events \
+https://www.googleapis.com/auth/gmail.readonly \
+https://www.googleapis.com/auth/gmail.compose";
 const STATE_TTL_SECS: i64 = 600;
 
 /// OAuth client config from the environment.
@@ -162,8 +164,16 @@ mod tests {
         assert!(url.contains("access_type=offline"));
         assert!(url.contains("prompt=consent"));
         assert!(url.contains("state=STATEVAL"));
-        assert!(url.contains("scope=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fcalendar.events"));
+        assert!(url.contains("calendar.events"), "{url}");
         assert!(url.contains("redirect_uri=https%3A%2F%2Fapp%2Fapi%2Fgoogle%2Foauth%2Fcallback"));
+    }
+
+    #[test]
+    fn consent_url_requests_all_scopes() {
+        let url = consent_url("cid", "https://app/redir", "state123");
+        assert!(url.contains("calendar.events"), "{url}");
+        assert!(url.contains("gmail.readonly"), "{url}");
+        assert!(url.contains("gmail.compose"), "{url}");
     }
 
     #[test]

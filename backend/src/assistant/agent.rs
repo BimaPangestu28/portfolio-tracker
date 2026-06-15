@@ -35,13 +35,27 @@ you to remember a fact. \
  You also manage the owner's agenda: create_event (a pre-event reminder is \
 created automatically), list_events for schedule questions like 'besok ada \
 apa?', and cancel_event. \
+ CONFIRMATION FORMAT — when you confirm a create / update / complete / cancel action \
+(todo, reminder, event, task, or invoice), reply as short plain-text lines, each on its \
+own line, no Markdown and no internal ids unless asked. Start with a status line: \
+'✅ <Dibuat/Selesai/...>' on success, '🗑️ Dibatalkan' on a cancellation. Then one item \
+line: a type icon + the title — 📝 todo, ⏰ reminder, 📅 event, 🗂️ task, 🧾 invoice. Then \
+optional detail lines, omitting any that don't apply: '🕑 <time> WIB' for when (append \
+' (diubah dari <old time> WIB)' when you moved it), '🔔 Reminder: <N> menit sebelumnya', \
+'📁 <project>' for a task's project, '💰 <amount>' for a billable task. For an invoice, \
+list each line item as '• <title> — <amount>' and end with a 'Total: <total>' line. \
  You can also enter transactions the owner sent as photos/PDFs: when they ask \
 to 'masukin transaksi tadi' or to confirm one, call list_pending_reviews. If \
 the account shows 'belum dikenali', call list_accounts to find a match; if \
 none fits, ask the user before calling create_account. If the instrument shows \
 'belum dikenali', call list_instruments to find it (auto-matching only catches \
 exact names); if it isn't there, tell the user to add it in the web UI → Data \
-— instruments can't be created from chat. Then call confirm_review with the \
+— instruments can't be created from chat. The account/instrument shown is only \
+a guess read from the photo (OCR), not authoritative — if the owner says it's \
+wrong (e.g. the photo reads one broker but the holding is in another), find the \
+right one with list_accounts/list_instruments and pass its account_id/instrument_id \
+to confirm_review to override it; you do NOT need the item to show 'belum \
+dikenali' first. Then call confirm_review with the \
 account_id and/or instrument_id needed. Unlike todos/reminders, ALWAYS ask the \
 user to confirm before create_account or confirm_review — these write financial \
 data that can't be silently undone. Use reject_review to discard an item. \
@@ -58,6 +72,37 @@ id to complete_task when the user says a task is done. \
  When the user says a task is billable or gives a price (e.g. 'task landing page PT AIS, \
 billable 10 juta'), pass billable=true and amount (in IDR) to create_task so it can be \
 invoiced later. \
+ You can also draft Upwork job proposals: when the owner pastes a job and asks for a proposal \
+(e.g. 'buatin proposal buat ini'), call draft_proposal with the pasted job_text (and notes if the \
+owner specifies emphasis or a bid). The tool returns a ready-to-send English draft — relay it to \
+the owner verbatim, without summarizing, translating, or reformatting it. \
+ You can also make invoices: when the owner says e.g. 'buatin invoice PT AIS: landing page 10 juta, hosting 2 juta', parse each line into {title, amount in IDR} and call create_invoice with client_name + line_items. Convert '10 juta' to 10000000. First echo the parsed items and the total back to the owner so they can catch typos. If create_invoice reports the client 'belum ada', ask the owner for the client's sub-name/website and retry with client_details. The PDF is sent to Telegram automatically. \
+ You also keep a quick-capture inbox. Decide per message: a vague or quick dump \
+with no clear single action (e.g. 'inget beliin kado', 'ide fitur X') → call capture_to_inbox; \
+a clear single actionable ('bayar pajak besok') → create it directly (todo/event/task) as usual; \
+a longer note with several items → extract the items, echo a short summary (e.g. 'Kebaca: 3 todo, \
+1 event …') and create them only after the user confirms. For 'apa di inbox?' call list_inbox. \
+For 'sortir inbox' / 'beresin inbox': call list_inbox, propose a classification for every pending \
+item in ONE message (todo/event/task/note — a note means save it with remember), and after the \
+user confirms, create each item with the matching tool and then call resolve_inbox with the \
+handled ids and status 'sorted' (use 'dropped' for ones the user discards). \
+ You can also handle Gmail: 'ada email penting?' → list_emails; to read or summarize \
+a specific one, call read_email with its id; to reply, call read_email for context then draft_reply \
+with the id and the reply text you compose — the draft is saved to Gmail for the owner to review and \
+send, it is NOT sent automatically, so tell them to check Gmail. If a Gmail tool says it's not \
+connected, tell the owner to connect Google in the web UI. \
+ You can answer money questions: 'bulan ini masuk/kepake/net berapa?' → cashflow_summary; \
+portfolio insight questions (konsentrasi, savings rate, net worth) → portfolio_insights. \
+For price alerts ('kabarin kalau BBCA turun 5%' or 'di harga 9000'), call set_price_alert: pass \
+the instrument and either target (an absolute price) or percent + direction (turun→below, \
+naik→above) — for a percent the alert is computed from the current price. list_price_alerts shows \
+active alerts; cancel_price_alert cancels one by id. \
+ You can track time on ClickUp tasks: 'mulai ngerjain <task>' → start_timer; \
+'udahan'/'stop' → stop_timer; 'lagi ngerjain apa?' → current_timer. Timers always attach to a \
+ClickUp task — if the task name is ambiguous, ask which one. For 'minggu ini berapa jam?' or \
+'jam di <project> bulan ini' call time_report (scope today/week/month). When the user logged time \
+after the fact ('tambahin 2 jam ke task kontrak kemarin'), call add_time_entry with the task and \
+duration. \
  You can assemble a day plan: when the user asks to plan today or what's left \
 (e.g. 'rencanain hariku', 'sisa hari ini apa aja', 'hari ini ngapain aja'), call plan_day \
 and present its agenda + prioritised todos as a short suggested flow. When the user agrees to \
@@ -148,47 +193,39 @@ async fn store_and_ingest(
     Ok(())
 }
 
-/// Run the agent loop for one inbound message. Stores the user message and
-/// the final reply in chat history only on success (no orphaned rows).
-pub async fn handle_message<M: ToolModel + Sync>(
+/// Load the channel's recent chat history as (role, content) pairs.
+async fn load_history(db: &Db, channel: &str) -> Vec<(String, String)> {
+    crate::repo::chat::recent_by_channel(db, channel, HISTORY_LIMIT)
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .map(|m| (m.role, m.content))
+        .collect()
+}
+
+/// Drive the tool-use loop over `messages` until the model returns text or hits
+/// the iteration cap. Returns the reply only — persisting is the caller's job.
+/// A shape anomaly or the cap yields a fallback reply (Ok), never an Err; only a
+/// transport/LLM error propagates.
+async fn run_tool_loop<M: ToolModel + Sync>(
     db: &Db,
     model: &M,
-    channel: &str,
-    user_msg: &str,
+    system: &str,
+    mut messages: Vec<serde_json::Value>,
 ) -> anyhow::Result<String> {
-    let now_wib = chrono::Utc::now().with_timezone(&super::time::wib()).to_rfc3339();
-    let memory = super::memory::MemoryClient::from_env();
-    let facts = match &memory {
-        Some(client) => client.search(user_msg, INJECT_FACT_LIMIT).await,
-        None => Vec::new(),
-    };
-    let system = compose_system(&now_wib, &facts);
     let tools = super::tools::definitions();
-    let history: Vec<(String, String)> =
-        crate::repo::chat::recent_by_channel(db, channel, HISTORY_LIMIT)
-            .await
-            .unwrap_or_default()
-            .into_iter()
-            .map(|m| (m.role, m.content))
-            .collect();
-    let mut messages = build_messages(&history, user_msg);
-
-    // Tool side effects commit eagerly per iteration and are intentionally NOT
-    // rolled back if a later model call fails — a created todo is real even if
-    // the confirmation reply never arrives. Only chat rows wait for success.
     for _ in 0..MAX_ITERATIONS {
         let resp = model
-            .complete_tools(&system, &messages, &tools)
+            .complete_tools(system, &messages, &tools)
             .await
             .map_err(|e| anyhow::anyhow!("llm error: {e}"))?;
-        // A shape anomaly (empty content, malformed blocks) ends the turn with
-        // a fallback instead of erroring: prior tool side effects are already
-        // committed and the user deserves *some* reply.
         let blocks = match extract_blocks(&resp) {
             Ok(blocks) => blocks,
             Err(e) => {
+                // Prior iterations' tool side effects are already committed; end
+                // the turn with a fallback reply (the caller still persists it)
+                // rather than erroring and leaving the user with nothing.
                 tracing::warn!("assistant: unusable model response ({e}); using fallback reply");
-                store_and_ingest(db, memory.clone(), channel, user_msg, NO_TEXT_REPLY).await?;
                 return Ok(NO_TEXT_REPLY.to_string());
             }
         };
@@ -213,11 +250,9 @@ pub async fn handle_message<M: ToolModel + Sync>(
             if reply.trim().is_empty() {
                 reply = NO_TEXT_REPLY.to_string();
             }
-            store_and_ingest(db, memory.clone(), channel, user_msg, &reply).await?;
             return Ok(reply);
         }
 
-        // Replay the assistant turn verbatim, then answer every tool_use.
         messages.push(serde_json::json!({ "role": "assistant", "content": resp["content"].clone() }));
         let mut results = Vec::new();
         for (id, name, input) in &tool_uses {
@@ -230,9 +265,55 @@ pub async fn handle_message<M: ToolModel + Sync>(
         }
         messages.push(serde_json::json!({ "role": "user", "content": results }));
     }
-
-    store_and_ingest(db, memory, channel, user_msg, ITERATION_CAP_REPLY).await?;
     Ok(ITERATION_CAP_REPLY.to_string())
+}
+
+/// Run the agent loop for one inbound message. Stores the user message and
+/// the final reply in chat history only on success (no orphaned rows).
+pub async fn handle_message<M: ToolModel + Sync>(
+    db: &Db,
+    model: &M,
+    channel: &str,
+    user_msg: &str,
+) -> anyhow::Result<String> {
+    let now_wib = chrono::Utc::now().with_timezone(&super::time::wib()).to_rfc3339();
+    let memory = super::memory::MemoryClient::from_env();
+    let facts = match &memory {
+        Some(client) => client.search(user_msg, INJECT_FACT_LIMIT).await,
+        None => Vec::new(),
+    };
+    let system = compose_system(&now_wib, &facts);
+    let history = load_history(db, channel).await;
+    let messages = build_messages(&history, user_msg);
+
+    // Tool side effects commit eagerly per iteration and are intentionally NOT
+    // rolled back if a later model call fails. Only chat rows wait for success.
+    let reply = run_tool_loop(db, model, &system, messages).await?;
+    store_and_ingest(db, memory, channel, user_msg, &reply).await?;
+    Ok(reply)
+}
+
+/// Kick off the assistant after a file upload. The model sees `seed` (the staged
+/// items plus how to handle them) as the opening turn and replies naturally, but
+/// chat history stores the concise `history_marker` in place of the verbose seed,
+/// so a later "iya" still has the assistant's question for context. Long-term
+/// memory is not consulted here — the seed already carries the resolved account.
+pub async fn handle_upload_event<M: ToolModel + Sync>(
+    db: &Db,
+    model: &M,
+    channel: &str,
+    seed: &str,
+    history_marker: &str,
+) -> anyhow::Result<String> {
+    let now_wib = chrono::Utc::now().with_timezone(&super::time::wib()).to_rfc3339();
+    // No memory lookup here — the upload seed is self-contained.
+    let system = compose_system(&now_wib, &[]);
+    let history = load_history(db, channel).await;
+    let messages = build_messages(&history, seed);
+
+    let reply = run_tool_loop(db, model, &system, messages).await?;
+    store_and_ingest(db, None, channel, history_marker, &reply).await?;
+    Ok(reply)
 }
 
 #[cfg(test)]
@@ -443,6 +524,18 @@ mod tests {
         assert!(prompt.contains("list_instruments"), "{prompt}");
     }
 
+    /// The detected account is only an OCR guess from the photo. When the owner
+    /// says it's wrong, the assistant must override it via confirm_review — not
+    /// give up because the item isn't flagged 'belum dikenali'.
+    #[test]
+    fn system_prompt_allows_overriding_a_wrongly_detected_account() {
+        let prompt = system_prompt("2026-06-12T10:00:00+07:00").to_lowercase();
+        assert!(
+            prompt.contains("override"),
+            "prompt must tell the assistant it can override a wrongly-detected account: {prompt}"
+        );
+    }
+
     #[test]
     fn system_prompt_mentions_the_project_tools() {
         let prompt = system_prompt("2026-06-13T10:00:00+07:00");
@@ -462,5 +555,57 @@ mod tests {
     fn system_prompt_mentions_billable() {
         let prompt = system_prompt("2026-06-13T10:00:00+07:00");
         assert!(prompt.contains("billable"), "{prompt}");
+    }
+
+    #[test]
+    fn system_prompt_mentions_proposal_relay() {
+        assert!(SYSTEM.contains("draft_proposal"));
+        assert!(SYSTEM.contains("verbatim"));
+    }
+
+    #[test]
+    fn system_prompt_mentions_invoicing() {
+        let prompt = system_prompt("2026-06-13T10:00:00+07:00");
+        assert!(prompt.contains("create_invoice"), "{prompt}");
+    }
+
+    #[tokio::test]
+    async fn upload_event_seeds_model_and_stores_marker() {
+        let db = mem_db().await;
+        let model = ScriptedModel::new(vec![text_response("Aku baca beli QQQM Rp2jt, catat ke IBKR ya?")]);
+        let reply = handle_upload_event(
+            &db, &model, "telegram",
+            "SEED-CTX-XYZ beli QQQM ke IBKR",
+            "(kirim 1 bukti transaksi)",
+        ).await.unwrap();
+        assert_eq!(reply, "Aku baca beli QQQM Rp2jt, catat ke IBKR ya?");
+
+        // The model saw the verbose seed as the trailing user message.
+        let seen = model.messages_of_call(0);
+        let last = seen.last().unwrap();
+        assert_eq!(last["role"], "user");
+        assert!(last["content"].as_str().unwrap().contains("SEED-CTX-XYZ"), "{last:?}");
+
+        // Chat history stores the concise marker, not the seed.
+        let history = crate::repo::chat::recent_by_channel(&db, "telegram", 10).await.unwrap();
+        assert_eq!(history.len(), 2);
+        assert_eq!(history[0].content, "(kirim 1 bukti transaksi)");
+        assert_eq!(history[1].content, "Aku baca beli QQQM Rp2jt, catat ke IBKR ya?");
+    }
+
+    #[tokio::test]
+    async fn followup_after_upload_sees_prior_question() {
+        let db = mem_db().await;
+        let model1 = ScriptedModel::new(vec![text_response("Beli QQQM Rp2jt, catat ke IBKR ya?")]);
+        handle_upload_event(&db, &model1, "telegram", "seed", "(kirim 1 bukti transaksi)").await.unwrap();
+
+        // The owner replies "iya"; the model must see its own prior question.
+        let model2 = ScriptedModel::new(vec![text_response("Sip, kecatat.")]);
+        handle_message(&db, &model2, "telegram", "iya").await.unwrap();
+        let seen = model2.messages_of_call(0);
+        assert!(
+            seen.iter().any(|m| m["content"].as_str().is_some_and(|c| c.contains("IBKR"))),
+            "follow-up turn should include the prior assistant question: {seen:?}"
+        );
     }
 }

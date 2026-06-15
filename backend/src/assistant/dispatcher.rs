@@ -48,6 +48,49 @@ pub async fn dispatch(db: &Db, name: &str, input: &serde_json::Value) -> Result<
             Ok(api) => clickup_complete_task(&api, input).await,
             Err(e) => Err(format!("clickup belum dikonfigurasi: {e}")),
         },
+        "start_timer" => match crate::clickup::ClickUpClient::from_env() {
+            Ok(api) => clickup_start_timer(&api, input).await,
+            Err(e) => Err(format!("clickup belum dikonfigurasi: {e}")),
+        },
+        "stop_timer" => match crate::clickup::ClickUpClient::from_env() {
+            Ok(api) => clickup_stop_timer(&api).await,
+            Err(e) => Err(format!("clickup belum dikonfigurasi: {e}")),
+        },
+        "current_timer" => match crate::clickup::ClickUpClient::from_env() {
+            Ok(api) => clickup_current_timer(&api).await,
+            Err(e) => Err(format!("clickup belum dikonfigurasi: {e}")),
+        },
+        "time_report" => match crate::clickup::ClickUpClient::from_env() {
+            Ok(api) => clickup_time_report(&api, input).await,
+            Err(e) => Err(format!("clickup belum dikonfigurasi: {e}")),
+        },
+        "add_time_entry" => match crate::clickup::ClickUpClient::from_env() {
+            Ok(api) => clickup_add_time_entry(&api, input).await,
+            Err(e) => Err(format!("clickup belum dikonfigurasi: {e}")),
+        },
+        "draft_proposal" => draft_proposal(input).await,
+        "list_clients" => invoice_list_clients(db).await,
+        "create_invoice" => invoice_create(db, input).await,
+        "capture_to_inbox" => capture_to_inbox(db, input).await,
+        "list_inbox" => list_inbox(db).await,
+        "resolve_inbox" => resolve_inbox(db, input).await,
+        "list_emails" => match crate::google::engine::current_access_token(db).await {
+            Ok(token) => gmail_list_emails(&crate::google::gmail::HttpGmail::new(token), input).await,
+            Err(_) => Err("Gmail belum tersambung — sambungin Google dulu di web UI".into()),
+        },
+        "read_email" => match crate::google::engine::current_access_token(db).await {
+            Ok(token) => gmail_read_email(&crate::google::gmail::HttpGmail::new(token), input).await,
+            Err(_) => Err("Gmail belum tersambung — sambungin Google dulu di web UI".into()),
+        },
+        "draft_reply" => match crate::google::engine::current_access_token(db).await {
+            Ok(token) => gmail_draft_reply(&crate::google::gmail::HttpGmail::new(token), input).await,
+            Err(_) => Err("Gmail belum tersambung — sambungin Google dulu di web UI".into()),
+        },
+        "cashflow_summary" => cashflow_summary(db, input).await,
+        "portfolio_insights" => portfolio_insights(db).await,
+        "set_price_alert" => set_price_alert(db, input).await,
+        "list_price_alerts" => list_price_alerts(db).await,
+        "cancel_price_alert" => cancel_price_alert(db, input).await,
         _ => Err(format!("unknown tool: {name}")),
     }
 }
@@ -283,6 +326,15 @@ async fn search_memory(input: &serde_json::Value) -> Result<String, String> {
         out.push('\n');
     }
     Ok(out)
+}
+
+/// Draft an Upwork proposal from a pasted job. Validation only here; the
+/// memory + LLM work lives in `assistant::proposal`.
+async fn draft_proposal(input: &serde_json::Value) -> Result<String, String> {
+    let job_text = str_arg(input, "job_text")
+        .ok_or("missing required argument 'job_text' — paste the job description")?;
+    let notes = str_arg(input, "notes");
+    Ok(super::proposal::draft(job_text, notes).await)
 }
 
 async fn remember(input: &serde_json::Value) -> Result<String, String> {
@@ -542,6 +594,223 @@ async fn clickup_list_projects(api: &dyn crate::clickup::ClickUpApi) -> Result<S
     Ok(out)
 }
 
+/// Resolve a task name to (task_id, task_name, project_name) by scanning open
+/// tasks across all projects. Exact (case-insensitive) matches win; otherwise
+/// fall back to substring matches. Errors on no match or ambiguity so the model
+/// asks the user instead of guessing.
+async fn resolve_clickup_task(
+    api: &dyn crate::clickup::ClickUpApi,
+    name: &str,
+) -> Result<(String, String, String), String> {
+    let needle = name.to_lowercase();
+    let projects = api.list_projects().await.map_err(|e| format!("{e}"))?;
+    let mut exact = Vec::new();
+    let mut partial = Vec::new();
+    for project in &projects {
+        for task in api.list_tasks(&project.id).await.map_err(|e| format!("{e}"))? {
+            let hay = task.name.to_lowercase();
+            if hay == needle {
+                exact.push((task.id.clone(), task.name.clone(), project.name.clone()));
+            } else if hay.contains(&needle) {
+                partial.push((task.id.clone(), task.name.clone(), project.name.clone()));
+            }
+        }
+    }
+    let mut hits = if !exact.is_empty() { exact } else { partial };
+    match hits.len() {
+        0 => Err(format!("task '{name}' nggak ketemu — sebutin nama task yang ada ya")),
+        1 => Ok(hits.remove(0)),
+        _ => Err(format!("ada beberapa task yang cocok '{name}' — sebutin lebih spesifik")),
+    }
+}
+
+async fn clickup_start_timer(
+    api: &dyn crate::clickup::ClickUpApi,
+    input: &serde_json::Value,
+) -> Result<String, String> {
+    let name = str_arg(input, "task").ok_or("missing required argument 'task'")?;
+    let (task_id, task_name, project) = resolve_clickup_task(api, name).await?;
+    api.start_timer(&task_id).await.map_err(|e| format!("{e}"))?;
+    Ok(format!("timer jalan buat '{task_name}' ({project})"))
+}
+
+async fn clickup_stop_timer(api: &dyn crate::clickup::ClickUpApi) -> Result<String, String> {
+    match api.stop_timer().await.map_err(|e| format!("{e}"))? {
+        Some(entry) => Ok(format!(
+            "timer '{}' distop — {}",
+            entry.task_name,
+            crate::clickup::report::format_duration(entry.duration_ms)
+        )),
+        None => Ok("nggak ada timer yang jalan".into()),
+    }
+}
+
+async fn clickup_current_timer(api: &dyn crate::clickup::ClickUpApi) -> Result<String, String> {
+    match api.current_timer().await.map_err(|e| format!("{e}"))? {
+        Some(running) => Ok(format!("lagi ngerjain '{}'", running.task_name)),
+        None => Ok("lagi nggak ada timer yang jalan".into()),
+    }
+}
+
+async fn clickup_time_report(
+    api: &dyn crate::clickup::ClickUpApi,
+    input: &serde_json::Value,
+) -> Result<String, String> {
+    let scope = match str_arg(input, "scope") {
+        Some(s) if matches!(s, "today" | "week" | "month") => s,
+        Some(s) => return Err(format!("scope '{s}' nggak dikenal — pakai today/week/month")),
+        None => "week",
+    };
+    let (start_ms, end_ms) = crate::clickup::report::period_window(scope, chrono::Utc::now());
+    let mut entries = api.time_entries(start_ms, end_ms).await.map_err(|e| format!("{e}"))?;
+    let project_filter = str_arg(input, "project");
+    if let Some(project) = project_filter {
+        let needle = project.to_lowercase();
+        entries.retain(|e| e.project_name.to_lowercase() == needle);
+    }
+    let (projects, grand_total) = crate::clickup::report::aggregate_hours(&entries);
+    if projects.is_empty() {
+        return Ok(match project_filter {
+            Some(project) => format!("nggak ada jam tercatat di project '{project}' untuk periode itu"),
+            None => "belum ada jam tercatat untuk periode itu".into(),
+        });
+    }
+    let label = match scope { "today" => "Hari ini", "month" => "Bulan ini", _ => "Minggu ini" };
+    let mut out = format!("{label}: {}\n", crate::clickup::report::format_duration(grand_total));
+    for project in projects {
+        out.push_str(&format!("- {}: {}\n", project.project, crate::clickup::report::format_duration(project.total_ms)));
+        for (task, ms) in project.tasks {
+            out.push_str(&format!("  - {task}: {}\n", crate::clickup::report::format_duration(ms)));
+        }
+    }
+    Ok(out)
+}
+
+async fn clickup_add_time_entry(
+    api: &dyn crate::clickup::ClickUpApi,
+    input: &serde_json::Value,
+) -> Result<String, String> {
+    let name = str_arg(input, "task").ok_or("missing required argument 'task'")?;
+    let raw_duration = str_arg(input, "duration").ok_or("missing required argument 'duration'")?;
+    let duration_ms = crate::clickup::report::parse_duration(raw_duration)
+        .ok_or_else(|| format!("durasi '{raw_duration}' nggak kebaca — coba '2 jam' atau '90 menit'"))?;
+    let start_ms = match str_arg(input, "day") {
+        Some(raw) => {
+            let dt = parse_tool_datetime(raw)
+                .ok_or_else(|| format!("day '{raw}' nggak terbaca — pakai RFC3339 +07:00"))?;
+            dt.timestamp_millis()
+        }
+        None => {
+            let (start, _) = crate::clickup::report::period_window("today", chrono::Utc::now());
+            start
+        }
+    };
+    let (task_id, task_name, _project) = resolve_clickup_task(api, name).await?;
+    api.add_time_entry(&task_id, duration_ms, start_ms).await.map_err(|e| format!("{e}"))?;
+    Ok(format!(
+        "{} dicatat ke '{task_name}'",
+        crate::clickup::report::format_duration(duration_ms)
+    ))
+}
+
+async fn invoice_list_clients(db: &Db) -> Result<String, String> {
+    let clients = crate::repo::clients::list(db).await.map_err(|e| format!("db error: {e}"))?;
+    if clients.is_empty() {
+        return Ok("belum ada klien tersimpan".into());
+    }
+    let mut out = String::new();
+    for c in clients {
+        out.push_str(&format!("#{} {}\n", c.id, c.name));
+    }
+    Ok(out)
+}
+
+fn parse_line_items(input: &serde_json::Value) -> Result<Vec<crate::invoice::assemble::ParsedItem>, String> {
+    let arr = input.get("line_items").and_then(|v| v.as_array()).ok_or("line_items harus berupa array")?;
+    if arr.is_empty() {
+        return Err("line_items kosong".into());
+    }
+    let mut items = Vec::new();
+    for it in arr {
+        let title = it.get("title").and_then(|v| v.as_str()).filter(|s| !s.trim().is_empty()).ok_or("setiap item butuh 'title'")?;
+        let amount = it.get("amount").and_then(|v| v.as_i64()).ok_or("setiap item butuh 'amount' (angka IDR)")?;
+        // Clamp once here so the rendered PDF and the persisted JSON agree.
+        let qty = it.get("qty").and_then(|v| v.as_i64()).unwrap_or(1).max(1);
+        let body = it.get("body").and_then(|v| v.as_str()).filter(|s| !s.trim().is_empty()).map(|s| s.to_string());
+        items.push(crate::invoice::assemble::ParsedItem { title: title.to_string(), body, qty, amount_idr: amount });
+    }
+    Ok(items)
+}
+
+async fn invoice_create(db: &Db, input: &serde_json::Value) -> Result<String, String> {
+    let client_name = str_arg(input, "client_name").ok_or("missing required argument 'client_name'")?;
+    let items = parse_line_items(input)?;
+
+    let existing = crate::repo::clients::get_by_name(db, client_name)
+        .await
+        .map_err(|e| format!("db error: {e}"))?;
+    // A new client with no details: bail before reading config or writing
+    // anything (keeps this path independent of the invoice env vars).
+    if existing.is_none() && input.get("client_details").is_none() {
+        return Err(format!("klien '{client_name}' belum ada — minta detail klien (sub_name/website) ke user dulu, lalu kirim lewat client_details"));
+    }
+
+    // We will create an invoice now, so config is required. Read it BEFORE
+    // creating any client row so a config failure never leaves an orphan client.
+    let mut config = crate::invoice::config::from_env()?;
+    if let Some(days) = input.get("due_days").and_then(|v| v.as_i64()) {
+        config.due_days = days;
+    }
+
+    let client = match existing {
+        Some(c) => c,
+        None => {
+            let details = input.get("client_details");
+            let sub = details.and_then(|d| d.get("sub_name")).and_then(|v| v.as_str());
+            let web = details.and_then(|d| d.get("website")).and_then(|v| v.as_str());
+            crate::repo::clients::create(db, &crate::repo::clients::NewClient { name: client_name, sub_name: sub, website: web })
+                .await.map_err(|e| format!("db error: {e}"))?
+        }
+    };
+
+    let now = chrono::Utc::now();
+    let number = crate::invoice::number::next_number(db, now).await.map_err(|e| format!("db error: {e}"))?;
+    let issue_date = now.with_timezone(&crate::assistant::time::wib()).date_naive();
+    let due_date = issue_date + chrono::Duration::days(config.due_days);
+    let data = crate::invoice::assemble::assemble_invoice_data(number.clone(), issue_date, &config, &client, &items);
+    let pdf = crate::invoice::render::render_pdf(&data).map_err(|e| format!("gagal render invoice: {e}"))?;
+
+    let issue_date_iso = issue_date.format("%Y-%m-%d").to_string();
+    let due_date_iso = due_date.format("%Y-%m-%d").to_string();
+    let line_items_json = serde_json::to_string(
+        &items.iter().map(|it| serde_json::json!({ "title": it.title, "body": it.body, "qty": it.qty, "amount": it.amount_idr })).collect::<Vec<_>>()
+    ).unwrap_or_else(|_| "[]".into());
+    crate::repo::invoices::insert(db, &crate::repo::invoices::NewInvoice {
+        number: &number, client_id: client.id,
+        issue_date: &issue_date_iso, due_date: &due_date_iso,
+        subtotal: &data.subtotal, total: &data.total, line_items_json: &line_items_json,
+    }).await.map_err(|e| format!("db error: {e}"))?;
+
+    let sent = send_invoice_pdf(db, &number, pdf).await;
+    let suffix = match sent {
+        Ok(true) => " dan dikirim ke Telegram".to_string(),
+        Ok(false) => " (tersimpan; Telegram belum tertaut, jadi PDF tidak dikirim)".to_string(),
+        Err(e) => format!(" (tersimpan, tapi gagal kirim PDF: {e})"),
+    };
+    Ok(format!("Invoice {number} dibuat — total {}{suffix}", data.total))
+}
+
+/// Send the rendered PDF to the linked owner chat. Ok(false) = no link/token.
+async fn send_invoice_pdf(db: &Db, number: &str, pdf: Vec<u8>) -> Result<bool, String> {
+    let Ok(token) = std::env::var("TELEGRAM_BOT_TOKEN") else { return Ok(false); };
+    if token.trim().is_empty() { return Ok(false); }
+    let Some(link) = crate::repo::telegram_link::get(db).await.map_err(|e| format!("db error: {e}"))? else { return Ok(false); };
+    let client = crate::telegram::client::TelegramClient::new(token);
+    let filename = crate::telegram::client::document_filename(number);
+    client.send_document(link.chat_id, &filename, pdf, &format!("Invoice {number}")).await.map_err(|e| format!("{e}"))?;
+    Ok(true)
+}
+
 async fn list_instruments(db: &Db) -> Result<String, String> {
     let instruments = crate::repo::instruments::list(db).await.map_err(|e| format!("db error: {e}"))?;
     if instruments.is_empty() {
@@ -619,6 +888,13 @@ async fn list_pending_reviews(db: &Db) -> Result<String, String> {
         }
         out.push('\n');
     }
+    // The instrument/account above are auto-detected from the photo, not
+    // authoritative — signal that the assistant may correct a wrong one rather
+    // than treat the detection as final.
+    out.push_str(
+        "(instrumen & akun di atas hasil deteksi otomatis dari foto, bukan final — \
+         kalau ada yang salah, override dengan account_id/instrument_id yang benar saat confirm_review)\n",
+    );
     Ok(out)
 }
 
@@ -639,6 +915,385 @@ async fn confirm_review(db: &Db, input: &serde_json::Value) -> Result<String, St
         .await
         .map_err(|e| format!("{e}"))?;
     Ok(format!("transaksi #{txn_id} dibuat dari review #{review_id}"))
+}
+
+async fn capture_to_inbox(db: &Db, input: &serde_json::Value) -> Result<String, String> {
+    let content = str_arg(input, "content").ok_or("missing required argument 'content'")?;
+    let row = crate::repo::inbox::create(db, content).await.map_err(|e| format!("db error: {e}"))?;
+    Ok(format!("dicatat ke inbox (#{})", row.id))
+}
+
+async fn list_inbox(db: &Db) -> Result<String, String> {
+    let rows = crate::repo::inbox::list_pending(db).await.map_err(|e| format!("db error: {e}"))?;
+    if rows.is_empty() {
+        return Ok("inbox kosong".into());
+    }
+    let mut out = String::new();
+    for row in rows {
+        out.push_str(&format!("#{} {}\n", row.id, row.content));
+    }
+    Ok(out)
+}
+
+async fn gmail_list_emails(api: &dyn crate::google::gmail::GmailApi, input: &serde_json::Value) -> Result<String, String> {
+    let max = input.get("max").and_then(|v| v.as_u64()).unwrap_or(10).min(25) as u32;
+    let emails = api.list_important_unread(max).await.map_err(|e| format!("{e}"))?;
+    if emails.is_empty() {
+        return Ok("nggak ada email penting yang belum dibaca".into());
+    }
+    let mut out = String::new();
+    for e in emails {
+        let subject = e.subject.replace('\n', " ");
+        let snippet = e.snippet.replace('\n', " ");
+        out.push_str(&format!("[{}] {} — {} — {}\n", e.id, e.from, subject, snippet));
+    }
+    Ok(out)
+}
+
+async fn gmail_read_email(api: &dyn crate::google::gmail::GmailApi, input: &serde_json::Value) -> Result<String, String> {
+    let id = str_arg(input, "id").ok_or("missing required argument 'id'")?;
+    let m = api.get_message(id).await.map_err(|e| format!("{e}"))?;
+    Ok(format!("Dari: {}\nSubjek: {}\n\n{}", m.from, m.subject, m.body))
+}
+
+async fn gmail_draft_reply(api: &dyn crate::google::gmail::GmailApi, input: &serde_json::Value) -> Result<String, String> {
+    let id = str_arg(input, "id").ok_or("missing required argument 'id'")?;
+    let body = str_arg(input, "body").ok_or("missing required argument 'body'")?;
+    let m = api.get_message(id).await.map_err(|e| format!("{e}"))?;
+    api.create_draft(&m.thread_id, &m.from, &m.subject, body).await.map_err(|e| format!("{e}"))?;
+    Ok(format!("draft balasan ke {} disimpan di Gmail — cek & kirim dari sana", m.from))
+}
+
+/// Returns `true` when `m` looks like a valid YYYY-MM month string.
+///
+/// Accepts exactly 7 characters: four ASCII digits, a hyphen, two ASCII
+/// digits — e.g. "2026-06". Does not validate calendar range (that is
+/// enforced downstream by the DB query or the service layer).
+fn valid_month(m: &str) -> bool {
+    m.len() == 7
+        && m.as_bytes()[4] == b'-'
+        && m[..4].bytes().all(|b| b.is_ascii_digit())
+        && m[5..].bytes().all(|b| b.is_ascii_digit())
+}
+
+/// Summarise the current (or given) month's cashflow: money in, money out,
+/// net, top 3 expense categories, and total freelance invoiced that month.
+/// Invoiced amount is shown separately — not added to income — because it
+/// represents amounts billed, not necessarily received.
+async fn cashflow_summary(db: &Db, input: &serde_json::Value) -> Result<String, String> {
+    // Resolve the target month: explicit arg or current WIB month.
+    let month: String = match str_arg(input, "month") {
+        Some(m) => {
+            if !valid_month(m) {
+                return Err("format bulan harus YYYY-MM, mis. 2026-06".into());
+            }
+            m.to_string()
+        }
+        None => chrono::Utc::now()
+            .with_timezone(&super::time::wib())
+            .format("%Y-%m")
+            .to_string(),
+    };
+
+    // Load cashflow rows for the month.
+    let cashflow_rows = crate::repo::cashflow::list_for_month(db, &month)
+        .await
+        .map_err(|e| format!("db error: {e}"))?;
+
+    // Load cashflow categories (income/expense, with optional monthly budget).
+    let category_rows = crate::repo::cashflow_categories::list(db)
+        .await
+        .map_err(|e| format!("db error: {e}"))?;
+
+    // Map CashflowRow → CfRow (the service layer struct).
+    // Use unwrap_or(ZERO) so a malformed amount string never silently drops a
+    // row from the totals — consistent with how portfolio_insights handles it.
+    let cf_rows: Vec<crate::service::cashflow::CfRow> = cashflow_rows
+        .iter()
+        .map(|row| crate::service::cashflow::CfRow {
+            direction: row.direction.clone(),
+            amount: crate::repo::dec(&row.amount).unwrap_or(rust_decimal::Decimal::ZERO),
+            category_id: row.category_id,
+        })
+        .collect();
+
+    // Map CashflowCategoryRow → CatRow with the real kind and optional budget.
+    let cat_rows: Vec<crate::service::cashflow::CatRow> = category_rows
+        .iter()
+        .map(|cat| crate::service::cashflow::CatRow {
+            id: cat.id,
+            name: cat.name.clone(),
+            kind: cat.kind.clone(),
+            budget: cat.monthly_budget.as_deref().and_then(|s| s.parse::<rust_decimal::Decimal>().ok()),
+        })
+        .collect();
+
+    let summary = crate::service::cashflow::month_summary(&month, &cf_rows, &cat_rows);
+
+    // Sum invoices issued in this month.
+    let all_invoices = crate::repo::invoices::list_all(db)
+        .await
+        .map_err(|e| format!("db error: {e}"))?;
+    let invoiced_total: rust_decimal::Decimal = all_invoices
+        .iter()
+        .filter(|inv| inv.issue_date.starts_with(&month))
+        .filter_map(|inv| crate::repo::dec(&inv.total).ok())
+        .fold(rust_decimal::Decimal::ZERO, |acc, amount| acc + amount);
+
+    // Render the summary using Indonesian number formatting.
+    let format_amount = |d: &rust_decimal::Decimal| {
+        crate::service::chat::group_id(&d.round_dp(0))
+    };
+
+    let mut output = format!(
+        "Bulan {month}: masuk Rp {}, kepake Rp {}, net Rp {}\n",
+        format_amount(&summary.total_in),
+        format_amount(&summary.total_out),
+        format_amount(&summary.net),
+    );
+
+    // Top 3 expense categories sorted by actual spending (descending).
+    // Categories with zero actual spend are excluded so an empty category
+    // never produces a misleading "- Health: Rp 0" line.
+    let mut expense_categories: Vec<&crate::service::cashflow::CategoryLine> = summary
+        .categories
+        .iter()
+        .filter(|cat| cat.kind == "expense" && cat.actual > rust_decimal::Decimal::ZERO)
+        .collect();
+    expense_categories.sort_by(|a, b| b.actual.cmp(&a.actual));
+    for category in expense_categories.iter().take(3) {
+        output.push_str(&format!(
+            "- {}: Rp {}\n",
+            category.name,
+            format_amount(&category.actual),
+        ));
+    }
+
+    // Show freelance invoiced total only when it is non-zero.
+    if invoiced_total > rust_decimal::Decimal::ZERO {
+        output.push_str(&format!(
+            "Freelance diinvoice: Rp {}\n",
+            format_amount(&invoiced_total),
+        ));
+    }
+
+    Ok(output)
+}
+
+/// Compute a portfolio health snapshot: net worth in IDR, biggest position
+/// concentration as a percentage of net worth, and the current month's savings
+/// rate derived from cashflow rows.
+///
+/// Returns at minimum the net-worth line so an empty database still produces a
+/// non-empty, human-readable result.
+async fn portfolio_insights(db: &Db) -> Result<String, String> {
+    let summary = crate::service::portfolio::build_summary(db)
+        .await
+        .map_err(|e| format!("db error: {e}"))?;
+
+    let net = summary.net_worth_idr;
+    let mut output = format!(
+        "Net worth: Rp {}\n",
+        crate::service::chat::group_id(&net.round_dp(0))
+    );
+
+    // Build (symbol, market_value_idr) pairs using the instrument list for
+    // symbol resolution — Position only carries instrument_id.
+    let instruments = crate::repo::instruments::list(db)
+        .await
+        .map_err(|e| format!("db error: {e}"))?;
+    let instrument_symbol_map: std::collections::HashMap<i64, String> = instruments
+        .iter()
+        .map(|i| (i.id, i.symbol.clone()))
+        .collect();
+
+    let symbol_values: Vec<(String, rust_decimal::Decimal)> = summary
+        .positions
+        .iter()
+        .filter_map(|p| {
+            instrument_symbol_map
+                .get(&p.instrument_id)
+                .map(|symbol| (symbol.clone(), p.market_value_idr))
+        })
+        .collect();
+
+    // Only show concentration when net worth is non-zero — concentration() can
+    // return Some with pct=0 when net worth is zero, which would print a
+    // misleading "X (0%)" line on an empty/zero portfolio.
+    if !net.is_zero() {
+        if let Some(concentration) =
+            crate::service::insights::concentration(&symbol_values, net)
+        {
+            output.push_str(&format!(
+                "Konsentrasi terbesar: {} ({}%)\n",
+                concentration.symbol,
+                concentration.pct.round_dp(0),
+            ));
+        }
+    }
+
+    // Savings rate from cashflow rows for the current WIB month.
+    let current_month = chrono::Utc::now()
+        .with_timezone(&crate::assistant::time::wib())
+        .format("%Y-%m")
+        .to_string();
+
+    let cashflow_rows = crate::repo::cashflow::list_for_month(db, &current_month)
+        .await
+        .map_err(|e| format!("db error: {e}"))?;
+    let mut total_income = rust_decimal::Decimal::ZERO;
+    let mut total_expense = rust_decimal::Decimal::ZERO;
+    for row in &cashflow_rows {
+        let amount = crate::repo::dec(&row.amount).unwrap_or(rust_decimal::Decimal::ZERO);
+        if row.direction == "in" {
+            total_income += amount;
+        } else if row.direction == "out" {
+            total_expense += amount;
+        }
+    }
+    if total_income > rust_decimal::Decimal::ZERO {
+        let savings_rate =
+            crate::service::insights::savings_rate(total_income, total_expense);
+        output.push_str(&format!(
+            "Savings rate bulan ini: {}%\n",
+            savings_rate.round_dp(0),
+        ));
+    }
+
+    Ok(output)
+}
+
+/// Resolve an instrument by name/symbol (case-insensitive).
+///
+/// Returns `(id, symbol)` if found, or an error message in Indonesian.
+async fn resolve_instrument(db: &Db, name: &str) -> Result<(i64, String), String> {
+    let instruments =
+        crate::repo::instruments::list(db).await.map_err(|e| format!("db error: {e}"))?;
+    let matched = instruments.iter().find(|i| {
+        i.symbol.eq_ignore_ascii_case(name) || i.name.eq_ignore_ascii_case(name)
+    });
+    match matched {
+        Some(i) => Ok((i.id, i.symbol.clone())),
+        None => Err(format!("instrumen '{name}' nggak ketemu")),
+    }
+}
+
+/// Set a price alert on an instrument.
+///
+/// Accepts either an absolute `target` price or a `percent` offset from the
+/// current price (requires a `direction` of "above" or "below").
+async fn set_price_alert(db: &Db, input: &serde_json::Value) -> Result<String, String> {
+    let instrument_name =
+        str_arg(input, "instrument").ok_or("missing required argument 'instrument'")?;
+    let (instrument_id, symbol) = resolve_instrument(db, instrument_name).await?;
+
+    // Resolve direction: explicit arg wins; otherwise error — we never silently default.
+    let direction = match str_arg(input, "direction") {
+        Some(d) if d == "above" || d == "below" => d.to_string(),
+        Some(other) => {
+            return Err(format!(
+                "direction '{other}' tidak valid — gunakan 'above' atau 'below'"
+            ))
+        }
+        None => {
+            return Err(
+                "direction wajib diisi — gunakan 'above' (naik) atau 'below' (turun)".into(),
+            )
+        }
+    };
+
+    // Compute target price.
+    let target: rust_decimal::Decimal = if let Some(target_val) = input.get("target").and_then(|v| v.as_f64()) {
+        rust_decimal::Decimal::try_from(target_val)
+            .map_err(|_| format!("target '{target_val}' tidak valid"))?
+    } else if let Some(pct_val) = input.get("percent").and_then(|v| v.as_f64()) {
+        let current_price = match crate::repo::prices::latest(db, instrument_id)
+            .await
+            .map_err(|e| format!("db error: {e}"))?
+        {
+            Some(p) => p.price,
+            None => {
+                return Err(format!(
+                    "harga {symbol} belum ada, nggak bisa hitung dari persen"
+                ))
+            }
+        };
+        let pct = rust_decimal::Decimal::try_from(pct_val)
+            .map_err(|_| format!("percent '{pct_val}' tidak valid"))?;
+        let hundred = rust_decimal::Decimal::from(100u32);
+        match direction.as_str() {
+            "below" => current_price * (rust_decimal::Decimal::ONE - pct / hundred),
+            "above" => current_price * (rust_decimal::Decimal::ONE + pct / hundred),
+            _ => unreachable!(),
+        }
+    } else {
+        return Err("butuh 'target' (harga absolut) atau 'percent' (persen dari harga sekarang)".into());
+    };
+
+    crate::repo::price_alerts::create(db, instrument_id, &target.to_string(), &direction)
+        .await
+        .map_err(|e| format!("db error: {e}"))?;
+
+    Ok(format!(
+        "alert dipasang: {symbol} {direction} Rp {}",
+        crate::service::chat::group_id(&target.round_dp(0))
+    ))
+}
+
+/// List all active price alerts, resolved to their instrument symbols.
+async fn list_price_alerts(db: &Db) -> Result<String, String> {
+    let alerts =
+        crate::repo::price_alerts::list_active(db).await.map_err(|e| format!("db error: {e}"))?;
+    if alerts.is_empty() {
+        return Ok("belum ada price alert".into());
+    }
+    let mut out = String::new();
+    for alert in alerts {
+        let symbol = crate::repo::instruments::get(db, alert.instrument_id)
+            .await
+            .ok()
+            .map(|i| i.symbol)
+            .unwrap_or_else(|| format!("#{}", alert.instrument_id));
+        let target_display = alert
+            .target_price
+            .parse::<rust_decimal::Decimal>()
+            .map(|d| crate::service::chat::group_id(&d.round_dp(0)))
+            .unwrap_or_else(|_| alert.target_price.clone());
+        out.push_str(&format!(
+            "[{}] {} {} Rp {}\n",
+            alert.id, symbol, alert.direction, target_display
+        ));
+    }
+    Ok(out)
+}
+
+/// Cancel an active price alert by id.
+async fn cancel_price_alert(db: &Db, input: &serde_json::Value) -> Result<String, String> {
+    let alert_id = id_arg(input, "id")?;
+    let cancelled = crate::repo::price_alerts::cancel(db, alert_id)
+        .await
+        .map_err(|e| format!("db error: {e}"))?;
+    if cancelled {
+        Ok(format!("price alert #{alert_id} dibatalkan"))
+    } else {
+        Err(format!("price alert #{alert_id} nggak ada atau sudah tidak aktif"))
+    }
+}
+
+async fn resolve_inbox(db: &Db, input: &serde_json::Value) -> Result<String, String> {
+    let status = str_arg(input, "status").ok_or("missing required argument 'status'")?;
+    if !matches!(status, "sorted" | "dropped") {
+        return Err(format!("invalid status '{status}' — use sorted/dropped"));
+    }
+    let ids: Vec<i64> = match input.get("ids") {
+        Some(serde_json::Value::Array(arr)) => arr
+            .iter()
+            .map(|v| v.as_i64().ok_or_else(|| format!("ids must be integers, got {v}")))
+            .collect::<Result<Vec<_>, _>>()?,
+        _ => return Err("missing required argument 'ids' (array of integers)".into()),
+    };
+    let affected = crate::repo::inbox::resolve(db, &ids, status).await.map_err(|e| format!("db error: {e}"))?;
+    Ok(format!("{affected} item inbox ditandai {status}"))
 }
 
 #[cfg(test)]
@@ -976,6 +1631,67 @@ mod tests {
         assert!(item.created_txn_id.is_some());
     }
 
+    /// The account was already auto-detected (wrongly) as Stockbit at ingest;
+    /// passing the right account must override it, not be refused because the
+    /// item isn't 'belum dikenali'. Locks the mechanism the affordance relies on.
+    #[tokio::test]
+    async fn confirm_review_overrides_an_already_detected_wrong_account() {
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        let instrument = crate::repo::instruments::create(&db, &crate::repo::instruments::NewInstrument {
+            symbol: "VXUS".into(), name: "Vanguard Total Intl".into(), instrument_type: "etf".into(),
+            native_currency: "USD".into(), category_id: None, price_source: "manual".into(),
+            decimals: Some(8), note: None,
+        }).await.unwrap();
+        let stockbit = crate::repo::accounts::create(&db, &crate::repo::accounts::NewAccount {
+            name: "Stockbit".into(), account_type: "broker".into(), institution: None,
+            native_currency: "IDR".into(), note: None,
+        }).await.unwrap();
+        let nanovest = crate::repo::accounts::create(&db, &crate::repo::accounts::NewAccount {
+            name: "Nanovest".into(), account_type: "broker".into(), institution: None,
+            native_currency: "IDR".into(), note: None,
+        }).await.unwrap();
+        // OCR read "Stockbit" → account resolved to the wrong one at ingest.
+        let id = seed_pending_item(&db, Some(stockbit.id), Some(instrument.id)).await;
+
+        let out = dispatch(&db, "confirm_review", &serde_json::json!({
+            "review_id": id, "account_id": nanovest.id
+        })).await.unwrap();
+        assert!(out.contains("dibuat"), "{out}");
+
+        let txns = crate::repo::transactions::list_all(&db).await.unwrap();
+        assert_eq!(txns.len(), 1);
+        assert_eq!(txns[0].account_id, nanovest.id, "override must switch Stockbit -> Nanovest");
+        let item = crate::repo::review_items::get(&db, id).await.unwrap();
+        assert_eq!(item.suggested_account_id, Some(nanovest.id));
+    }
+
+    /// list_pending_reviews must hint that the shown account/instrument is an OCR
+    /// guess the assistant can correct — otherwise a confidently-wrong account
+    /// looks authoritative and the assistant won't override it.
+    #[tokio::test]
+    async fn list_pending_reviews_notes_detected_values_are_correctable() {
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        let instrument = crate::repo::instruments::create(&db, &crate::repo::instruments::NewInstrument {
+            symbol: "VXUS".into(), name: "Vanguard Total Intl".into(), instrument_type: "etf".into(),
+            native_currency: "USD".into(), category_id: None, price_source: "manual".into(),
+            decimals: Some(8), note: None,
+        }).await.unwrap();
+        let acc = crate::repo::accounts::create(&db, &crate::repo::accounts::NewAccount {
+            name: "Stockbit".into(), account_type: "broker".into(), institution: None,
+            native_currency: "IDR".into(), note: None,
+        }).await.unwrap();
+        seed_pending_item(&db, Some(acc.id), Some(instrument.id)).await;
+
+        let out = dispatch(&db, "list_pending_reviews", &serde_json::json!({}))
+            .await
+            .unwrap()
+            .to_lowercase();
+        assert!(
+            out.contains("override"),
+            "listing should hint detected account/instrument is correctable: {out}"
+        );
+    }
+
     #[tokio::test]
     async fn confirm_review_still_incomplete_returns_reason() {
         let db = crate::db::connect("sqlite::memory:").await.unwrap();
@@ -1132,7 +1848,7 @@ mod tests {
 
     // ── ClickUp fake ─────────────────────────────────────────────────────────
 
-    use crate::clickup::client::{ClickUpApi, ClickUpError, NewTask, Project, Task};
+    use crate::clickup::client::{ClickUpApi, ClickUpError, NewTask, Project, RunningEntry, Task, TimeEntry};
     use std::sync::Mutex;
 
     #[derive(Default)]
@@ -1144,6 +1860,11 @@ mod tests {
         created_amounts: Mutex<Vec<Option<f64>>>,
         tasks: Mutex<std::collections::HashMap<String, Vec<crate::clickup::client::Task>>>,
         completed: Mutex<Vec<String>>,
+        running: Mutex<Option<RunningEntry>>,
+        entries: Mutex<Vec<TimeEntry>>,
+        started: Mutex<Vec<String>>,       // task_ids passed to start_timer
+        stopped: Mutex<u32>,
+        added: Mutex<Vec<(String, i64)>>,  // (task_id, duration_ms)
     }
 
     #[async_trait::async_trait]
@@ -1172,6 +1893,36 @@ mod tests {
             for tasks in self.tasks.lock().unwrap().values_mut() {
                 tasks.retain(|t| t.id != task_id);
             }
+            Ok(())
+        }
+        async fn start_timer(&self, task_id: &str) -> Result<(), ClickUpError> {
+            self.started.lock().unwrap().push(task_id.to_string());
+            *self.running.lock().unwrap() = Some(RunningEntry {
+                task_name: task_id.to_string(),
+                started_ms: 0,
+            });
+            Ok(())
+        }
+        async fn stop_timer(&self) -> Result<Option<TimeEntry>, ClickUpError> {
+            *self.stopped.lock().unwrap() += 1;
+            let running = self.running.lock().unwrap().take();
+            Ok(running.map(|r| TimeEntry {
+                task_id: r.task_name.clone(),
+                task_name: r.task_name,
+                project_name: "(test)".into(),
+                duration_ms: 3_600_000,
+                start_ms: 0,
+                billable: false,
+            }))
+        }
+        async fn current_timer(&self) -> Result<Option<RunningEntry>, ClickUpError> {
+            Ok(self.running.lock().unwrap().clone())
+        }
+        async fn time_entries(&self, _start_ms: i64, _end_ms: i64) -> Result<Vec<TimeEntry>, ClickUpError> {
+            Ok(self.entries.lock().unwrap().clone())
+        }
+        async fn add_time_entry(&self, task_id: &str, duration_ms: i64, _start_ms: i64) -> Result<(), ClickUpError> {
+            self.added.lock().unwrap().push((task_id.to_string(), duration_ms));
             Ok(())
         }
     }
@@ -1401,6 +2152,393 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn draft_proposal_requires_job_text() {
+        let err = super::draft_proposal(&serde_json::json!({})).await;
+        assert!(err.is_err(), "missing job_text must error");
+    }
+
+    #[tokio::test]
+    async fn list_clients_lists_saved() {
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        crate::repo::clients::create(&db, &crate::repo::clients::NewClient { name: "PT AIS", sub_name: None, website: None }).await.unwrap();
+        let out = invoice_list_clients(&db).await.unwrap();
+        assert!(out.contains("PT AIS"), "{out}");
+    }
+
+    #[tokio::test]
+    async fn create_invoice_persists_and_reports_number() {
+        std::env::set_var("INVOICE_ISSUER_NAME", "Bima");
+        std::env::set_var("INVOICE_ACCOUNT_NO", "123");
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        crate::repo::clients::create(&db, &crate::repo::clients::NewClient { name: "PT AIS", sub_name: None, website: None }).await.unwrap();
+        let out = invoice_create(&db, &serde_json::json!({
+            "client_name": "PT AIS",
+            "line_items": [{ "title": "Landing page", "amount": 10000000 }]
+        })).await.unwrap();
+        std::env::remove_var("INVOICE_ISSUER_NAME");
+        std::env::remove_var("INVOICE_ACCOUNT_NO");
+        assert!(out.contains("INV/"), "should report the invoice number: {out}");
+        let seq = crate::repo::invoices::max_seq_for_prefix(&db, "INV/").await.unwrap();
+        assert!(seq.is_some(), "invoice not persisted");
+    }
+
+    #[tokio::test]
+    async fn create_invoice_unknown_client_asks_for_details() {
+        // No env vars needed — the unknown-client check short-circuits before
+        // config is read, so this test is immune to env-var race conditions.
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        let err = invoice_create(&db, &serde_json::json!({
+            "client_name": "Klien Baru",
+            "line_items": [{ "title": "x", "amount": 1000 }]
+        })).await.unwrap_err();
+        assert!(err.contains("Klien Baru"), "{err}");
+        assert!(err.contains("detail") || err.contains("belum ada"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn create_invoice_new_client_with_details_creates_both() {
+        std::env::set_var("INVOICE_ISSUER_NAME", "Bima");
+        std::env::set_var("INVOICE_ACCOUNT_NO", "123");
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        let out = invoice_create(&db, &serde_json::json!({
+            "client_name": "Klien Baru",
+            "client_details": { "sub_name": "PT Baru", "website": "baru.id" },
+            "line_items": [{ "title": "Konsultasi", "amount": 5_000_000 }],
+            "due_days": 30
+        })).await.unwrap();
+        std::env::remove_var("INVOICE_ISSUER_NAME");
+        std::env::remove_var("INVOICE_ACCOUNT_NO");
+        assert!(out.contains("INV/"), "{out}");
+        // Both the client and the invoice were persisted.
+        let client = crate::repo::clients::get_by_name(&db, "Klien Baru").await.unwrap();
+        assert!(client.is_some(), "client not created");
+        assert!(crate::repo::invoices::max_seq_for_prefix(&db, "INV/").await.unwrap().is_some());
+    }
+
+    #[tokio::test]
+    async fn start_timer_resolves_task_and_starts() {
+        let fake = FakeClickUp::default();
+        fake.projects.lock().unwrap().push(Project { id: "l1".into(), name: "PT AIS".into() });
+        fake.tasks.lock().unwrap().insert("l1".into(), vec![Task {
+            id: "t9".into(), name: "landing page".into(), status: "open".into(), due_date_ms: None,
+        }]);
+        let out = clickup_start_timer(&fake, &serde_json::json!({ "task": "landing page" })).await.unwrap();
+        assert!(out.to_lowercase().contains("landing page"), "{out}");
+        assert_eq!(fake.started.lock().unwrap().as_slice(), &["t9".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn start_timer_unknown_task_errors() {
+        let fake = FakeClickUp::default();
+        fake.projects.lock().unwrap().push(Project { id: "l1".into(), name: "PT AIS".into() });
+        let err = clickup_start_timer(&fake, &serde_json::json!({ "task": "ghost" })).await.unwrap_err();
+        assert!(err.to_lowercase().contains("ghost") || err.to_lowercase().contains("ketemu"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn stop_timer_running_then_none() {
+        let fake = FakeClickUp::default();
+        *fake.running.lock().unwrap() = Some(RunningEntry { task_name: "landing".into(), started_ms: 0 });
+        let out = clickup_stop_timer(&fake).await.unwrap();
+        assert!(out.to_lowercase().contains("landing"), "{out}");
+        let out2 = clickup_stop_timer(&fake).await.unwrap();
+        assert!(out2.to_lowercase().contains("nggak ada"), "{out2}");
+    }
+
+    #[tokio::test]
+    async fn current_timer_reports_running_or_idle() {
+        let fake = FakeClickUp::default();
+        assert!(clickup_current_timer(&fake).await.unwrap().to_lowercase().contains("nggak ada"));
+        *fake.running.lock().unwrap() = Some(RunningEntry { task_name: "kontrak".into(), started_ms: 0 });
+        assert!(clickup_current_timer(&fake).await.unwrap().to_lowercase().contains("kontrak"));
+    }
+
+    #[tokio::test]
+    async fn time_report_aggregates_entries() {
+        let fake = FakeClickUp::default();
+        fake.entries.lock().unwrap().extend([
+            TimeEntry { task_id: "t1".into(), task_name: "landing".into(), project_name: "PT AIS".into(), duration_ms: 4 * 3_600_000, start_ms: 0, billable: false },
+            TimeEntry { task_id: "t2".into(), task_name: "kontrak".into(), project_name: "PT AIS".into(), duration_ms: 2 * 3_600_000, start_ms: 0, billable: false },
+        ]);
+        let out = clickup_time_report(&fake, &serde_json::json!({ "scope": "week" })).await.unwrap();
+        assert!(out.contains("PT AIS"), "{out}");
+        assert!(out.contains("landing"), "{out}");
+        assert!(out.contains("6j"), "{out}"); // project total 6j
+    }
+
+    #[tokio::test]
+    async fn time_report_empty_is_explicit() {
+        let fake = FakeClickUp::default();
+        let out = clickup_time_report(&fake, &serde_json::json!({ "scope": "week" })).await.unwrap();
+        assert!(out.to_lowercase().contains("belum ada"), "{out}");
+    }
+
+    #[tokio::test]
+    async fn start_timer_ambiguous_task_errors() {
+        let fake = FakeClickUp::default();
+        fake.projects.lock().unwrap().push(Project { id: "l1".into(), name: "PT AIS".into() });
+        fake.tasks.lock().unwrap().insert("l1".into(), vec![
+            Task { id: "t1".into(), name: "revisi desain".into(), status: "open".into(), due_date_ms: None },
+            Task { id: "t2".into(), name: "revisi kontrak".into(), status: "open".into(), due_date_ms: None },
+        ]);
+        // "revisi" substring-matches both → ambiguous.
+        let err = clickup_start_timer(&fake, &serde_json::json!({ "task": "revisi" })).await.unwrap_err();
+        assert!(err.to_lowercase().contains("beberapa") || err.to_lowercase().contains("spesifik"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn time_report_project_filter_miss_is_project_specific() {
+        let fake = FakeClickUp::default();
+        fake.entries.lock().unwrap().push(TimeEntry {
+            task_id: "t1".into(), task_name: "landing".into(), project_name: "PT AIS".into(),
+            duration_ms: 3_600_000, start_ms: 0, billable: false,
+        });
+        let out = clickup_time_report(&fake, &serde_json::json!({ "scope": "week", "project": "Klien B" })).await.unwrap();
+        assert!(out.contains("Klien B"), "{out}");
+    }
+
+    #[tokio::test]
+    async fn add_time_entry_parses_duration_and_records() {
+        let fake = FakeClickUp::default();
+        fake.projects.lock().unwrap().push(Project { id: "l1".into(), name: "PT AIS".into() });
+        fake.tasks.lock().unwrap().insert("l1".into(), vec![Task {
+            id: "t9".into(), name: "kontrak".into(), status: "open".into(), due_date_ms: None,
+        }]);
+        let out = clickup_add_time_entry(&fake, &serde_json::json!({ "task": "kontrak", "duration": "2 jam" })).await.unwrap();
+        assert!(out.to_lowercase().contains("kontrak"), "{out}");
+        let added = fake.added.lock().unwrap();
+        assert_eq!(added.as_slice(), &[("t9".to_string(), 7_200_000i64)]);
+    }
+
+    #[tokio::test]
+    async fn add_time_entry_bad_duration_errors() {
+        let fake = FakeClickUp::default();
+        fake.projects.lock().unwrap().push(Project { id: "l1".into(), name: "PT AIS".into() });
+        fake.tasks.lock().unwrap().insert("l1".into(), vec![Task {
+            id: "t9".into(), name: "kontrak".into(), status: "open".into(), due_date_ms: None,
+        }]);
+        let err = clickup_add_time_entry(&fake, &serde_json::json!({ "task": "kontrak", "duration": "kapan-kapan" })).await.unwrap_err();
+        assert!(err.to_lowercase().contains("durasi"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn capture_to_inbox_stores_and_lists() {
+        let db = mem_db().await;
+        let out = dispatch(&db, "capture_to_inbox", &serde_json::json!({ "content": "beli kado" })).await.unwrap();
+        assert!(out.to_lowercase().contains("inbox"), "{out}");
+        let listed = dispatch(&db, "list_inbox", &serde_json::json!({})).await.unwrap();
+        assert!(listed.contains("beli kado"), "{listed}");
+    }
+
+    #[tokio::test]
+    async fn list_inbox_empty_is_explicit() {
+        let db = mem_db().await;
+        let out = dispatch(&db, "list_inbox", &serde_json::json!({})).await.unwrap();
+        assert!(out.to_lowercase().contains("kosong"), "{out}");
+    }
+
+    #[tokio::test]
+    async fn resolve_inbox_marks_sorted_and_rejects_bad_status() {
+        let db = mem_db().await;
+        let row = crate::repo::inbox::create(&db, "x").await.unwrap();
+        let out = dispatch(&db, "resolve_inbox", &serde_json::json!({ "ids": [row.id], "status": "sorted" })).await.unwrap();
+        assert!(out.contains("1"), "{out}");
+        assert!(crate::repo::inbox::list_pending(&db).await.unwrap().is_empty());
+        let err = dispatch(&db, "resolve_inbox", &serde_json::json!({ "ids": [row.id], "status": "nonsense" })).await.unwrap_err();
+        assert!(err.to_lowercase().contains("status"), "{err}");
+    }
+
+    // ── Gmail fake ────────────────────────────────────────────────────────────
+
+    use crate::google::gmail::{EmailDetail, EmailSummary, GmailApi, GmailError};
+    use std::sync::Mutex as StdMutex;
+
+    #[derive(Default)]
+    struct FakeGmail {
+        messages: Vec<EmailSummary>,
+        drafts: StdMutex<Vec<(String, String)>>, // (thread_id, body)
+    }
+    #[async_trait::async_trait]
+    impl GmailApi for FakeGmail {
+        async fn list_important_unread(&self, _max: u32) -> Result<Vec<EmailSummary>, GmailError> {
+            Ok(self.messages.clone())
+        }
+        async fn get_message(&self, id: &str) -> Result<EmailDetail, GmailError> {
+            let m = self.messages.iter().find(|m| m.id == id)
+                .ok_or(GmailError::Api { status: 404, body: "not found".into() })?;
+            Ok(EmailDetail { id: m.id.clone(), thread_id: m.thread_id.clone(), from: m.from.clone(),
+                subject: m.subject.clone(), body: "isi email".into() })
+        }
+        async fn create_draft(&self, thread_id: &str, _to: &str, _subject: &str, body: &str)
+            -> Result<String, GmailError> {
+            self.drafts.lock().unwrap().push((thread_id.to_string(), body.to_string()));
+            Ok("draft_1".into())
+        }
+    }
+
+    fn email(id: &str, from: &str, subject: &str) -> EmailSummary {
+        EmailSummary { id: id.into(), thread_id: format!("t_{id}"), from: from.into(),
+            subject: subject.into(), snippet: "snippet".into() }
+    }
+
+    #[tokio::test]
+    async fn list_emails_formats_or_empty() {
+        let mut fake = FakeGmail::default();
+        assert!(gmail_list_emails(&fake, &serde_json::json!({})).await.unwrap().to_lowercase().contains("nggak ada"));
+        fake.messages = vec![email("m1", "Budi", "Meeting")];
+        let out = gmail_list_emails(&fake, &serde_json::json!({})).await.unwrap();
+        assert!(out.contains("Budi") && out.contains("Meeting") && out.contains("m1"), "{out}");
+    }
+
+    #[tokio::test]
+    async fn read_email_returns_body() {
+        let fake = FakeGmail { messages: vec![email("m1", "Budi", "Meeting")], ..Default::default() };
+        let out = gmail_read_email(&fake, &serde_json::json!({ "id": "m1" })).await.unwrap();
+        assert!(out.contains("isi email"), "{out}");
+    }
+
+    #[tokio::test]
+    async fn draft_reply_creates_draft() {
+        let fake = FakeGmail { messages: vec![email("m1", "Budi", "Meeting")], ..Default::default() };
+        let out = gmail_draft_reply(&fake, &serde_json::json!({ "id": "m1", "body": "ok meeting jam 3" })).await.unwrap();
+        assert!(out.to_lowercase().contains("draft"), "{out}");
+        assert_eq!(fake.drafts.lock().unwrap()[0], ("t_m1".to_string(), "ok meeting jam 3".to_string()));
+    }
+
+    #[tokio::test]
+    async fn portfolio_insights_runs_on_empty_db() {
+        let db = mem_db().await;
+        let out = dispatch(&db, "portfolio_insights", &serde_json::json!({})).await.unwrap();
+        assert!(!out.is_empty(), "{out}");
+        assert!(out.to_lowercase().contains("net worth"), "{out}");
+    }
+
+    #[tokio::test]
+    async fn cashflow_summary_reports_in_out_net() {
+        let db = mem_db().await;
+        let month = chrono::Utc::now().with_timezone(&crate::assistant::time::wib()).format("%Y-%m").to_string();
+        // Create a real cashflow expense category so the 'out' row can be tied to it.
+        let cat = crate::repo::cashflow_categories::create(
+            &db,
+            &crate::repo::cashflow_categories::NewCashflowCategory {
+                name: "Makan".into(),
+                kind: "expense".into(),
+                monthly_budget: None,
+                color: None,
+            },
+        ).await.unwrap();
+        // Insert one 'in' 1_000_000 cashflow row dated within `month`.
+        crate::repo::cashflow::create(&db, &crate::repo::cashflow::NewCashflow {
+            account_id: None,
+            occurred_on: format!("{month}-15"),
+            direction: "in".into(),
+            amount: "1000000".into(),
+            currency: "IDR".into(),
+            category_id: None,
+            note: None,
+        }).await.unwrap();
+        // Insert one 'out' 400_000 row tied to the "Makan" category.
+        crate::repo::cashflow::create(&db, &crate::repo::cashflow::NewCashflow {
+            account_id: None,
+            occurred_on: format!("{month}-15"),
+            direction: "out".into(),
+            amount: "400000".into(),
+            currency: "IDR".into(),
+            category_id: Some(cat.id),
+            note: None,
+        }).await.unwrap();
+        let out = dispatch(&db, "cashflow_summary", &serde_json::json!({})).await.unwrap();
+        assert!(out.to_lowercase().contains("masuk"), "{out}");
+        assert!(out.to_lowercase().contains("net"), "{out}");
+        assert!(out.contains("1.000.000") || out.contains("600.000"), "{out}"); // in or net
+        assert!(out.contains("Makan"), "category name must appear in expense breakdown: {out}");
+    }
+
+    /// cashflow_summary must reject a month arg that is not YYYY-MM format.
+    #[tokio::test]
+    async fn cashflow_summary_rejects_bad_month_format() {
+        let db = mem_db().await;
+        let err = dispatch(&db, "cashflow_summary", &serde_json::json!({ "month": "2026-1" }))
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_lowercase().contains("yyyy-mm") || err.to_lowercase().contains("format bulan"),
+            "error must mention expected format: {err}"
+        );
+    }
+
+    /// cashflow_summary must not emit a "Rp 0" line for a category that had
+    /// no activity this month.
+    #[tokio::test]
+    async fn cashflow_summary_omits_zero_spend_categories() {
+        let db = mem_db().await;
+        let month = chrono::Utc::now()
+            .with_timezone(&crate::assistant::time::wib())
+            .format("%Y-%m")
+            .to_string();
+
+        // "Makan" — has actual spend; "Kesehatan" — zero activity this month.
+        let cat_makan = crate::repo::cashflow_categories::create(
+            &db,
+            &crate::repo::cashflow_categories::NewCashflowCategory {
+                name: "Makan".into(),
+                kind: "expense".into(),
+                monthly_budget: None,
+                color: None,
+            },
+        )
+        .await
+        .unwrap();
+        crate::repo::cashflow_categories::create(
+            &db,
+            &crate::repo::cashflow_categories::NewCashflowCategory {
+                name: "Kesehatan".into(),
+                kind: "expense".into(),
+                monthly_budget: None,
+                color: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        crate::repo::cashflow::create(&db, &crate::repo::cashflow::NewCashflow {
+            account_id: None,
+            occurred_on: format!("{month}-10"),
+            direction: "out".into(),
+            amount: "200000".into(),
+            currency: "IDR".into(),
+            category_id: Some(cat_makan.id),
+            note: None,
+        })
+        .await
+        .unwrap();
+
+        let out = dispatch(&db, "cashflow_summary", &serde_json::json!({})).await.unwrap();
+        assert!(out.contains("Makan"), "active category must appear: {out}");
+        assert!(
+            !out.contains("Kesehatan"),
+            "zero-spend category must not appear in top expenses: {out}"
+        );
+    }
+
+    /// portfolio_insights on an empty DB must show net worth and must NOT show
+    /// a concentration line (net worth is zero so concentration is suppressed).
+    #[tokio::test]
+    async fn portfolio_insights_empty_db_no_concentration_line() {
+        let db = mem_db().await;
+        let out = dispatch(&db, "portfolio_insights", &serde_json::json!({})).await.unwrap();
+        assert!(out.to_lowercase().contains("net worth"), "net worth line required: {out}");
+        assert!(
+            !out.to_lowercase().contains("konsentrasi"),
+            "concentration line must be absent when net worth is zero: {out}"
+        );
+        assert!(
+            !out.to_lowercase().contains("savings rate"),
+            "savings rate line must be absent when no cashflow rows: {out}"
+        );
+    }
+
+    #[tokio::test]
     async fn list_pending_reviews_shows_amount_only_nominal() {
         let db = crate::db::connect("sqlite::memory:").await.unwrap();
         let instrument = crate::repo::instruments::create(&db, &crate::repo::instruments::NewInstrument {
@@ -1422,5 +2560,133 @@ mod tests {
         }).await.unwrap();
         let out = dispatch(&db, "list_pending_reviews", &serde_json::json!({})).await.unwrap();
         assert!(out.contains("nominal 13000000"), "{out}");
+    }
+
+    // ── Price alert helpers ───────────────────────────────────────────────────
+
+    /// Insert a minimal instrument and return it (id + symbol).
+    async fn seed_instrument(db: &Db, symbol: &str) -> crate::repo::instruments::InstrumentRow {
+        crate::repo::instruments::create(
+            db,
+            &crate::repo::instruments::NewInstrument {
+                symbol: symbol.to_string(),
+                name: format!("{symbol} Corp"),
+                instrument_type: "stock".into(),
+                native_currency: "IDR".into(),
+                category_id: None,
+                price_source: "manual".into(),
+                decimals: Some(0),
+                note: None,
+            },
+        )
+        .await
+        .unwrap()
+    }
+
+    // ── Price alert dispatcher tests ──────────────────────────────────────────
+
+    #[tokio::test]
+    async fn set_price_alert_with_absolute_target_stores_active_alert() {
+        let db = mem_db().await;
+        seed_instrument(&db, "BBCA").await;
+
+        let out = dispatch(
+            &db,
+            "set_price_alert",
+            &serde_json::json!({ "instrument": "BBCA", "target": 9000, "direction": "below" }),
+        )
+        .await
+        .unwrap();
+        assert!(out.contains("BBCA"), "{out}");
+        assert!(out.contains("below"), "{out}");
+
+        let active = crate::repo::price_alerts::list_active(&db).await.unwrap();
+        assert_eq!(active.len(), 1, "should have one active alert");
+        assert_eq!(active[0].direction, "below");
+        // target is stored as a Decimal string; "9000" is the canonical form.
+        let stored: rust_decimal::Decimal = active[0].target_price.parse().unwrap();
+        assert_eq!(stored, rust_decimal::Decimal::from(9000u32));
+    }
+
+    #[tokio::test]
+    async fn set_price_alert_with_percent_computes_target_from_current_price() {
+        let db = mem_db().await;
+        let ins = seed_instrument(&db, "BBCA").await;
+        // Seed current price at 10000.
+        crate::repo::prices::upsert_latest(
+            &db, ins.id, rust_decimal::Decimal::from(10000u32), "IDR", "manual", "2026-06-15",
+        )
+        .await
+        .unwrap();
+
+        dispatch(
+            &db,
+            "set_price_alert",
+            &serde_json::json!({ "instrument": "BBCA", "percent": 5, "direction": "below" }),
+        )
+        .await
+        .unwrap();
+
+        let active = crate::repo::price_alerts::list_active(&db).await.unwrap();
+        assert_eq!(active.len(), 1);
+        // 10000 * (1 - 5/100) = 9500
+        let stored: rust_decimal::Decimal = active[0].target_price.parse().unwrap();
+        assert_eq!(stored, rust_decimal::Decimal::from(9500u32));
+    }
+
+    #[tokio::test]
+    async fn set_price_alert_unknown_instrument_returns_error() {
+        let db = mem_db().await;
+        let err = dispatch(
+            &db,
+            "set_price_alert",
+            &serde_json::json!({ "instrument": "ZZZNOPE", "target": 1000, "direction": "below" }),
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            err.contains("ZZZNOPE") || err.contains("nggak ketemu"),
+            "error should mention instrument name: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn list_price_alerts_shows_symbol_and_target() {
+        let db = mem_db().await;
+        let ins = seed_instrument(&db, "TLKM").await;
+        crate::repo::price_alerts::create(&db, ins.id, "4500", "above").await.unwrap();
+
+        let out = dispatch(&db, "list_price_alerts", &serde_json::json!({})).await.unwrap();
+        assert!(out.contains("TLKM"), "{out}");
+        assert!(out.contains("above"), "{out}");
+        // Formatted IDR number.
+        assert!(out.contains("4.500") || out.contains("4500"), "{out}");
+    }
+
+    #[tokio::test]
+    async fn list_price_alerts_empty_shows_placeholder() {
+        let db = mem_db().await;
+        let out = dispatch(&db, "list_price_alerts", &serde_json::json!({})).await.unwrap();
+        assert!(
+            out.contains("belum ada") || out.contains("(belum ada alert)"),
+            "should indicate no alerts: {out}"
+        );
+    }
+
+    #[tokio::test]
+    async fn cancel_price_alert_removes_from_active() {
+        let db = mem_db().await;
+        let ins = seed_instrument(&db, "ASII").await;
+        let alert = crate::repo::price_alerts::create(&db, ins.id, "6000", "below").await.unwrap();
+
+        let out = dispatch(
+            &db,
+            "cancel_price_alert",
+            &serde_json::json!({ "id": alert.id }),
+        )
+        .await
+        .unwrap();
+        assert!(out.contains("dibatalkan") || out.contains("cancelled"), "{out}");
+        assert!(crate::repo::price_alerts::list_active(&db).await.unwrap().is_empty());
     }
 }

@@ -1,6 +1,6 @@
 use crate::db::Db;
-use crate::ingestion::extract::{parse_extraction, ExtractedEntry};
-use crate::ingestion::matching::{suggest_account, suggest_instrument_for_entry};
+use crate::ingestion::extract::{parse_extraction, ExtractError, Extraction, ExtractedEntry};
+use crate::ingestion::matching::{resolve_account, suggest_instrument_for_entry};
 use crate::llm::claude::Part;
 use crate::llm::native::NativeLlmClient;
 use crate::repo::review_items::{self, NewReviewItem};
@@ -71,6 +71,48 @@ fn save_file(batch_id: &str, f: &UploadFile) -> anyhow::Result<(String, String)>
 const PDF_UNSUPPORTED_PAYLOAD: &str =
     "{\"note\":\"PDF belum didukung — unggah ulang sebagai gambar (PNG/JPG).\"}";
 
+/// The vision model declined to read the document — it returned a natural-language
+/// refusal instead of JSON, and did so again on retry. Surfaced as a typed error
+/// (downcastable from the `anyhow::Error`) so the Telegram/API layer can tell the
+/// owner the real cause rather than a generic "failed to process the file".
+#[derive(Debug, thiserror::Error)]
+#[error("vision model refused to extract from the document")]
+pub struct ModelRefused;
+
+/// How many times to ask the vision model before giving up on a refusal.
+const MAX_EXTRACT_ATTEMPTS: usize = 2;
+
+/// Call the vision model and parse its JSON, retrying once when the model returns
+/// a prose-only refusal. Such refusals are largely stochastic, so a second
+/// attempt frequently succeeds; one that survives the retry becomes a typed
+/// [`ModelRefused`] error. Malformed-but-JSON-ish replies are a different problem
+/// and fail fast with the original parse error.
+///
+/// Returns the parsed extraction alongside the raw model reply (kept for the
+/// `raw_llm_json` audit column).
+async fn extract_with_refusal_retry(
+    client: &NativeLlmClient,
+    parts: &[Part],
+) -> anyhow::Result<(Extraction, String)> {
+    let mut last_snippet = String::new();
+    for attempt in 1..=MAX_EXTRACT_ATTEMPTS {
+        let raw = client.complete(SYSTEM_PROMPT, parts).await
+            .map_err(|e| anyhow::anyhow!("llm error: {e}"))?;
+        match parse_extraction(&raw) {
+            Ok(extraction) => return Ok((extraction, raw)),
+            Err(ExtractError::Refused(snippet)) => {
+                tracing::warn!(
+                    "ingest: vision model refused (attempt {attempt}/{MAX_EXTRACT_ATTEMPTS}): {snippet}"
+                );
+                last_snippet = snippet;
+            }
+            Err(e) => return Err(anyhow::anyhow!("parse error: {e}; raw={raw}")),
+        }
+    }
+    Err(anyhow::Error::new(ModelRefused)
+        .context(format!("model refused after {MAX_EXTRACT_ATTEMPTS} attempts: {last_snippet}")))
+}
+
 /// Full pipeline for one upload batch: save files, call the vision model once per
 /// image, parse, stage items. `batch_id` is supplied by the caller (the API
 /// layer) so it is deterministic/testable.
@@ -98,10 +140,7 @@ pub async fn ingest_batch(db: &Db, client: &NativeLlmClient, batch_id: &str, fil
             Part::Text("Extract per the system instructions.".into()),
             Part::Image(f.media_type.clone(), f.data_base64.clone()),
         ];
-        let raw = client.complete(SYSTEM_PROMPT, &parts).await
-            .map_err(|e| anyhow::anyhow!("llm error: {e}"))?;
-        let extraction = parse_extraction(&raw)
-            .map_err(|e| anyhow::anyhow!("parse error: {e}; raw={raw}"))?;
+        let (extraction, raw) = extract_with_refusal_retry(client, &parts).await?;
         if extraction.entries.is_empty() {
             let row = review_items::create(db, &NewReviewItem {
                 batch_id,
@@ -121,7 +160,10 @@ pub async fn ingest_batch(db: &Db, client: &NativeLlmClient, batch_id: &str, fil
         for entry in &extraction.entries {
             let payload = serde_json::to_string(entry)?;
             let sug_ins = suggest_instrument_for_entry(db, entry.symbol.as_deref(), entry.instrument_name.as_deref()).await?;
-            let sug_acc = match &entry.account_hint { Some(a) => suggest_account(db, a).await?, None => None };
+            // Resolve the account against the DB (exact name, then this
+            // instrument's history, then a single fuzzy match) so previously-seen
+            // instruments don't show up as "belum dikenali".
+            let sug_acc = resolve_account(db, entry.account_hint.as_deref(), sug_ins).await?;
             let row = review_items::create(db, &NewReviewItem {
                 batch_id,
                 source_kind: &kind,
@@ -149,6 +191,15 @@ mod tests {
         ExtractedEntry { entry_type:"buy".into(), symbol:symbol.map(String::from), instrument_name:None,
             quantity:qty.map(String::from), price_native:Some("1".into()), fee_native:None, currency:Some("USD".into()),
             executed_at:None, account_hint:None, note:None, confidence:conf, amount_native:None, force_attention:false }
+    }
+
+    #[test]
+    fn model_refused_survives_context_for_downcast() {
+        // The Telegram layer distinguishes a refusal via downcast_ref through the
+        // anyhow context chain; lock that contract so the tailored reply keeps firing.
+        let err = anyhow::Error::new(ModelRefused)
+            .context("model refused after 2 attempts: I'm sorry, I cannot fulfill this request.");
+        assert!(err.downcast_ref::<ModelRefused>().is_some());
     }
 
     #[test]

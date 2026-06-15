@@ -48,6 +48,8 @@ pub struct TgMessage {
     pub photo: Option<Vec<TgPhotoSize>>,
     /// File attachments (PDF statements, forwarded images, ...).
     pub document: Option<TgDocument>,
+    /// Voice note (Telegram sends OGG/Opus).
+    pub voice: Option<TgVoice>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -61,6 +63,12 @@ pub struct TgPhotoSize {
 pub struct TgDocument {
     pub file_id: String,
     pub file_name: Option<String>,
+    pub mime_type: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TgVoice {
+    pub file_id: String,
     pub mime_type: Option<String>,
 }
 
@@ -102,6 +110,16 @@ pub fn parse_file_path(body: &serde_json::Value) -> Result<String, TgError> {
         .and_then(|p| p.as_str())
         .map(String::from)
         .ok_or_else(|| TgError::Shape(format!("no file_path: {body}")))
+}
+
+/// Sanitize an invoice number into a safe PDF filename:
+/// "INV/2026/VI/001" -> "INV-2026-VI-001.pdf".
+pub fn document_filename(invoice_number: &str) -> String {
+    let safe: String = invoice_number
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect();
+    format!("{safe}.pdf")
 }
 
 pub struct TelegramClient {
@@ -192,6 +210,33 @@ impl TelegramClient {
             .client
             .post(self.url("sendMessage"))
             .json(&serde_json::json!({ "chat_id": chat_id, "text": text }))
+            .send()
+            .await
+            .map_err(|e| TgError::Http(e.to_string()))?;
+        Self::check(resp).await?;
+        Ok(())
+    }
+
+    /// Upload bytes (the invoice PDF) as a Telegram document with a caption.
+    pub async fn send_document(
+        &self,
+        chat_id: i64,
+        filename: &str,
+        bytes: Vec<u8>,
+        caption: &str,
+    ) -> Result<(), TgError> {
+        let part = reqwest::multipart::Part::bytes(bytes)
+            .file_name(filename.to_string())
+            .mime_str("application/pdf")
+            .map_err(|e| TgError::Http(e.to_string()))?;
+        let form = reqwest::multipart::Form::new()
+            .text("chat_id", chat_id.to_string())
+            .text("caption", caption.to_string())
+            .part("document", part);
+        let resp = self
+            .client
+            .post(self.url("sendDocument"))
+            .multipart(form)
             .send()
             .await
             .map_err(|e| TgError::Http(e.to_string()))?;
@@ -336,6 +381,21 @@ mod tests {
     }
 
     #[test]
+    fn parse_updates_extracts_voice_messages() {
+        let body = serde_json::json!({
+            "ok": true,
+            "result": [{
+                "update_id": 1,
+                "message": { "chat": { "id": 7 }, "voice": { "file_id": "v1", "mime_type": "audio/ogg" } }
+            }]
+        });
+        let updates = parse_updates(&body).unwrap();
+        let voice = updates[0].message.as_ref().unwrap().voice.as_ref().unwrap();
+        assert_eq!(voice.file_id, "v1");
+        assert_eq!(voice.mime_type.as_deref(), Some("audio/ogg"));
+    }
+
+    #[test]
     fn parse_updates_extracts_callback_queries() {
         let body = serde_json::json!({
             "ok": true,
@@ -403,5 +463,10 @@ mod tests {
     fn parse_updates_rejects_not_ok() {
         let body = serde_json::json!({ "ok": false, "description": "bad" });
         assert!(matches!(parse_updates(&body), Err(TgError::Shape(_))));
+    }
+
+    #[test]
+    fn document_filename_is_safe() {
+        assert_eq!(document_filename("INV/2026/VI/001"), "INV-2026-VI-001.pdf");
     }
 }

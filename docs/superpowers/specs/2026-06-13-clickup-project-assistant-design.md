@@ -57,8 +57,8 @@ integration with its own client). Layers:
   `create_list`, `create_task`, `list_tasks`, `complete_task`,
   `get_custom_fields`. The trait lets dispatch logic be tested against a fake
   client with no network.
-- **`clickup::config`** — reads `CLICKUP_API_TOKEN`, `CLICKUP_WORKSPACE_ID`
-  (90182781247), `CLICKUP_SPACE_ID` (901811400643) from env at startup. When
+- **`clickup::config`** — reads `CLICKUP_API_TOKEN` and `CLICKUP_SPACE_ID`
+  from env at startup (ids kept in the secret — this is a public repo). When
   the token is absent, the ClickUp tools are simply not registered and the bot
   runs without them (mirrors how `telegram::spawn` no-ops without a token).
 - **Assistant tools** — new schemas in `assistant::tools` and handlers in
