@@ -6,7 +6,10 @@ pub mod crud;
 pub mod events;
 pub mod goals;
 pub mod google;
+pub mod inbox;
 pub mod ingest;
+pub mod reminders;
+pub mod todos;
 pub mod upwork;
 pub mod portfolio;
 pub mod telegram;
@@ -56,6 +59,9 @@ pub fn router(state: AppState) -> Router {
         .route("/events", get(events::list).post(events::create))
         .route("/events/:id", axum::routing::patch(events::update))
         .route("/events/:id/cancel", post(events::cancel))
+        .route("/todos", get(todos::list))
+        .route("/reminders", get(reminders::list))
+        .route("/inbox", get(inbox::list))
         .route(
             "/accounts",
             get(crud::list_accounts).post(crud::create_account),
@@ -225,6 +231,22 @@ mod router_tests {
                 .body(Body::empty()).unwrap()
         ).await.unwrap();
         assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+        std::env::remove_var("AUTH_PASSWORD");
+        std::env::remove_var("JWT_SECRET");
+    }
+
+    #[serial]
+    #[tokio::test]
+    async fn assistant_read_routes_are_protected() {
+        std::env::set_var("AUTH_PASSWORD", "pw");
+        std::env::set_var("JWT_SECRET", "router-test-assistant");
+        let app = router(test_state().await);
+        for uri in ["/todos", "/reminders", "/inbox"] {
+            let res = app.clone().oneshot(
+                Request::builder().uri(uri).body(Body::empty()).unwrap()
+            ).await.unwrap();
+            assert_eq!(res.status(), StatusCode::UNAUTHORIZED, "{uri} should be protected");
+        }
         std::env::remove_var("AUTH_PASSWORD");
         std::env::remove_var("JWT_SECRET");
     }
