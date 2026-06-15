@@ -14,6 +14,7 @@ import {
   WhatsappStatusSchema,
   TelegramStatusSchema, TelegramLinkCodeSchema,
   MoverSchema, BenchmarkRowSchema, EventSchema,
+  TodoSchema, ReminderSchema, InboxItemSchema,
   type Account, type Category, type Instrument, type Transaction, type ReviewItem,
   type CashflowCategory, type Cashflow, type Connector, type Goal,
 } from "./schemas";
@@ -262,6 +263,17 @@ export const useEvents = (fromZ: string, toZ: string) =>
     queryFn: () =>
       api.get(`/events?from=${encodeURIComponent(fromZ)}&to=${encodeURIComponent(toZ)}`, z.array(EventSchema)),
   });
+
+// ── Assistant: todo / reminder / inbox hooks ──────────────────────────────────
+
+export const useTodos = () =>
+  useQuery({ queryKey: ["todos"], queryFn: () => api.get("/todos", z.array(TodoSchema)) });
+
+export const useReminders = () =>
+  useQuery({ queryKey: ["reminders"], queryFn: () => api.get("/reminders", z.array(ReminderSchema)) });
+
+export const useInbox = () =>
+  useQuery({ queryKey: ["inbox"], queryFn: () => api.get("/inbox", z.array(InboxItemSchema)) });
 
 type EventBody = { title: string; start_at: string; location?: string | null; notes?: string | null };
 
