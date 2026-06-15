@@ -1,15 +1,25 @@
 import { Link } from "react-router-dom";
-import { useReminders } from "../api/hooks";
+import { X } from "lucide-react";
+import { toast } from "sonner";
+import { useReminders, useCancelReminder } from "../api/hooks";
 import { todayWibKey, wibDayKey, formatWibTime } from "../lib/wib";
 
 const MAX_ROWS = 5;
 
 export function DashboardReminderCard() {
   const reminders = useReminders();
+  const cancelReminder = useCancelReminder();
   const rows = (reminders.data ?? [])
     .slice()
     .sort((a, b) => a.remind_at.localeCompare(b.remind_at))
     .slice(0, MAX_ROWS);
+
+  function handleCancel(id: number) {
+    cancelReminder.mutate(id, {
+      onSuccess: () => toast.success("Reminder dibatalkan"),
+      onError: (err) => toast.error((err as Error).message),
+    });
+  }
 
   return (
     <div className="card">
@@ -25,6 +35,15 @@ export function DashboardReminderCard() {
               {wibDayKey(r.remind_at) === todayWibKey() ? "Hari ini" : wibDayKey(r.remind_at).slice(5)} · {formatWibTime(r.remind_at)}
             </span>
             <span className="flex-1 truncate">{r.message}</span>
+            <button
+              type="button"
+              aria-label={`Batalkan ${r.message}`}
+              className="pt-icon-btn shrink-0"
+              disabled={cancelReminder.isPending}
+              onClick={() => handleCancel(r.id)}
+            >
+              <X size={15} />
+            </button>
           </div>
         ))}
       </div>
