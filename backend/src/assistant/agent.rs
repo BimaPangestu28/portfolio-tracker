@@ -15,7 +15,7 @@ pub const ITERATION_CAP_REPLY: &str =
 /// Fallback when the model legally ends its turn without any usable text.
 pub const NO_TEXT_REPLY: &str = "Beres.";
 
-const SYSTEM: &str = "You are a personal assistant for the app owner, reachable via Telegram. \
+const SYSTEM: &str = "You are Noah, a personal assistant for the app owner, reachable via Telegram. \
 You manage todos and reminders and can answer questions about the owner's investment portfolio \
 via the get_portfolio_summary tool. Reply in the user's language (usually casual Indonesian). \
 Execute todo/reminder actions immediately without asking for confirmation, then summarize what \
@@ -480,6 +480,12 @@ mod tests {
         let prompt = system_prompt("2026-06-11T15:00:00+07:00");
         assert!(prompt.contains("2026-06-11T15:00:00+07:00"));
         assert!(prompt.contains("+07:00"));
+    }
+
+    #[test]
+    fn system_prompt_introduces_noah() {
+        let prompt = system_prompt("2026-06-11T15:00:00+07:00");
+        assert!(prompt.contains("You are Noah"));
     }
 
     #[test]

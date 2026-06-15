@@ -364,3 +364,39 @@ export const EventSchema = z.object({
   google_event_id: z.string().nullable().optional(),
 });
 export type EventItem = z.infer<typeof EventSchema>;
+
+// ── Assistant: todos, reminders, inbox ──────────────────────────────────────
+
+export const TodoSchema = z.object({
+  id: z.number(),
+  title: z.string(),
+  notes: z.string().nullable().optional(),
+  due_at: z.string().nullable().optional(),
+  status: z.string(),
+  created_at: z.string(),
+  completed_at: z.string().nullable().optional(),
+  priority: z.string().nullable().optional(),
+  estimate_minutes: z.number().nullable().optional(),
+});
+export type Todo = z.infer<typeof TodoSchema>;
+
+export const ReminderSchema = z.object({
+  id: z.number(),
+  todo_id: z.number().nullable().optional(),
+  message: z.string(),
+  remind_at: z.string(),
+  recurrence: z.string(),
+  status: z.string(),
+  sent_at: z.string().nullable().optional(),
+  event_id: z.number().nullable().optional(),
+});
+export type Reminder = z.infer<typeof ReminderSchema>;
+
+export const InboxItemSchema = z.object({
+  id: z.number(),
+  content: z.string(),
+  status: z.string(),
+  created_at: z.string(),
+  resolved_at: z.string().nullable().optional(),
+});
+export type InboxItem = z.infer<typeof InboxItemSchema>;
