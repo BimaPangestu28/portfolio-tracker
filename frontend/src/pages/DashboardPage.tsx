@@ -39,6 +39,9 @@ import {
 import { formatIDR, formatUSD, formatPct, formatQty, parseNum } from "../lib/format";
 import { txTone, txLabel } from "../lib/txn";
 import { DashboardAgendaCard } from "../components/DashboardAgendaCard";
+import { DashboardTodoCard } from "../components/DashboardTodoCard";
+import { DashboardReminderCard } from "../components/DashboardReminderCard";
+import { DashboardInboxCard } from "../components/DashboardInboxCard";
 import { HeroSparkline } from "../components/charts/HeroSparkline";
 import { DonutChart } from "../components/charts/DonutChart";
 import { DriftBarsChart } from "../components/charts/DriftBarsChart";
@@ -1155,6 +1158,20 @@ export default function DashboardPage() {
       {/* ── 0. Pending review banner ──────────────────────────────────────── */}
       <PendingReviewBanner count={pendingReviews.data?.length ?? 0} />
 
+      {/* ── Hari ini (assistant section) ──────────────────────────────────── */}
+      <div>
+        <div className="t-h3" style={{ marginBottom: 12 }}>Hari ini</div>
+        <div className="grid gap-5" style={{ gridTemplateColumns: "repeat(2, minmax(0,1fr))" }}>
+          <DashboardTodoCard />
+          <DashboardAgendaCard />
+          <DashboardReminderCard />
+          <DashboardInboxCard />
+        </div>
+      </div>
+
+      {/* ── Keuangan ──────────────────────────────────────────────────────── */}
+      <div className="t-h3" style={{ marginTop: 4 }}>Keuangan</div>
+
       {/* ── 1. Hero + KPI row ──────────────────────────────────────────────── */}
       {isLoadingCore ? (
         <HeroRowSkeleton />
@@ -1248,9 +1265,6 @@ export default function DashboardPage() {
           <GoalsCard goals={goals.data ?? []} />
         )}
       </div>
-
-      {/* ── 5b. Agenda upcoming events ────────────────────────────────────── */}
-      <DashboardAgendaCard />
 
       {/* ── 6. Posisi Terbesar + Aktivitas side by side ───────────────────── */}
       <div className="grid gap-5" style={{ gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)" }}>
