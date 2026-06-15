@@ -266,14 +266,14 @@ export const useEvents = (fromZ: string, toZ: string) =>
 
 // ── Assistant: todo / reminder / inbox hooks ──────────────────────────────────
 
-export const useTodos = () =>
-  useQuery({ queryKey: ["todos"], queryFn: () => api.get("/todos", z.array(TodoSchema)) });
+export const useTodos = (status?: string) =>
+  useQuery({ queryKey: ["todos", status ?? "open"], queryFn: () => api.get(`/todos${status ? `?status=${status}` : ""}`, z.array(TodoSchema)) });
 
-export const useReminders = () =>
-  useQuery({ queryKey: ["reminders"], queryFn: () => api.get("/reminders", z.array(ReminderSchema)) });
+export const useReminders = (status?: string) =>
+  useQuery({ queryKey: ["reminders", status ?? "pending"], queryFn: () => api.get(`/reminders${status ? `?status=${status}` : ""}`, z.array(ReminderSchema)) });
 
-export const useInbox = () =>
-  useQuery({ queryKey: ["inbox"], queryFn: () => api.get("/inbox", z.array(InboxItemSchema)) });
+export const useInbox = (status?: string) =>
+  useQuery({ queryKey: ["inbox", status ?? "pending"], queryFn: () => api.get(`/inbox${status ? `?status=${status}` : ""}`, z.array(InboxItemSchema)) });
 
 type EventBody = { title: string; start_at: string; location?: string | null; notes?: string | null };
 
@@ -300,3 +300,22 @@ export const useCancelReminder = () =>
 
 export const useResolveInbox = () =>
   useInvalidatingMutation((id: number) => api.post(`/inbox/${id}/resolve`, z.unknown(), {}), ["inbox"]);
+
+export const useUpdateTodo = () =>
+  useInvalidatingMutation(
+    (args: { id: number; body: { title: string; notes?: string | null; due_at?: string | null; priority?: string | null; estimate_minutes?: number | null } }) =>
+      api.patch(`/todos/${args.id}`, TodoSchema, args.body),
+    ["todos"],
+  );
+
+export const useReopenTodo = () =>
+  useInvalidatingMutation((id: number) => api.post(`/todos/${id}/reopen`, z.unknown(), {}), ["todos"]);
+
+export const useUnresolveInbox = () =>
+  useInvalidatingMutation((id: number) => api.post(`/inbox/${id}/unresolve`, z.unknown(), {}), ["inbox"]);
+
+export const useCreateReminder = () =>
+  useInvalidatingMutation(
+    (b: { message: string; remind_at: string; recurrence?: string }) => api.post("/reminders", ReminderSchema, b),
+    ["reminders"],
+  );

@@ -55,6 +55,26 @@ pub async fn list_pending(db: &Db) -> anyhow::Result<Vec<ReminderRow>> {
     Ok(rows)
 }
 
+/// List reminders by status: "pending", "sent", "cancelled", or "all".
+pub async fn list_by_status(db: &Db, status: &str) -> anyhow::Result<Vec<ReminderRow>> {
+    let rows = match status {
+        "all" => {
+            sqlx::query_as::<_, ReminderRow>("SELECT * FROM reminders ORDER BY remind_at")
+                .fetch_all(db)
+                .await?
+        }
+        other => {
+            sqlx::query_as::<_, ReminderRow>(
+                "SELECT * FROM reminders WHERE status = ? ORDER BY remind_at",
+            )
+            .bind(other)
+            .fetch_all(db)
+            .await?
+        }
+    };
+    Ok(rows)
+}
+
 /// Pending reminders due at or before `now`. `now` must use the same
 /// "%Y-%m-%dT%H:%M:%SZ" format as stored values so string <= is time <=.
 pub async fn due(db: &Db, now: &str) -> anyhow::Result<Vec<ReminderRow>> {

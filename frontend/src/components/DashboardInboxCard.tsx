@@ -21,7 +21,7 @@ export function DashboardInboxCard() {
     <div className="card">
       <div className="card-head flex items-center justify-between">
         <div className="card-title">Inbox</div>
-        <Link to="/chat" className="text-sm text-primary hover:underline">Tanya Noah →</Link>
+        <Link to="/tugas" className="text-sm text-primary hover:underline">Lihat semua →</Link>
       </div>
       <div className="card-pad space-y-1" style={{ paddingTop: 14 }}>
         {rows.length === 0 && <p className="text-sm text-muted-foreground">Inbox kosong.</p>}

@@ -60,6 +60,35 @@ pub async fn resolve(db: &Db, ids: &[i64], status: &str) -> anyhow::Result<u64> 
     Ok(affected)
 }
 
+/// List inbox items by status: "pending", "sorted", or "all".
+pub async fn list_by_status(db: &Db, status: &str) -> anyhow::Result<Vec<InboxRow>> {
+    let rows = match status {
+        "all" => {
+            sqlx::query_as::<_, InboxRow>("SELECT * FROM inbox ORDER BY id DESC")
+                .fetch_all(db)
+                .await?
+        }
+        other => {
+            sqlx::query_as::<_, InboxRow>("SELECT * FROM inbox WHERE status = ? ORDER BY id DESC")
+                .bind(other)
+                .fetch_all(db)
+                .await?
+        }
+    };
+    Ok(rows)
+}
+
+/// Move a sorted inbox item back to pending. False if not currently sorted.
+pub async fn unresolve(db: &Db, id: i64) -> anyhow::Result<bool> {
+    let result = sqlx::query(
+        "UPDATE inbox SET status = 'pending', resolved_at = NULL WHERE id = ? AND status = 'sorted'",
+    )
+    .bind(id)
+    .execute(db)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

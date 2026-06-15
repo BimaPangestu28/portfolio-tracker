@@ -16,3 +16,6 @@ backend/data/
 .claude/
 whatsapp-gateway/auth_state/
 whatsapp-gateway/node_modules/
+
+# local git worktrees
+.worktrees/
