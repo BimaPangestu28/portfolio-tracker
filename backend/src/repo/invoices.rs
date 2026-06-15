@@ -47,6 +47,15 @@ pub async fn list_all(db: &Db) -> anyhow::Result<Vec<InvoiceRow>> {
         .fetch_all(db).await?)
 }
 
+/// Fetch a single invoice by id.
+pub async fn get(db: &Db, id: i64) -> anyhow::Result<Option<InvoiceRow>> {
+    let row = sqlx::query_as::<_, InvoiceRow>("SELECT * FROM invoice WHERE id = ?")
+        .bind(id)
+        .fetch_optional(db)
+        .await?;
+    Ok(row)
+}
+
 pub async fn max_seq_for_prefix(db: &Db, prefix: &str) -> anyhow::Result<Option<u32>> {
     // Prefix is app-built (`INV/<year>/<roman>/`) and never contains LIKE
     // wildcards, so no ESCAPE handling is needed.
