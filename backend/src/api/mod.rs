@@ -60,7 +60,9 @@ pub fn router(state: AppState) -> Router {
         .route("/events/:id", axum::routing::patch(events::update))
         .route("/events/:id/cancel", post(events::cancel))
         .route("/todos", get(todos::list).post(todos::create))
+        .route("/todos/:id", axum::routing::patch(todos::update))
         .route("/todos/:id/complete", post(todos::complete))
+        .route("/todos/:id/reopen", post(todos::reopen))
         .route("/reminders", get(reminders::list))
         .route("/reminders/:id/cancel", post(reminders::cancel))
         .route("/inbox", get(inbox::list))
@@ -266,6 +268,23 @@ mod router_tests {
             ("/reminders/1/cancel", "POST"),
             ("/inbox/1/resolve", "POST"),
         ];
+        for (uri, method) in cases {
+            let res = app.clone().oneshot(
+                Request::builder().method(method).uri(uri).body(Body::empty()).unwrap()
+            ).await.unwrap();
+            assert_eq!(res.status(), StatusCode::UNAUTHORIZED, "{method} {uri} should be protected");
+        }
+        std::env::remove_var("AUTH_PASSWORD");
+        std::env::remove_var("JWT_SECRET");
+    }
+
+    #[serial]
+    #[tokio::test]
+    async fn todo_edit_routes_are_protected() {
+        std::env::set_var("AUTH_PASSWORD", "pw");
+        std::env::set_var("JWT_SECRET", "router-test-todo-edit");
+        let app = router(test_state().await);
+        let cases = [("/todos/1", "PATCH"), ("/todos/1/reopen", "POST")];
         for (uri, method) in cases {
             let res = app.clone().oneshot(
                 Request::builder().method(method).uri(uri).body(Body::empty()).unwrap()

@@ -135,6 +135,63 @@ pub async fn rollover(
     Ok(moved)
 }
 
+/// List todos by status: "open", "done", or "all".
+pub async fn list_by_status(db: &Db, status: &str) -> anyhow::Result<Vec<TodoRow>> {
+    let rows = match status {
+        "all" => {
+            sqlx::query_as::<_, TodoRow>(
+                "SELECT * FROM todos ORDER BY (status = 'done'), due_at IS NULL, due_at, id",
+            )
+            .fetch_all(db)
+            .await?
+        }
+        other => {
+            sqlx::query_as::<_, TodoRow>(
+                "SELECT * FROM todos WHERE status = ? ORDER BY due_at IS NULL, due_at, id",
+            )
+            .bind(other)
+            .fetch_all(db)
+            .await?
+        }
+    };
+    Ok(rows)
+}
+
+/// Full-replace editable fields of a todo. Returns false if the id is absent.
+pub async fn update(
+    db: &Db,
+    id: i64,
+    title: &str,
+    notes: Option<&str>,
+    due_at: Option<&str>,
+    priority: Option<&str>,
+    estimate_minutes: Option<i64>,
+) -> anyhow::Result<bool> {
+    let result = sqlx::query(
+        "UPDATE todos SET title = ?, notes = ?, due_at = ?, priority = ?, estimate_minutes = ? WHERE id = ?",
+    )
+    .bind(title)
+    .bind(notes)
+    .bind(due_at)
+    .bind(priority)
+    .bind(estimate_minutes)
+    .bind(id)
+    .execute(db)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
+/// Reopen a done todo (done -> open, clear completed_at). False if not currently done.
+pub async fn reopen(db: &Db, id: i64) -> anyhow::Result<bool> {
+    let result = sqlx::query(
+        "UPDATE todos SET status = 'open', completed_at = NULL WHERE id = ? AND status = 'done'",
+    )
+    .bind(id)
+    .execute(db)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
