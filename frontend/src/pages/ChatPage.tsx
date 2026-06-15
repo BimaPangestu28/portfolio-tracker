@@ -5,9 +5,10 @@ import { QueryState } from "../components/QueryState";
 import { MarkdownMessage } from "../components/MarkdownMessage";
 
 const SUGGESTIONS = [
-  "Apakah saya perlu rebalancing?",
-  "Performa terbaik bulan ini?",
-  "Berapa XIRR saya?",
+  "Apa agenda saya hari ini?",
+  "Ingetin meeting jam 3 sore",
+  "Catat todo: bayar internet",
+  "Berapa net worth saya?",
 ];
 
 export default function ChatPage() {

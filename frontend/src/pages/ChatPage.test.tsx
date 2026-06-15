@@ -27,7 +27,7 @@ test("shows empty-history message when no messages exist", async () => {
 
 test("renders suggestion chips", async () => {
   render(<ChatPage />, { wrapper });
-  expect(screen.getByRole("button", { name: /rebalancing/i })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /agenda saya hari ini/i })).toBeInTheDocument();
 });
 
 test("shows WhatsApp status badge", async () => {
