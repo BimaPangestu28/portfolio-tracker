@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { TodoTab } from "../components/tugas/TodoTab";
+import { ReminderTab } from "../components/tugas/ReminderTab";
+import { InboxTab } from "../components/tugas/InboxTab";
 
 type Tab = "todo" | "reminder" | "inbox";
 
@@ -19,8 +21,8 @@ export default function TugasPage() {
       </div>
       <div className="card card-pad" style={{ padding: 18 }}>
         {tab === "todo" && <TodoTab />}
-        {tab === "reminder" && <p className="text-sm text-muted-foreground">Segera.</p>}
-        {tab === "inbox" && <p className="text-sm text-muted-foreground">Segera.</p>}
+        {tab === "reminder" && <ReminderTab />}
+        {tab === "inbox" && <InboxTab />}
       </div>
     </div>
   );
