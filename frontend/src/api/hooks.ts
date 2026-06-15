@@ -288,3 +288,15 @@ export const useUpdateEvent = () =>
 
 export const useCancelEvent = () =>
   useInvalidatingMutation((id: number) => api.post(`/events/${id}/cancel`, z.unknown(), {}), ["events"]);
+
+export const useCreateTodo = () =>
+  useInvalidatingMutation((b: { title: string }) => api.post("/todos", TodoSchema, b), ["todos"]);
+
+export const useCompleteTodo = () =>
+  useInvalidatingMutation((id: number) => api.post(`/todos/${id}/complete`, z.unknown(), {}), ["todos"]);
+
+export const useCancelReminder = () =>
+  useInvalidatingMutation((id: number) => api.post(`/reminders/${id}/cancel`, z.unknown(), {}), ["reminders"]);
+
+export const useResolveInbox = () =>
+  useInvalidatingMutation((id: number) => api.post(`/inbox/${id}/resolve`, z.unknown(), {}), ["inbox"]);
