@@ -17,6 +17,7 @@ import {
   ListChecks,
   Banknote,
   Inbox,
+  FileText,
   Menu,
   X,
   RefreshCw,
@@ -64,6 +65,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { to: "/portfolio", label: "Portofolio", icon: Wallet },
       { to: "/data",      label: "Data",       icon: Inbox },
+      { to: "/invoices",  label: "Invoice",    icon: FileText },
     ],
   },
 ];
