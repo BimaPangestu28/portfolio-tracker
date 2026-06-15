@@ -9,6 +9,7 @@ import PortfolioPage from "./pages/PortfolioPage";
 import PlannerPage from "./pages/PlannerPage";
 import BudgetPage from "./pages/BudgetPage";
 import DataPage from "./pages/DataPage";
+import InvoicesPage from "./pages/InvoicesPage";
 import ChatPage from "./pages/ChatPage";
 import SettingsPage from "./pages/SettingsPage";
 import AgendaPage from "./pages/AgendaPage";
@@ -33,6 +34,7 @@ export default function App() {
         <Route path="planner" element={<PlannerPage />} />
         <Route path="budget" element={<BudgetPage />} />
         <Route path="data" element={<DataPage />} />
+        <Route path="invoices" element={<InvoicesPage />} />
         <Route path="agenda" element={<AgendaPage />} />
         <Route path="tugas" element={<TugasPage />} />
         <Route path="chat" element={<ChatPage />} />

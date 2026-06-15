@@ -8,6 +8,7 @@ pub mod goals;
 pub mod google;
 pub mod inbox;
 pub mod ingest;
+pub mod invoices;
 pub mod reminders;
 pub mod todos;
 pub mod upwork;
@@ -103,6 +104,10 @@ pub fn router(state: AppState) -> Router {
         .route("/portfolio/performance", get(portfolio::performance))
         .route("/portfolio/movers", get(portfolio::movers))
         .route("/portfolio/benchmark", get(portfolio::benchmark))
+        .route("/invoices", get(invoices::list))
+        .route("/invoices/:id", get(invoices::get))
+        .route("/invoices/:id/pdf", get(invoices::pdf))
+        .route("/clients", get(invoices::list_clients))
         .route("/goals", get(goals::list_goals).post(goals::create_goal))
         .route("/goals/:id", delete(goals::delete_goal))
         .route(
@@ -308,6 +313,23 @@ mod router_tests {
                 Request::builder().method(method).uri(uri).body(Body::empty()).unwrap()
             ).await.unwrap();
             assert_eq!(res.status(), StatusCode::UNAUTHORIZED, "{method} {uri} should be protected");
+        }
+        std::env::remove_var("AUTH_PASSWORD");
+        std::env::remove_var("JWT_SECRET");
+    }
+
+    #[serial]
+    #[tokio::test]
+    async fn invoice_routes_are_protected() {
+        std::env::set_var("AUTH_PASSWORD", "pw");
+        std::env::set_var("JWT_SECRET", "router-test-invoice");
+        let app = router(test_state().await);
+        let uris = ["/invoices", "/invoices/1", "/invoices/1/pdf", "/clients"];
+        for uri in uris {
+            let res = app.clone().oneshot(
+                Request::builder().method("GET").uri(uri).body(Body::empty()).unwrap()
+            ).await.unwrap();
+            assert_eq!(res.status(), StatusCode::UNAUTHORIZED, "GET {uri} should be protected");
         }
         std::env::remove_var("AUTH_PASSWORD");
         std::env::remove_var("JWT_SECRET");

@@ -5,3 +5,4 @@ pub mod model;
 pub mod render;
 pub mod config;
 pub mod assemble;
+pub mod rebuild;
