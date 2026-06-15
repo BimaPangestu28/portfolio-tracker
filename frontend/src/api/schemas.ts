@@ -400,3 +400,35 @@ export const InboxItemSchema = z.object({
   resolved_at: z.string().nullable().optional(),
 });
 export type InboxItem = z.infer<typeof InboxItemSchema>;
+
+// ── Invoices: clients, invoices, line items ─────────────────────────────────
+
+export const ClientSchema = z.object({
+  id: z.number(),
+  name: z.string(),
+  sub_name: z.string().nullable(),
+  website: z.string().nullable(),
+  created_at: z.string(),
+});
+export type Client = z.infer<typeof ClientSchema>;
+
+export const InvoiceSchema = z.object({
+  id: z.number(),
+  number: z.string(),
+  client_id: z.number(),
+  issue_date: z.string(),
+  due_date: z.string(),
+  subtotal: z.string(),
+  total: z.string(),
+  line_items_json: z.string(),
+  created_at: z.string(),
+});
+export type Invoice = z.infer<typeof InvoiceSchema>;
+
+export const InvoiceLineItemSchema = z.object({
+  title: z.string(),
+  body: z.string().nullable().optional(),
+  qty: z.number(),
+  amount: z.number(),
+});
+export type InvoiceLineItem = z.infer<typeof InvoiceLineItemSchema>;

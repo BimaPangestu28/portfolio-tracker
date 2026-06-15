@@ -15,6 +15,7 @@ import {
   TelegramStatusSchema, TelegramLinkCodeSchema,
   MoverSchema, BenchmarkRowSchema, EventSchema,
   TodoSchema, ReminderSchema, InboxItemSchema,
+  InvoiceSchema, ClientSchema,
   type Account, type Category, type Instrument, type Transaction, type ReviewItem,
   type CashflowCategory, type Cashflow, type Connector, type Goal,
 } from "./schemas";
@@ -319,3 +320,14 @@ export const useCreateReminder = () =>
     (b: { message: string; remind_at: string; recurrence?: string }) => api.post("/reminders", ReminderSchema, b),
     ["reminders"],
   );
+
+// ── Invoice / client hooks ─────────────────────────────────────────────────
+
+export const useInvoices = () =>
+  useQuery({ queryKey: ["invoices"], queryFn: () => api.get("/invoices", z.array(InvoiceSchema)) });
+
+export const useClients = () =>
+  useQuery({ queryKey: ["clients"], queryFn: () => api.get("/clients", z.array(ClientSchema)) });
+
+export const useInvoice = (id: number | null) =>
+  useQuery({ queryKey: ["invoice", id], enabled: id != null, queryFn: () => api.get(`/invoices/${id}`, InvoiceSchema) });

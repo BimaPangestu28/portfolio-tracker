@@ -64,6 +64,15 @@ export const api = {
   patch: <T>(path: string, schema: z.ZodType<T>, body: unknown) =>
     request(path, schema, { method: "PATCH", body: JSON.stringify(body) }),
   del: (path: string) => request(path, z.unknown(), { method: "DELETE" }),
+  getBlob: async (path: string): Promise<Blob> => {
+    const res = await fetch(`${BASE}${path}`, { headers: { ...authHeader() } });
+    if (res.status === 401) {
+      localStorage.removeItem(TOKEN_KEY);
+      window.dispatchEvent(new Event("pt-unauthorized"));
+    }
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return res.blob();
+  },
 
   // Google Calendar integration
   googleStatus: () => request("/google/status", googleStatusSchema),
