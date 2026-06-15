@@ -11,14 +11,16 @@ pub fn definitions() -> serde_json::Value {
                 "properties": {
                     "title": { "type": "string", "description": "Short task title in the user's words" },
                     "notes": { "type": "string", "description": "Optional extra detail" },
-                    "due_at": { "type": "string", "description": "Optional deadline, RFC3339 with +07:00 offset, e.g. 2026-06-12T09:00:00+07:00" }
+                    "due_at": { "type": "string", "description": "Optional deadline, RFC3339 with +07:00 offset, e.g. 2026-06-12T09:00:00+07:00" },
+                    "priority": { "type": "string", "enum": ["high", "normal", "low"], "description": "Optional importance; default normal" },
+                    "estimate_minutes": { "type": "integer", "description": "Optional rough effort estimate in minutes, for day planning" }
                 },
                 "required": ["title"]
             }
         },
         {
             "name": "list_todos",
-            "description": "List the user's open todos with ids, titles, and due dates.",
+            "description": "List the user's open todos with ids, titles, due dates, priority, and time estimates.",
             "input_schema": { "type": "object", "properties": {} }
         },
         {
@@ -28,6 +30,21 @@ pub fn definitions() -> serde_json::Value {
                 "type": "object",
                 "properties": { "id": { "type": "integer", "description": "Todo id" } },
                 "required": ["id"]
+            }
+        },
+        {
+            "name": "plan_day",
+            "description": "Assemble today's plan: agenda events at their times plus open todos ordered by priority. Use when the user asks to plan the day or what's left today (e.g. 'rencanain hariku', 'sisa hari ini apa aja').",
+            "input_schema": { "type": "object", "properties": {} }
+        },
+        {
+            "name": "rollover_todos",
+            "description": "Move unfinished todos that are overdue or due today to tomorrow (preserving time of day). Call this when the user agrees to the evening review's offer, or asks to push today's leftovers to tomorrow. Omit 'ids' to roll all overdue/today todos.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "ids": { "type": "array", "items": { "type": "integer" }, "description": "Optional specific todo ids to roll; omit to roll all overdue/today todos" }
+                }
             }
         },
         {
@@ -402,7 +419,7 @@ mod tests {
         assert_eq!(
             names,
             vec![
-                "create_todo", "list_todos", "complete_todo",
+                "create_todo", "list_todos", "complete_todo", "plan_day", "rollover_todos",
                 "create_reminder", "list_reminders", "cancel_reminder",
                 "get_portfolio_summary", "search_memory", "remember",
                 "create_event", "list_events", "cancel_event",

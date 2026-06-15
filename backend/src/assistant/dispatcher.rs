@@ -11,6 +11,8 @@ pub async fn dispatch(db: &Db, name: &str, input: &serde_json::Value) -> Result<
         "create_todo" => create_todo(db, input).await,
         "list_todos" => list_todos(db).await,
         "complete_todo" => complete_todo(db, input).await,
+        "plan_day" => plan_day(db).await,
+        "rollover_todos" => rollover_todos(db, input).await,
         "create_reminder" => create_reminder(db, input).await,
         "list_reminders" => list_reminders(db).await,
         "cancel_reminder" => cancel_reminder(db, input).await,
@@ -126,9 +128,35 @@ async fn create_todo(db: &Db, input: &serde_json::Value) -> Result<String, Strin
         }
         None => None,
     };
-    let todo = crate::repo::todos::create(db, title, str_arg(input, "notes"), due_at.as_deref())
-        .await
-        .map_err(|e| format!("db error: {e}"))?;
+    let priority = match str_arg(input, "priority") {
+        Some(p) if matches!(p, "high" | "normal" | "low") => Some(p),
+        Some(p) => return Err(format!("invalid priority '{p}' — use high/normal/low")),
+        None => None,
+    };
+    let estimate_minutes = match input.get("estimate_minutes") {
+        None | Some(serde_json::Value::Null) => None,
+        Some(v) => {
+            let minutes = v
+                .as_i64()
+                .ok_or_else(|| format!("estimate_minutes must be an integer, got {v}"))?;
+            if !(1..=MAX_ESTIMATE_MINUTES).contains(&minutes) {
+                return Err(format!(
+                    "estimate_minutes must be between 1 and {MAX_ESTIMATE_MINUTES}, got {minutes}"
+                ));
+            }
+            Some(minutes)
+        }
+    };
+    let todo = crate::repo::todos::create(
+        db,
+        title,
+        str_arg(input, "notes"),
+        due_at.as_deref(),
+        priority,
+        estimate_minutes,
+    )
+    .await
+    .map_err(|e| format!("db error: {e}"))?;
     Ok(format!("created todo #{} '{}'", todo.id, todo.title))
 }
 
@@ -143,10 +171,48 @@ async fn list_todos(db: &Db) -> Result<String, String> {
         if let Some(due) = &t.due_at {
             out.push_str(&format!(" (due {})", to_wib_display(due)));
         }
+        if let Some(p) = &t.priority {
+            if p != "normal" {
+                out.push_str(&format!(" [{p}]"));
+            }
+        }
+        if let Some(est) = t.estimate_minutes {
+            out.push_str(&format!(" ~{est}m"));
+        }
         if let Some(notes) = &t.notes {
             out.push_str(&format!(" — {notes}"));
         }
         out.push('\n');
+    }
+    Ok(out)
+}
+
+async fn plan_day(db: &Db) -> Result<String, String> {
+    let plan = crate::assistant::proactive::plan::gather(db, chrono::Utc::now())
+        .await
+        .map_err(|e| format!("db error: {e}"))?;
+    Ok(crate::assistant::proactive::plan::render_plan_block(&plan))
+}
+
+async fn rollover_todos(db: &Db, input: &serde_json::Value) -> Result<String, String> {
+    let ids: Option<Vec<i64>> = match input.get("ids") {
+        None | Some(serde_json::Value::Null) => None,
+        Some(serde_json::Value::Array(arr)) => Some(
+            arr.iter()
+                .map(|v| v.as_i64().ok_or_else(|| format!("ids must be integers, got {v}")))
+                .collect::<Result<Vec<_>, _>>()?,
+        ),
+        Some(v) => return Err(format!("ids must be an array of integers, got {v}")),
+    };
+    let moved = crate::repo::todos::rollover(db, ids.as_deref(), chrono::Utc::now())
+        .await
+        .map_err(|e| format!("db error: {e}"))?;
+    if moved.is_empty() {
+        return Ok("nggak ada todo yang perlu digeser".into());
+    }
+    let mut out = format!("{} todo digeser ke besok:\n", moved.len());
+    for t in moved {
+        out.push_str(&format!("- #{} {}\n", t.id, t.title));
     }
     Ok(out)
 }
@@ -282,6 +348,10 @@ async fn remember(input: &serde_json::Value) -> Result<String, String> {
         .map_err(|e| format!("could not save the note: {e}"))?;
     Ok("noted — saved to long-term memory".into())
 }
+
+/// Upper bound for a todo effort estimate (one week of minutes), mirroring the
+/// event reminder ceiling — guards against hallucinated absurd values.
+const MAX_ESTIMATE_MINUTES: i64 = 7 * 24 * 60;
 
 /// Default lead time for the automatic pre-event reminder.
 const DEFAULT_EVENT_REMIND_MINUTES: i64 = 30;
@@ -1274,15 +1344,26 @@ mod tests {
     async fn list_todos_renders_rows_or_empty_note() {
         let db = mem_db().await;
         assert_eq!(dispatch(&db, "list_todos", &serde_json::json!({})).await.unwrap(), "no open todos");
-        crate::repo::todos::create(&db, "beli kado", None, None).await.unwrap();
+        crate::repo::todos::create(&db, "beli kado", None, None, None, None).await.unwrap();
         let out = dispatch(&db, "list_todos", &serde_json::json!({})).await.unwrap();
         assert!(out.contains("beli kado"), "{out}");
     }
 
     #[tokio::test]
+    async fn list_todos_renders_priority_and_estimate() {
+        let db = mem_db().await;
+        crate::repo::todos::create(&db, "deck", None, None, Some("high"), Some(45)).await.unwrap();
+        crate::repo::todos::create(&db, "santai", None, None, Some("normal"), None).await.unwrap();
+        let out = dispatch(&db, "list_todos", &serde_json::json!({})).await.unwrap();
+        assert!(out.contains("[high]"), "{out}");
+        assert!(out.contains("~45m"), "{out}");
+        assert!(!out.contains("[normal]"), "{out}");
+    }
+
+    #[tokio::test]
     async fn complete_todo_round_trips_and_errors_when_done() {
         let db = mem_db().await;
-        let todo = crate::repo::todos::create(&db, "x", None, None).await.unwrap();
+        let todo = crate::repo::todos::create(&db, "x", None, None, None, None).await.unwrap();
         let out = dispatch(&db, "complete_todo", &serde_json::json!({ "id": todo.id })).await.unwrap();
         assert!(out.contains("done"), "{out}");
         let err = dispatch(&db, "complete_todo", &serde_json::json!({ "id": todo.id })).await.unwrap_err();
@@ -1667,6 +1748,29 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn create_todo_stores_priority_and_estimate() {
+        let db = mem_db().await;
+        dispatch(&db, "create_todo", &serde_json::json!({
+            "title": "siapin deck",
+            "priority": "high",
+            "estimate_minutes": 45
+        })).await.unwrap();
+        let todos = crate::repo::todos::list_open(&db).await.unwrap();
+        assert_eq!(todos[0].priority.as_deref(), Some("high"));
+        assert_eq!(todos[0].estimate_minutes, Some(45));
+    }
+
+    #[tokio::test]
+    async fn create_todo_rejects_bad_priority() {
+        let db = mem_db().await;
+        let err = dispatch(&db, "create_todo", &serde_json::json!({
+            "title": "x", "priority": "urgent"
+        })).await.unwrap_err();
+        assert!(err.contains("priority"), "{err}");
+        assert!(err.contains("high/normal/low"), "{err}");
+    }
+
+    #[tokio::test]
     async fn create_account_requires_name() {
         let db = crate::db::connect("sqlite::memory:").await.unwrap();
         let err = dispatch(&db, "create_account", &serde_json::json!({
@@ -2007,6 +2111,44 @@ mod tests {
         clickup_create_task(&fake, &serde_json::json!({ "project": "PT AIS", "title": "x" })).await.unwrap();
         assert_eq!(fake.created_billables.lock().unwrap()[0], None);
         assert_eq!(fake.created_amounts.lock().unwrap()[0], None);
+    }
+
+    #[tokio::test]
+    async fn rollover_todos_default_moves_overdue_and_reports() {
+        let db = mem_db().await;
+        let yesterday = (chrono::Utc::now() - chrono::Duration::days(1)).to_rfc3339();
+        crate::repo::todos::create(&db, "kelar besok", None, Some(&yesterday), None, None).await.unwrap();
+        let out = dispatch(&db, "rollover_todos", &serde_json::json!({})).await.unwrap();
+        assert!(out.contains("kelar besok"), "{out}");
+        assert!(out.contains("digeser"), "{out}");
+    }
+
+    #[tokio::test]
+    async fn rollover_todos_reports_when_nothing_to_move() {
+        let db = mem_db().await;
+        let out = dispatch(&db, "rollover_todos", &serde_json::json!({})).await.unwrap();
+        assert!(out.contains("nggak ada"), "{out}");
+    }
+
+    #[tokio::test]
+    async fn rollover_todos_rejects_malformed_ids() {
+        let db = mem_db().await;
+        let scalar = dispatch(&db, "rollover_todos", &serde_json::json!({ "ids": 5 })).await.unwrap_err();
+        assert!(scalar.contains("ids"), "{scalar}");
+        let bad_elem = dispatch(&db, "rollover_todos", &serde_json::json!({ "ids": ["x"] })).await.unwrap_err();
+        assert!(bad_elem.contains("ids"), "{bad_elem}");
+    }
+
+    #[tokio::test]
+    async fn plan_day_returns_block_with_ordered_todos() {
+        let db = mem_db().await;
+        crate::repo::todos::create(&db, "kerja low", None, None, Some("low"), None).await.unwrap();
+        crate::repo::todos::create(&db, "kerja high", None, None, Some("high"), None).await.unwrap();
+        let out = dispatch(&db, "plan_day", &serde_json::json!({})).await.unwrap();
+        assert!(out.contains("Rencana hari"), "{out}");
+        let hi = out.find("kerja high").unwrap();
+        let lo = out.find("kerja low").unwrap();
+        assert!(hi < lo, "{out}");
     }
 
     #[tokio::test]

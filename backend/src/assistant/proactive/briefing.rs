@@ -63,19 +63,6 @@ async fn gather_clickup_due(
     Ok(grouped)
 }
 
-/// Indonesian weekday name for the briefing header.
-fn weekday_id(day: chrono::Weekday) -> &'static str {
-    match day {
-        chrono::Weekday::Mon => "Senin",
-        chrono::Weekday::Tue => "Selasa",
-        chrono::Weekday::Wed => "Rabu",
-        chrono::Weekday::Thu => "Kamis",
-        chrono::Weekday::Fri => "Jumat",
-        chrono::Weekday::Sat => "Sabtu",
-        chrono::Weekday::Sun => "Minggu",
-    }
-}
-
 /// Split open todos into due-today and overdue by their WIB calendar date.
 fn classify_todos(open_todos: Vec<TodoRow>, today_wib: &str) -> (Vec<TodoRow>, Vec<TodoRow>) {
     let (mut due_today, mut overdue) = (Vec::new(), Vec::new());
@@ -105,6 +92,8 @@ pub async fn gather(db: &Db) -> anyhow::Result<BriefingData> {
 
     let open_todos = crate::repo::todos::list_open(db).await?;
     let (todos_due_today, todos_overdue) = classify_todos(open_todos, &today);
+    let todos_due_today = super::plan::order_todos(todos_due_today);
+    let todos_overdue = super::plan::order_todos(todos_overdue);
 
     let reminders_today = crate::repo::reminders::list_pending(db)
         .await?
@@ -122,14 +111,7 @@ pub async fn gather(db: &Db) -> anyhow::Result<BriefingData> {
         .collect();
 
     // Today's WIB calendar day expressed as a UTC range.
-    let day_start = now_wib
-        .date_naive()
-        .and_hms_opt(0, 0, 0)
-        .expect("midnight is valid")
-        .and_local_timezone(crate::assistant::time::wib())
-        .single()
-        .expect("WIB has no DST gaps")
-        .with_timezone(&chrono::Utc);
+    let day_start = crate::assistant::time::start_of_today_wib(now_wib.with_timezone(&chrono::Utc));
     let events_today = crate::repo::events::list_between(
         db,
         &crate::assistant::time::to_db_utc(day_start),
@@ -172,7 +154,7 @@ pub async fn gather(db: &Db) -> anyhow::Result<BriefingData> {
                 .search(
                     &format!(
                         "hal penting hari ini {} {today}",
-                        weekday_id(now_wib.weekday())
+                        crate::assistant::time::weekday_id(now_wib.weekday())
                     ),
                     5,
                 )
@@ -205,7 +187,7 @@ pub async fn gather(db: &Db) -> anyhow::Result<BriefingData> {
 
     Ok(BriefingData {
         date_wib: today,
-        weekday: weekday_id(now_wib.weekday()).to_string(),
+        weekday: crate::assistant::time::weekday_id(now_wib.weekday()).to_string(),
         todos_due_today,
         todos_overdue,
         reminders_today,
@@ -439,6 +421,8 @@ mod tests {
             status: "open".into(),
             created_at: String::new(),
             completed_at: None,
+            priority: None,
+            estimate_minutes: None,
         }];
         d.pending_reviews = 2;
         d.memory_facts = vec![crate::assistant::memory::MemoryFact {
@@ -494,6 +478,8 @@ mod tests {
             status: "open".into(),
             created_at: String::new(),
             completed_at: None,
+            priority: None,
+            estimate_minutes: None,
         }
     }
 

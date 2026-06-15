@@ -15,6 +15,7 @@ const RECAP_MONDAY_GRACE_END_HOUR: u32 = 9;
 pub struct ProactiveConfig {
     pub briefing_hour: Option<u32>,
     pub recap_hour: Option<u32>,
+    pub evening_review_hour: Option<u32>,
     pub monthly_recap_hour: Option<u32>,
     pub mover_alert_pct: f64,
     pub milestone_step_idr: i64,
@@ -40,6 +41,7 @@ impl ProactiveConfig {
         Self {
             briefing_hour: parse_hour(std::env::var("BRIEFING_HOUR_WIB").ok(), 7),
             recap_hour: parse_hour(std::env::var("RECAP_HOUR_WIB").ok(), 17),
+            evening_review_hour: parse_hour(std::env::var("EVENING_REVIEW_HOUR_WIB").ok(), 21),
             monthly_recap_hour: parse_hour(std::env::var("MONTHLY_RECAP_HOUR_WIB").ok(), 8),
             mover_alert_pct: std::env::var("MOVER_ALERT_PCT")
                 .ok()
@@ -60,6 +62,21 @@ pub fn briefing_due(now_wib: DateTime<FixedOffset>, briefing_hour: Option<u32>) 
     let h = now_wib.hour();
     if h >= hour && h < hour + GRACE_HOURS {
         Some(format!("briefing:{}", now_wib.format("%Y-%m-%d")))
+    } else {
+        None
+    }
+}
+
+/// Dedup key when the evening review is due, else None. Same fixed-hour grace
+/// window as the briefing; the day is forfeited past the window.
+pub fn evening_review_due(
+    now_wib: DateTime<FixedOffset>,
+    review_hour: Option<u32>,
+) -> Option<String> {
+    let hour = review_hour?;
+    let h = now_wib.hour();
+    if h >= hour && h < hour + GRACE_HOURS {
+        Some(format!("evening_review:{}", now_wib.format("%Y-%m-%d")))
     } else {
         None
     }
@@ -111,6 +128,14 @@ pub async fn run_once(
         if crate::repo::proactive_log::try_claim(db, "recap", &key).await? {
             if let Err(e) = super::recap::run(db, client, link.chat_id).await {
                 tracing::warn!("recap for {key} forfeited: {e:#}");
+            }
+        }
+    }
+
+    if let Some(key) = evening_review_due(now_wib, config.evening_review_hour) {
+        if crate::repo::proactive_log::try_claim(db, "evening_review", &key).await? {
+            if let Err(e) = super::evening_review::run(db, client, link.chat_id).await {
+                tracing::warn!("evening review for {key} forfeited: {e:#}");
             }
         }
     }
@@ -234,6 +259,7 @@ mod tests {
         assert_eq!(config.monthly_recap_hour, Some(8));
         assert!((config.mover_alert_pct - 5.0).abs() < f64::EPSILON);
         assert_eq!(config.milestone_step_idr, 50_000_000);
+        assert_eq!(config.evening_review_hour, Some(21));
     }
 
     #[test]
@@ -277,6 +303,22 @@ mod tests {
         assert_eq!(parse_hour(Some("25".into()), 7), Some(7));
     }
 
+    #[test]
+    fn evening_review_due_inside_the_window_only() {
+        // default hour 21, grace 5h → due 21:00..02:00-clamped (window does not wrap).
+        assert_eq!(evening_review_due(wib(2026, 6, 12, 20, 59), Some(21)), None);
+        assert_eq!(
+            evening_review_due(wib(2026, 6, 12, 21, 0), Some(21)),
+            Some("evening_review:2026-06-12".to_string())
+        );
+        assert_eq!(
+            evening_review_due(wib(2026, 6, 12, 23, 59), Some(21)),
+            Some("evening_review:2026-06-12".to_string())
+        );
+        // Disabled.
+        assert_eq!(evening_review_due(wib(2026, 6, 12, 21, 30), None), None);
+    }
+
     #[tokio::test]
     async fn run_once_claims_and_survives_an_empty_db_without_a_client() {
         // With no telegram link, run_once must be a clean no-op.
@@ -284,6 +326,7 @@ mod tests {
         let config = ProactiveConfig {
             briefing_hour: Some(0), // "always due" for this test
             recap_hour: Some(0),
+            evening_review_hour: Some(0),
             monthly_recap_hour: Some(0),
             mover_alert_pct: 5.0,
             milestone_step_idr: 50_000_000,
