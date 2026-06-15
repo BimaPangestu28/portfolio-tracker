@@ -49,8 +49,8 @@ export default function ChatPage() {
       {/* Header */}
       <div className="flex items-center justify-between" style={{ marginBottom: 12 }}>
         <div>
-          <h1 className="t-h1">Chat</h1>
-          <div className="t-sm t-muted">Tanya jawab portofolio</div>
+          <h1 className="t-h1">Noah</h1>
+          <div className="t-sm t-muted">Asisten pribadi kamu</div>
         </div>
         <span className={waConnected ? "badge badge-gain" : "badge"}>
           <span className="badge-dot" style={{ background: "currentColor" }} />

@@ -4,8 +4,8 @@
  * Layout: auth-shell (CSS grid 1.05fr / 1fr) — aside left, form right.
  *
  * Aside:
- *   - Brand mark (pie icon gradient box) + "Portfolio"
- *   - Tagline: "Portofolio kamu, satu tampilan yang tenang."
+ *   - Brand mark (sparkles gradient box) + "Noah"
+ *   - Tagline: "Asisten pribadi kamu, dalam satu tempat yang tenang."
  *   - Features: shield (Privat & self-hosted), scale (Dual currency), chat (WhatsApp)
  *   - Radial gradient + grid overlay via CSS (auth-aside::after)
  *   - © catalystlabs.id footer
@@ -19,7 +19,7 @@ import { useState, useRef, type FormEvent } from "react";
 import {
   Eye,
   EyeOff,
-  PieChart as PieIcon,
+  Sparkles as PieIcon,
   Shield,
   Scale,
   MessageCircle,
@@ -48,7 +48,7 @@ const FEATURES = [
   {
     icon: MessageCircle,
     title: "Sinkron lewat WhatsApp",
-    desc: "Tanya portofolio dari mana saja.",
+    desc: "Tanya Noah dari mana saja.",
   },
 ];
 
@@ -62,12 +62,12 @@ function BrandAside() {
         <div className="auth-aside-mark">
           <PieIcon size={22} strokeWidth={2} />
         </div>
-        <span className="auth-aside-name">Portfolio</span>
+        <span className="auth-aside-name">Noah</span>
       </div>
 
       {/* Middle: tagline + features */}
       <div className="flex col gap-8">
-        <h1 className="auth-tag">Portofolio kamu, satu tampilan yang tenang.</h1>
+        <h1 className="auth-tag">Asisten pribadi kamu, dalam satu tempat yang tenang.</h1>
         <div className="auth-feat">
           {FEATURES.map((f) => (
             <div className="auth-feat-row" key={f.title}>
@@ -148,7 +148,7 @@ function LoginForm() {
           <PieIcon size={19} strokeWidth={2} />
         </div>
         <span className="auth-aside-name" style={{ fontSize: 17 }}>
-          Portfolio
+          Noah
         </span>
       </div>
 

@@ -15,7 +15,7 @@ export default defineConfig({
       manifest: {
         name: "Noah",
         short_name: "Noah",
-        description: "Lacak portofolio investasi & tanya jawab dengan asisten.",
+        description: "Noah — asisten pribadi: tugas, agenda, & keuangan.",
         lang: "id",
         theme_color: "#2977f5",
         background_color: "#ffffff",
