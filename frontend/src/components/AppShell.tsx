@@ -16,7 +16,6 @@ import {
   CalendarDays,
   Banknote,
   Inbox,
-  MessageSquare,
   Menu,
   X,
   RefreshCw,
@@ -42,21 +41,39 @@ interface NavItem {
   end?: boolean;
 }
 
-const NAV_ITEMS: NavItem[] = [
-  { to: "/",          label: "Dashboard",  icon: LayoutDashboard, end: true },
-  { to: "/portfolio", label: "Portofolio", icon: Wallet },
-  { to: "/planner",   label: "Rencana",    icon: Target },
-  { to: "/agenda",   label: "Agenda",     icon: CalendarDays },
-  { to: "/budget",    label: "Budget",     icon: Banknote },
-  { to: "/data",      label: "Data",       icon: Inbox },
-  { to: "/chat",      label: "Chat",       icon: MessageSquare },
+interface NavGroup {
+  title: string;
+  items: NavItem[];
+}
+
+const NAV_GROUPS: NavGroup[] = [
+  {
+    title: "Asisten",
+    items: [
+      { to: "/chat",    label: "Noah",      icon: Sparkles },
+      { to: "/",        label: "Dashboard", icon: LayoutDashboard, end: true },
+      { to: "/agenda",  label: "Agenda",    icon: CalendarDays },
+      { to: "/planner", label: "Rencana",   icon: Target },
+      { to: "/budget",  label: "Budget",    icon: Banknote },
+    ],
+  },
+  {
+    title: "Keuangan",
+    items: [
+      { to: "/portfolio", label: "Portofolio", icon: Wallet },
+      { to: "/data",      label: "Data",       icon: Inbox },
+    ],
+  },
 ];
+
+/** Flat list of every nav item, for lookups (page title, bottom nav). */
+const NAV_ITEMS: NavItem[] = NAV_GROUPS.flatMap((g) => g.items);
 
 /** Settings lives in the sidebar footer, not the main nav. */
 const SETTINGS_ITEM: NavItem = { to: "/settings", label: "Pengaturan", icon: Settings };
 
 /** Bottom nav shows first 4 + "More" (opens sheet) */
-const BOTTOM_KEYS = ["/", "/portfolio", "/budget", "/chat"];
+const BOTTOM_KEYS = ["/chat", "/", "/agenda", "/budget"];
 
 /* ── Small primitives ───────────────────────────────────────────────── */
 
@@ -90,22 +107,34 @@ function NavList({ collapsed, onNavigate }: { collapsed?: boolean; onNavigate?: 
 
   return (
     <nav className="pt-nav">
-      {NAV_ITEMS.map((item) => {
-        const active = isActive(item);
-        return (
-          <NavLink
-            key={item.to}
-            to={item.to}
-            end={item.end}
-            title={collapsed ? item.label : undefined}
-            className={cn("pt-nav-item", active && "active")}
-            onClick={onNavigate}
-          >
-            <item.icon size={18} strokeWidth={active ? 2.2 : 1.8} />
-            <span className="pt-nav-label">{item.label}</span>
-          </NavLink>
-        );
-      })}
+      {NAV_GROUPS.map((group) => (
+        <div key={group.title} className="pt-nav-group">
+          {!collapsed && (
+            <div
+              className="pt-nav-group-label"
+              style={{ padding: "10px 12px 4px", fontSize: 11, textTransform: "uppercase", letterSpacing: "0.04em", color: "hsl(var(--muted-foreground))" }}
+            >
+              {group.title}
+            </div>
+          )}
+          {group.items.map((item) => {
+            const active = isActive(item);
+            return (
+              <NavLink
+                key={item.to}
+                to={item.to}
+                end={item.end}
+                title={collapsed ? item.label : undefined}
+                className={cn("pt-nav-item", active && "active")}
+                onClick={onNavigate}
+              >
+                <item.icon size={18} strokeWidth={active ? 2.2 : 1.8} />
+                <span className="pt-nav-label">{item.label}</span>
+              </NavLink>
+            );
+          })}
+        </div>
+      ))}
     </nav>
   );
 }

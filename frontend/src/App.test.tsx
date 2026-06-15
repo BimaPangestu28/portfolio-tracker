@@ -46,7 +46,7 @@ test("renders 6-item nav items", () => {
   expect(screen.getAllByText("Rencana").length).toBeGreaterThan(0);
   expect(screen.getAllByText("Budget").length).toBeGreaterThan(0);
   expect(screen.getAllByText("Data").length).toBeGreaterThan(0);
-  expect(screen.getAllByText("Chat").length).toBeGreaterThan(0);
+  expect(screen.getAllByText("Noah").length).toBeGreaterThan(0);
 });
 
 test("consolidated pages are not standalone nav items", () => {
