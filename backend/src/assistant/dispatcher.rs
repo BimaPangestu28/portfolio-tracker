@@ -66,8 +66,29 @@ pub async fn dispatch(db: &Db, name: &str, input: &serde_json::Value) -> Result<
             Ok(api) => clickup_add_time_entry(&api, input).await,
             Err(e) => Err(format!("clickup belum dikonfigurasi: {e}")),
         },
+        "draft_proposal" => draft_proposal(input).await,
         "list_clients" => invoice_list_clients(db).await,
         "create_invoice" => invoice_create(db, input).await,
+        "capture_to_inbox" => capture_to_inbox(db, input).await,
+        "list_inbox" => list_inbox(db).await,
+        "resolve_inbox" => resolve_inbox(db, input).await,
+        "list_emails" => match crate::google::engine::current_access_token(db).await {
+            Ok(token) => gmail_list_emails(&crate::google::gmail::HttpGmail::new(token), input).await,
+            Err(_) => Err("Gmail belum tersambung — sambungin Google dulu di web UI".into()),
+        },
+        "read_email" => match crate::google::engine::current_access_token(db).await {
+            Ok(token) => gmail_read_email(&crate::google::gmail::HttpGmail::new(token), input).await,
+            Err(_) => Err("Gmail belum tersambung — sambungin Google dulu di web UI".into()),
+        },
+        "draft_reply" => match crate::google::engine::current_access_token(db).await {
+            Ok(token) => gmail_draft_reply(&crate::google::gmail::HttpGmail::new(token), input).await,
+            Err(_) => Err("Gmail belum tersambung — sambungin Google dulu di web UI".into()),
+        },
+        "cashflow_summary" => cashflow_summary(db, input).await,
+        "portfolio_insights" => portfolio_insights(db).await,
+        "set_price_alert" => set_price_alert(db, input).await,
+        "list_price_alerts" => list_price_alerts(db).await,
+        "cancel_price_alert" => cancel_price_alert(db, input).await,
         _ => Err(format!("unknown tool: {name}")),
     }
 }
@@ -239,6 +260,15 @@ async fn search_memory(input: &serde_json::Value) -> Result<String, String> {
         out.push('\n');
     }
     Ok(out)
+}
+
+/// Draft an Upwork proposal from a pasted job. Validation only here; the
+/// memory + LLM work lives in `assistant::proposal`.
+async fn draft_proposal(input: &serde_json::Value) -> Result<String, String> {
+    let job_text = str_arg(input, "job_text")
+        .ok_or("missing required argument 'job_text' — paste the job description")?;
+    let notes = str_arg(input, "notes");
+    Ok(super::proposal::draft(job_text, notes).await)
 }
 
 async fn remember(input: &serde_json::Value) -> Result<String, String> {
@@ -788,6 +818,13 @@ async fn list_pending_reviews(db: &Db) -> Result<String, String> {
         }
         out.push('\n');
     }
+    // The instrument/account above are auto-detected from the photo, not
+    // authoritative — signal that the assistant may correct a wrong one rather
+    // than treat the detection as final.
+    out.push_str(
+        "(instrumen & akun di atas hasil deteksi otomatis dari foto, bukan final — \
+         kalau ada yang salah, override dengan account_id/instrument_id yang benar saat confirm_review)\n",
+    );
     Ok(out)
 }
 
@@ -808,6 +845,385 @@ async fn confirm_review(db: &Db, input: &serde_json::Value) -> Result<String, St
         .await
         .map_err(|e| format!("{e}"))?;
     Ok(format!("transaksi #{txn_id} dibuat dari review #{review_id}"))
+}
+
+async fn capture_to_inbox(db: &Db, input: &serde_json::Value) -> Result<String, String> {
+    let content = str_arg(input, "content").ok_or("missing required argument 'content'")?;
+    let row = crate::repo::inbox::create(db, content).await.map_err(|e| format!("db error: {e}"))?;
+    Ok(format!("dicatat ke inbox (#{})", row.id))
+}
+
+async fn list_inbox(db: &Db) -> Result<String, String> {
+    let rows = crate::repo::inbox::list_pending(db).await.map_err(|e| format!("db error: {e}"))?;
+    if rows.is_empty() {
+        return Ok("inbox kosong".into());
+    }
+    let mut out = String::new();
+    for row in rows {
+        out.push_str(&format!("#{} {}\n", row.id, row.content));
+    }
+    Ok(out)
+}
+
+async fn gmail_list_emails(api: &dyn crate::google::gmail::GmailApi, input: &serde_json::Value) -> Result<String, String> {
+    let max = input.get("max").and_then(|v| v.as_u64()).unwrap_or(10).min(25) as u32;
+    let emails = api.list_important_unread(max).await.map_err(|e| format!("{e}"))?;
+    if emails.is_empty() {
+        return Ok("nggak ada email penting yang belum dibaca".into());
+    }
+    let mut out = String::new();
+    for e in emails {
+        let subject = e.subject.replace('\n', " ");
+        let snippet = e.snippet.replace('\n', " ");
+        out.push_str(&format!("[{}] {} — {} — {}\n", e.id, e.from, subject, snippet));
+    }
+    Ok(out)
+}
+
+async fn gmail_read_email(api: &dyn crate::google::gmail::GmailApi, input: &serde_json::Value) -> Result<String, String> {
+    let id = str_arg(input, "id").ok_or("missing required argument 'id'")?;
+    let m = api.get_message(id).await.map_err(|e| format!("{e}"))?;
+    Ok(format!("Dari: {}\nSubjek: {}\n\n{}", m.from, m.subject, m.body))
+}
+
+async fn gmail_draft_reply(api: &dyn crate::google::gmail::GmailApi, input: &serde_json::Value) -> Result<String, String> {
+    let id = str_arg(input, "id").ok_or("missing required argument 'id'")?;
+    let body = str_arg(input, "body").ok_or("missing required argument 'body'")?;
+    let m = api.get_message(id).await.map_err(|e| format!("{e}"))?;
+    api.create_draft(&m.thread_id, &m.from, &m.subject, body).await.map_err(|e| format!("{e}"))?;
+    Ok(format!("draft balasan ke {} disimpan di Gmail — cek & kirim dari sana", m.from))
+}
+
+/// Returns `true` when `m` looks like a valid YYYY-MM month string.
+///
+/// Accepts exactly 7 characters: four ASCII digits, a hyphen, two ASCII
+/// digits — e.g. "2026-06". Does not validate calendar range (that is
+/// enforced downstream by the DB query or the service layer).
+fn valid_month(m: &str) -> bool {
+    m.len() == 7
+        && m.as_bytes()[4] == b'-'
+        && m[..4].bytes().all(|b| b.is_ascii_digit())
+        && m[5..].bytes().all(|b| b.is_ascii_digit())
+}
+
+/// Summarise the current (or given) month's cashflow: money in, money out,
+/// net, top 3 expense categories, and total freelance invoiced that month.
+/// Invoiced amount is shown separately — not added to income — because it
+/// represents amounts billed, not necessarily received.
+async fn cashflow_summary(db: &Db, input: &serde_json::Value) -> Result<String, String> {
+    // Resolve the target month: explicit arg or current WIB month.
+    let month: String = match str_arg(input, "month") {
+        Some(m) => {
+            if !valid_month(m) {
+                return Err("format bulan harus YYYY-MM, mis. 2026-06".into());
+            }
+            m.to_string()
+        }
+        None => chrono::Utc::now()
+            .with_timezone(&super::time::wib())
+            .format("%Y-%m")
+            .to_string(),
+    };
+
+    // Load cashflow rows for the month.
+    let cashflow_rows = crate::repo::cashflow::list_for_month(db, &month)
+        .await
+        .map_err(|e| format!("db error: {e}"))?;
+
+    // Load cashflow categories (income/expense, with optional monthly budget).
+    let category_rows = crate::repo::cashflow_categories::list(db)
+        .await
+        .map_err(|e| format!("db error: {e}"))?;
+
+    // Map CashflowRow → CfRow (the service layer struct).
+    // Use unwrap_or(ZERO) so a malformed amount string never silently drops a
+    // row from the totals — consistent with how portfolio_insights handles it.
+    let cf_rows: Vec<crate::service::cashflow::CfRow> = cashflow_rows
+        .iter()
+        .map(|row| crate::service::cashflow::CfRow {
+            direction: row.direction.clone(),
+            amount: crate::repo::dec(&row.amount).unwrap_or(rust_decimal::Decimal::ZERO),
+            category_id: row.category_id,
+        })
+        .collect();
+
+    // Map CashflowCategoryRow → CatRow with the real kind and optional budget.
+    let cat_rows: Vec<crate::service::cashflow::CatRow> = category_rows
+        .iter()
+        .map(|cat| crate::service::cashflow::CatRow {
+            id: cat.id,
+            name: cat.name.clone(),
+            kind: cat.kind.clone(),
+            budget: cat.monthly_budget.as_deref().and_then(|s| s.parse::<rust_decimal::Decimal>().ok()),
+        })
+        .collect();
+
+    let summary = crate::service::cashflow::month_summary(&month, &cf_rows, &cat_rows);
+
+    // Sum invoices issued in this month.
+    let all_invoices = crate::repo::invoices::list_all(db)
+        .await
+        .map_err(|e| format!("db error: {e}"))?;
+    let invoiced_total: rust_decimal::Decimal = all_invoices
+        .iter()
+        .filter(|inv| inv.issue_date.starts_with(&month))
+        .filter_map(|inv| crate::repo::dec(&inv.total).ok())
+        .fold(rust_decimal::Decimal::ZERO, |acc, amount| acc + amount);
+
+    // Render the summary using Indonesian number formatting.
+    let format_amount = |d: &rust_decimal::Decimal| {
+        crate::service::chat::group_id(&d.round_dp(0))
+    };
+
+    let mut output = format!(
+        "Bulan {month}: masuk Rp {}, kepake Rp {}, net Rp {}\n",
+        format_amount(&summary.total_in),
+        format_amount(&summary.total_out),
+        format_amount(&summary.net),
+    );
+
+    // Top 3 expense categories sorted by actual spending (descending).
+    // Categories with zero actual spend are excluded so an empty category
+    // never produces a misleading "- Health: Rp 0" line.
+    let mut expense_categories: Vec<&crate::service::cashflow::CategoryLine> = summary
+        .categories
+        .iter()
+        .filter(|cat| cat.kind == "expense" && cat.actual > rust_decimal::Decimal::ZERO)
+        .collect();
+    expense_categories.sort_by(|a, b| b.actual.cmp(&a.actual));
+    for category in expense_categories.iter().take(3) {
+        output.push_str(&format!(
+            "- {}: Rp {}\n",
+            category.name,
+            format_amount(&category.actual),
+        ));
+    }
+
+    // Show freelance invoiced total only when it is non-zero.
+    if invoiced_total > rust_decimal::Decimal::ZERO {
+        output.push_str(&format!(
+            "Freelance diinvoice: Rp {}\n",
+            format_amount(&invoiced_total),
+        ));
+    }
+
+    Ok(output)
+}
+
+/// Compute a portfolio health snapshot: net worth in IDR, biggest position
+/// concentration as a percentage of net worth, and the current month's savings
+/// rate derived from cashflow rows.
+///
+/// Returns at minimum the net-worth line so an empty database still produces a
+/// non-empty, human-readable result.
+async fn portfolio_insights(db: &Db) -> Result<String, String> {
+    let summary = crate::service::portfolio::build_summary(db)
+        .await
+        .map_err(|e| format!("db error: {e}"))?;
+
+    let net = summary.net_worth_idr;
+    let mut output = format!(
+        "Net worth: Rp {}\n",
+        crate::service::chat::group_id(&net.round_dp(0))
+    );
+
+    // Build (symbol, market_value_idr) pairs using the instrument list for
+    // symbol resolution — Position only carries instrument_id.
+    let instruments = crate::repo::instruments::list(db)
+        .await
+        .map_err(|e| format!("db error: {e}"))?;
+    let instrument_symbol_map: std::collections::HashMap<i64, String> = instruments
+        .iter()
+        .map(|i| (i.id, i.symbol.clone()))
+        .collect();
+
+    let symbol_values: Vec<(String, rust_decimal::Decimal)> = summary
+        .positions
+        .iter()
+        .filter_map(|p| {
+            instrument_symbol_map
+                .get(&p.instrument_id)
+                .map(|symbol| (symbol.clone(), p.market_value_idr))
+        })
+        .collect();
+
+    // Only show concentration when net worth is non-zero — concentration() can
+    // return Some with pct=0 when net worth is zero, which would print a
+    // misleading "X (0%)" line on an empty/zero portfolio.
+    if !net.is_zero() {
+        if let Some(concentration) =
+            crate::service::insights::concentration(&symbol_values, net)
+        {
+            output.push_str(&format!(
+                "Konsentrasi terbesar: {} ({}%)\n",
+                concentration.symbol,
+                concentration.pct.round_dp(0),
+            ));
+        }
+    }
+
+    // Savings rate from cashflow rows for the current WIB month.
+    let current_month = chrono::Utc::now()
+        .with_timezone(&crate::assistant::time::wib())
+        .format("%Y-%m")
+        .to_string();
+
+    let cashflow_rows = crate::repo::cashflow::list_for_month(db, &current_month)
+        .await
+        .map_err(|e| format!("db error: {e}"))?;
+    let mut total_income = rust_decimal::Decimal::ZERO;
+    let mut total_expense = rust_decimal::Decimal::ZERO;
+    for row in &cashflow_rows {
+        let amount = crate::repo::dec(&row.amount).unwrap_or(rust_decimal::Decimal::ZERO);
+        if row.direction == "in" {
+            total_income += amount;
+        } else if row.direction == "out" {
+            total_expense += amount;
+        }
+    }
+    if total_income > rust_decimal::Decimal::ZERO {
+        let savings_rate =
+            crate::service::insights::savings_rate(total_income, total_expense);
+        output.push_str(&format!(
+            "Savings rate bulan ini: {}%\n",
+            savings_rate.round_dp(0),
+        ));
+    }
+
+    Ok(output)
+}
+
+/// Resolve an instrument by name/symbol (case-insensitive).
+///
+/// Returns `(id, symbol)` if found, or an error message in Indonesian.
+async fn resolve_instrument(db: &Db, name: &str) -> Result<(i64, String), String> {
+    let instruments =
+        crate::repo::instruments::list(db).await.map_err(|e| format!("db error: {e}"))?;
+    let matched = instruments.iter().find(|i| {
+        i.symbol.eq_ignore_ascii_case(name) || i.name.eq_ignore_ascii_case(name)
+    });
+    match matched {
+        Some(i) => Ok((i.id, i.symbol.clone())),
+        None => Err(format!("instrumen '{name}' nggak ketemu")),
+    }
+}
+
+/// Set a price alert on an instrument.
+///
+/// Accepts either an absolute `target` price or a `percent` offset from the
+/// current price (requires a `direction` of "above" or "below").
+async fn set_price_alert(db: &Db, input: &serde_json::Value) -> Result<String, String> {
+    let instrument_name =
+        str_arg(input, "instrument").ok_or("missing required argument 'instrument'")?;
+    let (instrument_id, symbol) = resolve_instrument(db, instrument_name).await?;
+
+    // Resolve direction: explicit arg wins; otherwise error — we never silently default.
+    let direction = match str_arg(input, "direction") {
+        Some(d) if d == "above" || d == "below" => d.to_string(),
+        Some(other) => {
+            return Err(format!(
+                "direction '{other}' tidak valid — gunakan 'above' atau 'below'"
+            ))
+        }
+        None => {
+            return Err(
+                "direction wajib diisi — gunakan 'above' (naik) atau 'below' (turun)".into(),
+            )
+        }
+    };
+
+    // Compute target price.
+    let target: rust_decimal::Decimal = if let Some(target_val) = input.get("target").and_then(|v| v.as_f64()) {
+        rust_decimal::Decimal::try_from(target_val)
+            .map_err(|_| format!("target '{target_val}' tidak valid"))?
+    } else if let Some(pct_val) = input.get("percent").and_then(|v| v.as_f64()) {
+        let current_price = match crate::repo::prices::latest(db, instrument_id)
+            .await
+            .map_err(|e| format!("db error: {e}"))?
+        {
+            Some(p) => p.price,
+            None => {
+                return Err(format!(
+                    "harga {symbol} belum ada, nggak bisa hitung dari persen"
+                ))
+            }
+        };
+        let pct = rust_decimal::Decimal::try_from(pct_val)
+            .map_err(|_| format!("percent '{pct_val}' tidak valid"))?;
+        let hundred = rust_decimal::Decimal::from(100u32);
+        match direction.as_str() {
+            "below" => current_price * (rust_decimal::Decimal::ONE - pct / hundred),
+            "above" => current_price * (rust_decimal::Decimal::ONE + pct / hundred),
+            _ => unreachable!(),
+        }
+    } else {
+        return Err("butuh 'target' (harga absolut) atau 'percent' (persen dari harga sekarang)".into());
+    };
+
+    crate::repo::price_alerts::create(db, instrument_id, &target.to_string(), &direction)
+        .await
+        .map_err(|e| format!("db error: {e}"))?;
+
+    Ok(format!(
+        "alert dipasang: {symbol} {direction} Rp {}",
+        crate::service::chat::group_id(&target.round_dp(0))
+    ))
+}
+
+/// List all active price alerts, resolved to their instrument symbols.
+async fn list_price_alerts(db: &Db) -> Result<String, String> {
+    let alerts =
+        crate::repo::price_alerts::list_active(db).await.map_err(|e| format!("db error: {e}"))?;
+    if alerts.is_empty() {
+        return Ok("belum ada price alert".into());
+    }
+    let mut out = String::new();
+    for alert in alerts {
+        let symbol = crate::repo::instruments::get(db, alert.instrument_id)
+            .await
+            .ok()
+            .map(|i| i.symbol)
+            .unwrap_or_else(|| format!("#{}", alert.instrument_id));
+        let target_display = alert
+            .target_price
+            .parse::<rust_decimal::Decimal>()
+            .map(|d| crate::service::chat::group_id(&d.round_dp(0)))
+            .unwrap_or_else(|_| alert.target_price.clone());
+        out.push_str(&format!(
+            "[{}] {} {} Rp {}\n",
+            alert.id, symbol, alert.direction, target_display
+        ));
+    }
+    Ok(out)
+}
+
+/// Cancel an active price alert by id.
+async fn cancel_price_alert(db: &Db, input: &serde_json::Value) -> Result<String, String> {
+    let alert_id = id_arg(input, "id")?;
+    let cancelled = crate::repo::price_alerts::cancel(db, alert_id)
+        .await
+        .map_err(|e| format!("db error: {e}"))?;
+    if cancelled {
+        Ok(format!("price alert #{alert_id} dibatalkan"))
+    } else {
+        Err(format!("price alert #{alert_id} nggak ada atau sudah tidak aktif"))
+    }
+}
+
+async fn resolve_inbox(db: &Db, input: &serde_json::Value) -> Result<String, String> {
+    let status = str_arg(input, "status").ok_or("missing required argument 'status'")?;
+    if !matches!(status, "sorted" | "dropped") {
+        return Err(format!("invalid status '{status}' — use sorted/dropped"));
+    }
+    let ids: Vec<i64> = match input.get("ids") {
+        Some(serde_json::Value::Array(arr)) => arr
+            .iter()
+            .map(|v| v.as_i64().ok_or_else(|| format!("ids must be integers, got {v}")))
+            .collect::<Result<Vec<_>, _>>()?,
+        _ => return Err("missing required argument 'ids' (array of integers)".into()),
+    };
+    let affected = crate::repo::inbox::resolve(db, &ids, status).await.map_err(|e| format!("db error: {e}"))?;
+    Ok(format!("{affected} item inbox ditandai {status}"))
 }
 
 #[cfg(test)]
@@ -1132,6 +1548,67 @@ mod tests {
         let item = crate::repo::review_items::get(&db, id).await.unwrap();
         assert_eq!(item.status, "confirmed");
         assert!(item.created_txn_id.is_some());
+    }
+
+    /// The account was already auto-detected (wrongly) as Stockbit at ingest;
+    /// passing the right account must override it, not be refused because the
+    /// item isn't 'belum dikenali'. Locks the mechanism the affordance relies on.
+    #[tokio::test]
+    async fn confirm_review_overrides_an_already_detected_wrong_account() {
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        let instrument = crate::repo::instruments::create(&db, &crate::repo::instruments::NewInstrument {
+            symbol: "VXUS".into(), name: "Vanguard Total Intl".into(), instrument_type: "etf".into(),
+            native_currency: "USD".into(), category_id: None, price_source: "manual".into(),
+            decimals: Some(8), note: None,
+        }).await.unwrap();
+        let stockbit = crate::repo::accounts::create(&db, &crate::repo::accounts::NewAccount {
+            name: "Stockbit".into(), account_type: "broker".into(), institution: None,
+            native_currency: "IDR".into(), note: None,
+        }).await.unwrap();
+        let nanovest = crate::repo::accounts::create(&db, &crate::repo::accounts::NewAccount {
+            name: "Nanovest".into(), account_type: "broker".into(), institution: None,
+            native_currency: "IDR".into(), note: None,
+        }).await.unwrap();
+        // OCR read "Stockbit" → account resolved to the wrong one at ingest.
+        let id = seed_pending_item(&db, Some(stockbit.id), Some(instrument.id)).await;
+
+        let out = dispatch(&db, "confirm_review", &serde_json::json!({
+            "review_id": id, "account_id": nanovest.id
+        })).await.unwrap();
+        assert!(out.contains("dibuat"), "{out}");
+
+        let txns = crate::repo::transactions::list_all(&db).await.unwrap();
+        assert_eq!(txns.len(), 1);
+        assert_eq!(txns[0].account_id, nanovest.id, "override must switch Stockbit -> Nanovest");
+        let item = crate::repo::review_items::get(&db, id).await.unwrap();
+        assert_eq!(item.suggested_account_id, Some(nanovest.id));
+    }
+
+    /// list_pending_reviews must hint that the shown account/instrument is an OCR
+    /// guess the assistant can correct — otherwise a confidently-wrong account
+    /// looks authoritative and the assistant won't override it.
+    #[tokio::test]
+    async fn list_pending_reviews_notes_detected_values_are_correctable() {
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        let instrument = crate::repo::instruments::create(&db, &crate::repo::instruments::NewInstrument {
+            symbol: "VXUS".into(), name: "Vanguard Total Intl".into(), instrument_type: "etf".into(),
+            native_currency: "USD".into(), category_id: None, price_source: "manual".into(),
+            decimals: Some(8), note: None,
+        }).await.unwrap();
+        let acc = crate::repo::accounts::create(&db, &crate::repo::accounts::NewAccount {
+            name: "Stockbit".into(), account_type: "broker".into(), institution: None,
+            native_currency: "IDR".into(), note: None,
+        }).await.unwrap();
+        seed_pending_item(&db, Some(acc.id), Some(instrument.id)).await;
+
+        let out = dispatch(&db, "list_pending_reviews", &serde_json::json!({}))
+            .await
+            .unwrap()
+            .to_lowercase();
+        assert!(
+            out.contains("override"),
+            "listing should hint detected account/instrument is correctable: {out}"
+        );
     }
 
     #[tokio::test]
@@ -1533,6 +2010,12 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn draft_proposal_requires_job_text() {
+        let err = super::draft_proposal(&serde_json::json!({})).await;
+        assert!(err.is_err(), "missing job_text must error");
+    }
+
+    #[tokio::test]
     async fn list_clients_lists_saved() {
         let db = crate::db::connect("sqlite::memory:").await.unwrap();
         crate::repo::clients::create(&db, &crate::repo::clients::NewClient { name: "PT AIS", sub_name: None, website: None }).await.unwrap();
@@ -1697,6 +2180,223 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn capture_to_inbox_stores_and_lists() {
+        let db = mem_db().await;
+        let out = dispatch(&db, "capture_to_inbox", &serde_json::json!({ "content": "beli kado" })).await.unwrap();
+        assert!(out.to_lowercase().contains("inbox"), "{out}");
+        let listed = dispatch(&db, "list_inbox", &serde_json::json!({})).await.unwrap();
+        assert!(listed.contains("beli kado"), "{listed}");
+    }
+
+    #[tokio::test]
+    async fn list_inbox_empty_is_explicit() {
+        let db = mem_db().await;
+        let out = dispatch(&db, "list_inbox", &serde_json::json!({})).await.unwrap();
+        assert!(out.to_lowercase().contains("kosong"), "{out}");
+    }
+
+    #[tokio::test]
+    async fn resolve_inbox_marks_sorted_and_rejects_bad_status() {
+        let db = mem_db().await;
+        let row = crate::repo::inbox::create(&db, "x").await.unwrap();
+        let out = dispatch(&db, "resolve_inbox", &serde_json::json!({ "ids": [row.id], "status": "sorted" })).await.unwrap();
+        assert!(out.contains("1"), "{out}");
+        assert!(crate::repo::inbox::list_pending(&db).await.unwrap().is_empty());
+        let err = dispatch(&db, "resolve_inbox", &serde_json::json!({ "ids": [row.id], "status": "nonsense" })).await.unwrap_err();
+        assert!(err.to_lowercase().contains("status"), "{err}");
+    }
+
+    // ── Gmail fake ────────────────────────────────────────────────────────────
+
+    use crate::google::gmail::{EmailDetail, EmailSummary, GmailApi, GmailError};
+    use std::sync::Mutex as StdMutex;
+
+    #[derive(Default)]
+    struct FakeGmail {
+        messages: Vec<EmailSummary>,
+        drafts: StdMutex<Vec<(String, String)>>, // (thread_id, body)
+    }
+    #[async_trait::async_trait]
+    impl GmailApi for FakeGmail {
+        async fn list_important_unread(&self, _max: u32) -> Result<Vec<EmailSummary>, GmailError> {
+            Ok(self.messages.clone())
+        }
+        async fn get_message(&self, id: &str) -> Result<EmailDetail, GmailError> {
+            let m = self.messages.iter().find(|m| m.id == id)
+                .ok_or(GmailError::Api { status: 404, body: "not found".into() })?;
+            Ok(EmailDetail { id: m.id.clone(), thread_id: m.thread_id.clone(), from: m.from.clone(),
+                subject: m.subject.clone(), body: "isi email".into() })
+        }
+        async fn create_draft(&self, thread_id: &str, _to: &str, _subject: &str, body: &str)
+            -> Result<String, GmailError> {
+            self.drafts.lock().unwrap().push((thread_id.to_string(), body.to_string()));
+            Ok("draft_1".into())
+        }
+    }
+
+    fn email(id: &str, from: &str, subject: &str) -> EmailSummary {
+        EmailSummary { id: id.into(), thread_id: format!("t_{id}"), from: from.into(),
+            subject: subject.into(), snippet: "snippet".into() }
+    }
+
+    #[tokio::test]
+    async fn list_emails_formats_or_empty() {
+        let mut fake = FakeGmail::default();
+        assert!(gmail_list_emails(&fake, &serde_json::json!({})).await.unwrap().to_lowercase().contains("nggak ada"));
+        fake.messages = vec![email("m1", "Budi", "Meeting")];
+        let out = gmail_list_emails(&fake, &serde_json::json!({})).await.unwrap();
+        assert!(out.contains("Budi") && out.contains("Meeting") && out.contains("m1"), "{out}");
+    }
+
+    #[tokio::test]
+    async fn read_email_returns_body() {
+        let fake = FakeGmail { messages: vec![email("m1", "Budi", "Meeting")], ..Default::default() };
+        let out = gmail_read_email(&fake, &serde_json::json!({ "id": "m1" })).await.unwrap();
+        assert!(out.contains("isi email"), "{out}");
+    }
+
+    #[tokio::test]
+    async fn draft_reply_creates_draft() {
+        let fake = FakeGmail { messages: vec![email("m1", "Budi", "Meeting")], ..Default::default() };
+        let out = gmail_draft_reply(&fake, &serde_json::json!({ "id": "m1", "body": "ok meeting jam 3" })).await.unwrap();
+        assert!(out.to_lowercase().contains("draft"), "{out}");
+        assert_eq!(fake.drafts.lock().unwrap()[0], ("t_m1".to_string(), "ok meeting jam 3".to_string()));
+    }
+
+    #[tokio::test]
+    async fn portfolio_insights_runs_on_empty_db() {
+        let db = mem_db().await;
+        let out = dispatch(&db, "portfolio_insights", &serde_json::json!({})).await.unwrap();
+        assert!(!out.is_empty(), "{out}");
+        assert!(out.to_lowercase().contains("net worth"), "{out}");
+    }
+
+    #[tokio::test]
+    async fn cashflow_summary_reports_in_out_net() {
+        let db = mem_db().await;
+        let month = chrono::Utc::now().with_timezone(&crate::assistant::time::wib()).format("%Y-%m").to_string();
+        // Create a real cashflow expense category so the 'out' row can be tied to it.
+        let cat = crate::repo::cashflow_categories::create(
+            &db,
+            &crate::repo::cashflow_categories::NewCashflowCategory {
+                name: "Makan".into(),
+                kind: "expense".into(),
+                monthly_budget: None,
+                color: None,
+            },
+        ).await.unwrap();
+        // Insert one 'in' 1_000_000 cashflow row dated within `month`.
+        crate::repo::cashflow::create(&db, &crate::repo::cashflow::NewCashflow {
+            account_id: None,
+            occurred_on: format!("{month}-15"),
+            direction: "in".into(),
+            amount: "1000000".into(),
+            currency: "IDR".into(),
+            category_id: None,
+            note: None,
+        }).await.unwrap();
+        // Insert one 'out' 400_000 row tied to the "Makan" category.
+        crate::repo::cashflow::create(&db, &crate::repo::cashflow::NewCashflow {
+            account_id: None,
+            occurred_on: format!("{month}-15"),
+            direction: "out".into(),
+            amount: "400000".into(),
+            currency: "IDR".into(),
+            category_id: Some(cat.id),
+            note: None,
+        }).await.unwrap();
+        let out = dispatch(&db, "cashflow_summary", &serde_json::json!({})).await.unwrap();
+        assert!(out.to_lowercase().contains("masuk"), "{out}");
+        assert!(out.to_lowercase().contains("net"), "{out}");
+        assert!(out.contains("1.000.000") || out.contains("600.000"), "{out}"); // in or net
+        assert!(out.contains("Makan"), "category name must appear in expense breakdown: {out}");
+    }
+
+    /// cashflow_summary must reject a month arg that is not YYYY-MM format.
+    #[tokio::test]
+    async fn cashflow_summary_rejects_bad_month_format() {
+        let db = mem_db().await;
+        let err = dispatch(&db, "cashflow_summary", &serde_json::json!({ "month": "2026-1" }))
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_lowercase().contains("yyyy-mm") || err.to_lowercase().contains("format bulan"),
+            "error must mention expected format: {err}"
+        );
+    }
+
+    /// cashflow_summary must not emit a "Rp 0" line for a category that had
+    /// no activity this month.
+    #[tokio::test]
+    async fn cashflow_summary_omits_zero_spend_categories() {
+        let db = mem_db().await;
+        let month = chrono::Utc::now()
+            .with_timezone(&crate::assistant::time::wib())
+            .format("%Y-%m")
+            .to_string();
+
+        // "Makan" — has actual spend; "Kesehatan" — zero activity this month.
+        let cat_makan = crate::repo::cashflow_categories::create(
+            &db,
+            &crate::repo::cashflow_categories::NewCashflowCategory {
+                name: "Makan".into(),
+                kind: "expense".into(),
+                monthly_budget: None,
+                color: None,
+            },
+        )
+        .await
+        .unwrap();
+        crate::repo::cashflow_categories::create(
+            &db,
+            &crate::repo::cashflow_categories::NewCashflowCategory {
+                name: "Kesehatan".into(),
+                kind: "expense".into(),
+                monthly_budget: None,
+                color: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        crate::repo::cashflow::create(&db, &crate::repo::cashflow::NewCashflow {
+            account_id: None,
+            occurred_on: format!("{month}-10"),
+            direction: "out".into(),
+            amount: "200000".into(),
+            currency: "IDR".into(),
+            category_id: Some(cat_makan.id),
+            note: None,
+        })
+        .await
+        .unwrap();
+
+        let out = dispatch(&db, "cashflow_summary", &serde_json::json!({})).await.unwrap();
+        assert!(out.contains("Makan"), "active category must appear: {out}");
+        assert!(
+            !out.contains("Kesehatan"),
+            "zero-spend category must not appear in top expenses: {out}"
+        );
+    }
+
+    /// portfolio_insights on an empty DB must show net worth and must NOT show
+    /// a concentration line (net worth is zero so concentration is suppressed).
+    #[tokio::test]
+    async fn portfolio_insights_empty_db_no_concentration_line() {
+        let db = mem_db().await;
+        let out = dispatch(&db, "portfolio_insights", &serde_json::json!({})).await.unwrap();
+        assert!(out.to_lowercase().contains("net worth"), "net worth line required: {out}");
+        assert!(
+            !out.to_lowercase().contains("konsentrasi"),
+            "concentration line must be absent when net worth is zero: {out}"
+        );
+        assert!(
+            !out.to_lowercase().contains("savings rate"),
+            "savings rate line must be absent when no cashflow rows: {out}"
+        );
+    }
+
+    #[tokio::test]
     async fn list_pending_reviews_shows_amount_only_nominal() {
         let db = crate::db::connect("sqlite::memory:").await.unwrap();
         let instrument = crate::repo::instruments::create(&db, &crate::repo::instruments::NewInstrument {
@@ -1718,5 +2418,133 @@ mod tests {
         }).await.unwrap();
         let out = dispatch(&db, "list_pending_reviews", &serde_json::json!({})).await.unwrap();
         assert!(out.contains("nominal 13000000"), "{out}");
+    }
+
+    // ── Price alert helpers ───────────────────────────────────────────────────
+
+    /// Insert a minimal instrument and return it (id + symbol).
+    async fn seed_instrument(db: &Db, symbol: &str) -> crate::repo::instruments::InstrumentRow {
+        crate::repo::instruments::create(
+            db,
+            &crate::repo::instruments::NewInstrument {
+                symbol: symbol.to_string(),
+                name: format!("{symbol} Corp"),
+                instrument_type: "stock".into(),
+                native_currency: "IDR".into(),
+                category_id: None,
+                price_source: "manual".into(),
+                decimals: Some(0),
+                note: None,
+            },
+        )
+        .await
+        .unwrap()
+    }
+
+    // ── Price alert dispatcher tests ──────────────────────────────────────────
+
+    #[tokio::test]
+    async fn set_price_alert_with_absolute_target_stores_active_alert() {
+        let db = mem_db().await;
+        seed_instrument(&db, "BBCA").await;
+
+        let out = dispatch(
+            &db,
+            "set_price_alert",
+            &serde_json::json!({ "instrument": "BBCA", "target": 9000, "direction": "below" }),
+        )
+        .await
+        .unwrap();
+        assert!(out.contains("BBCA"), "{out}");
+        assert!(out.contains("below"), "{out}");
+
+        let active = crate::repo::price_alerts::list_active(&db).await.unwrap();
+        assert_eq!(active.len(), 1, "should have one active alert");
+        assert_eq!(active[0].direction, "below");
+        // target is stored as a Decimal string; "9000" is the canonical form.
+        let stored: rust_decimal::Decimal = active[0].target_price.parse().unwrap();
+        assert_eq!(stored, rust_decimal::Decimal::from(9000u32));
+    }
+
+    #[tokio::test]
+    async fn set_price_alert_with_percent_computes_target_from_current_price() {
+        let db = mem_db().await;
+        let ins = seed_instrument(&db, "BBCA").await;
+        // Seed current price at 10000.
+        crate::repo::prices::upsert_latest(
+            &db, ins.id, rust_decimal::Decimal::from(10000u32), "IDR", "manual", "2026-06-15",
+        )
+        .await
+        .unwrap();
+
+        dispatch(
+            &db,
+            "set_price_alert",
+            &serde_json::json!({ "instrument": "BBCA", "percent": 5, "direction": "below" }),
+        )
+        .await
+        .unwrap();
+
+        let active = crate::repo::price_alerts::list_active(&db).await.unwrap();
+        assert_eq!(active.len(), 1);
+        // 10000 * (1 - 5/100) = 9500
+        let stored: rust_decimal::Decimal = active[0].target_price.parse().unwrap();
+        assert_eq!(stored, rust_decimal::Decimal::from(9500u32));
+    }
+
+    #[tokio::test]
+    async fn set_price_alert_unknown_instrument_returns_error() {
+        let db = mem_db().await;
+        let err = dispatch(
+            &db,
+            "set_price_alert",
+            &serde_json::json!({ "instrument": "ZZZNOPE", "target": 1000, "direction": "below" }),
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            err.contains("ZZZNOPE") || err.contains("nggak ketemu"),
+            "error should mention instrument name: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn list_price_alerts_shows_symbol_and_target() {
+        let db = mem_db().await;
+        let ins = seed_instrument(&db, "TLKM").await;
+        crate::repo::price_alerts::create(&db, ins.id, "4500", "above").await.unwrap();
+
+        let out = dispatch(&db, "list_price_alerts", &serde_json::json!({})).await.unwrap();
+        assert!(out.contains("TLKM"), "{out}");
+        assert!(out.contains("above"), "{out}");
+        // Formatted IDR number.
+        assert!(out.contains("4.500") || out.contains("4500"), "{out}");
+    }
+
+    #[tokio::test]
+    async fn list_price_alerts_empty_shows_placeholder() {
+        let db = mem_db().await;
+        let out = dispatch(&db, "list_price_alerts", &serde_json::json!({})).await.unwrap();
+        assert!(
+            out.contains("belum ada") || out.contains("(belum ada alert)"),
+            "should indicate no alerts: {out}"
+        );
+    }
+
+    #[tokio::test]
+    async fn cancel_price_alert_removes_from_active() {
+        let db = mem_db().await;
+        let ins = seed_instrument(&db, "ASII").await;
+        let alert = crate::repo::price_alerts::create(&db, ins.id, "6000", "below").await.unwrap();
+
+        let out = dispatch(
+            &db,
+            "cancel_price_alert",
+            &serde_json::json!({ "id": alert.id }),
+        )
+        .await
+        .unwrap();
+        assert!(out.contains("dibatalkan") || out.contains("cancelled"), "{out}");
+        assert!(crate::repo::price_alerts::list_active(&db).await.unwrap().is_empty());
     }
 }

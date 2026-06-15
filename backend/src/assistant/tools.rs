@@ -156,7 +156,7 @@ pub fn definitions() -> serde_json::Value {
         },
         {
             "name": "confirm_review",
-            "description": "Confirm a pending review item, turning it into a transaction. Pass account_id and/or instrument_id to fill in anything flagged 'belum dikenali' (create the account first with create_account if needed). Always ask the user to confirm before calling — this writes a transaction.",
+            "description": "Confirm a pending review item, turning it into a transaction. The account/instrument shown is only a guess read from the photo — pass account_id and/or instrument_id both to fill in anything flagged 'belum dikenali' AND to override a wrongly-detected account/instrument the owner corrects (e.g. the photo reads one broker but the holding is in another). You do NOT need the item to show 'belum dikenali' to override it (create the account first with create_account if needed). Always ask the user to confirm before calling — this writes a transaction.",
             "input_schema": {
                 "type": "object",
                 "properties": {
@@ -219,6 +219,18 @@ pub fn definitions() -> serde_json::Value {
                 "type": "object",
                 "properties": { "task_id": { "type": "string", "description": "ClickUp task id from list_tasks" } },
                 "required": ["task_id"]
+            }
+        },
+        {
+            "name": "draft_proposal",
+            "description": "Draft an Upwork job proposal in professional English from a job description the user pastes. Pulls the owner's skills and experience from long-term memory to tailor it. Returns the draft for the user to review and submit manually — it never submits anything. Use when the owner pastes a job and asks for a proposal.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "job_text": { "type": "string", "description": "The full Upwork job description the user pasted." },
+                    "notes": { "type": "string", "description": "Optional emphasis or constraints, e.g. 'emphasize React, bid $30/hr'." }
+                },
+                "required": ["job_text"]
             }
         },
         {
@@ -299,6 +311,77 @@ pub fn definitions() -> serde_json::Value {
                 },
                 "required": ["task", "duration"]
             }
+        },
+        {
+            "name": "capture_to_inbox",
+            "description": "Save a raw quick capture to the GTD inbox for later sorting. Use for vague/ambiguous dumps with no clear single action (e.g. 'inget beliin kado', 'ide fitur X').",
+            "input_schema": {
+                "type": "object",
+                "properties": { "content": { "type": "string", "description": "The raw captured text" } },
+                "required": ["content"]
+            }
+        },
+        {
+            "name": "list_inbox",
+            "description": "List pending inbox captures with ids. Use for 'apa di inbox?' or before sorting.",
+            "input_schema": { "type": "object", "properties": {} }
+        },
+        {
+            "name": "resolve_inbox",
+            "description": "Mark inbox items as sorted (after you created todos/events/tasks/notes from them) or dropped (discarded). Pass the item ids.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "ids": { "type": "array", "items": { "type": "integer" }, "description": "Inbox item ids to resolve" },
+                    "status": { "type": "string", "enum": ["sorted", "dropped"], "description": "sorted (handled) or dropped (discarded)" }
+                },
+                "required": ["ids", "status"]
+            }
+        },
+        {
+            "name": "list_emails",
+            "description": "List important unread Gmail (sender, subject, snippet, id). Use for 'ada email penting?'.",
+            "input_schema": { "type": "object", "properties": { "max": { "type": "integer", "description": "Max emails, default 10" } } }
+        },
+        {
+            "name": "read_email",
+            "description": "Read the full body of one email by id (from list_emails) to summarize it or to draft a reply.",
+            "input_schema": { "type": "object", "properties": { "id": { "type": "string", "description": "Gmail message id" } }, "required": ["id"] }
+        },
+        {
+            "name": "draft_reply",
+            "description": "Create a Gmail DRAFT reply to an email (by id). You compose the body; the draft is saved in Gmail for the owner to review and send — it is NOT sent automatically.",
+            "input_schema": { "type": "object", "properties": { "id": { "type": "string", "description": "Gmail message id to reply to" }, "body": { "type": "string", "description": "Reply text you composed" } }, "required": ["id", "body"] }
+        },
+        {
+            "name": "cashflow_summary",
+            "description": "Monthly cashflow: money in, money out, net, top expense categories, and freelance invoiced that month. Use for 'bulan ini masuk/kepake/net berapa?'.",
+            "input_schema": { "type": "object", "properties": { "month": { "type": "string", "description": "YYYY-MM; default current month", "pattern": "^\\d{4}-\\d{2}$" } } }
+        },
+        {
+            "name": "portfolio_insights",
+            "description": "Portfolio health: net worth, biggest-position concentration, and this month's savings rate. Use for insight questions about the portfolio.",
+            "input_schema": { "type": "object", "properties": {} }
+        },
+        {
+            "name": "set_price_alert",
+            "description": "Set a price alert on an instrument. Provide either target (an absolute price) OR percent + direction. 'turun X%' → direction below; 'naik X%' → above; percent is computed from the current price.",
+            "input_schema": { "type": "object", "properties": {
+                "instrument": { "type": "string", "description": "Instrument symbol/name, e.g. BBCA" },
+                "target": { "type": "number", "description": "Absolute target price" },
+                "percent": { "type": "number", "description": "Percent move from current price (use with direction)" },
+                "direction": { "type": "string", "enum": ["above", "below"], "description": "Trigger when price goes above/below" }
+            }, "required": ["instrument"] }
+        },
+        {
+            "name": "list_price_alerts",
+            "description": "List active price alerts.",
+            "input_schema": { "type": "object", "properties": {} }
+        },
+        {
+            "name": "cancel_price_alert",
+            "description": "Cancel a price alert by id (from list_price_alerts).",
+            "input_schema": { "type": "object", "properties": { "id": { "type": "integer", "description": "Alert id" } }, "required": ["id"] }
         }
     ])
 }
@@ -330,9 +413,21 @@ mod tests {
                 "create_task",
                 "list_tasks",
                 "complete_task",
+                "draft_proposal",
                 "list_clients",
                 "create_invoice",
                 "start_timer", "stop_timer", "current_timer", "time_report", "add_time_entry",
+                "capture_to_inbox",
+                "list_inbox",
+                "resolve_inbox",
+                "list_emails",
+                "read_email",
+                "draft_reply",
+                "cashflow_summary",
+                "portfolio_insights",
+                "set_price_alert",
+                "list_price_alerts",
+                "cancel_price_alert",
             ]
         );
         for tool in defs.as_array().unwrap() {
@@ -371,6 +466,28 @@ mod tests {
         assert_eq!(find("create_project")["input_schema"]["required"], serde_json::json!(["name"]));
         assert_eq!(find("create_task")["input_schema"]["required"], serde_json::json!(["project", "title"]));
         assert_eq!(find("complete_task")["input_schema"]["required"], serde_json::json!(["task_id"]));
+        assert_eq!(find("draft_proposal")["input_schema"]["required"], serde_json::json!(["job_text"]));
         assert_eq!(find("create_invoice")["input_schema"]["required"], serde_json::json!(["client_name", "line_items"]));
+    }
+
+    /// The detected account/instrument is only an OCR guess; the assistant must
+    /// know confirm_review can OVERRIDE it, not merely fill in 'belum dikenali'.
+    #[test]
+    fn confirm_review_description_allows_overriding_a_detected_account() {
+        let defs = definitions();
+        let desc = defs
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|t| t["name"] == "confirm_review")
+            .unwrap()["description"]
+            .as_str()
+            .unwrap()
+            .to_lowercase();
+        assert!(
+            desc.contains("override"),
+            "confirm_review must say account/instrument can be overridden/corrected, \
+             not only filled when 'belum dikenali': {desc}"
+        );
     }
 }

@@ -186,8 +186,15 @@ const ANSWER_FAILED_REPLY: &str =
     "Maaf, lagi ada gangguan saat menjawab. Coba lagi sebentar lagi ya.";
 const INGEST_FAILED_REPLY: &str =
     "Maaf, gagal memproses file-nya. Coba kirim ulang sebentar lagi ya.";
+const REFUSED_REPLY: &str =
+    "Modelnya menolak membaca dokumen ini. Coba kirim ulang, atau potong jadi screenshot \
+     yang isinya cukup detail transaksinya saja ya.";
 const UNSUPPORTED_FILE_REPLY: &str =
     "Format file tidak didukung — kirim foto atau PDF ya.";
+const VOICE_FAILED_REPLY: &str =
+    "Maaf, gagal memproses voice note-nya. Coba lagi atau ketik aja ya.";
+const VOICE_UNCLEAR_REPLY: &str =
+    "Suaranya nggak kedengeran jelas — coba ulangi atau ketik aja ya.";
 
 /// Spawn the background poller when TELEGRAM_BOT_TOKEN is configured.
 /// Without the token the Telegram channel is simply off.
@@ -252,40 +259,67 @@ async fn handle_update(client: &TelegramClient, db: &Db, tg: &SharedTgState, upd
     };
 
     match plan_action(linked, chat_id) {
-        Action::Answer => match pick_attachment(&message) {
-            AttachmentPick::Some(attachment) => {
-                match ingest_attachment(client, db, &attachment).await {
-                    Ok(items) if items.is_empty() => {
-                        send_or_log(client, chat_id, "Tidak ada transaksi yang terbaca dari file itu.").await;
-                    }
-                    Ok(items) => {
-                        let (seed, marker) = build_upload_seed(db, &items).await;
-                        let reply = kickoff_upload(db, &seed, &marker).await.unwrap_or_else(|e| {
-                            tracing::error!("telegram: upload kickoff failed: {e:#}");
+        Action::Answer => {
+            if let Some(voice) = &message.voice {
+                match transcribe_voice(client, voice).await {
+                    Ok(transcript) if !transcript.is_empty() => {
+                        send_or_log(client, chat_id, &format!("Aku denger: {transcript}")).await;
+                        let reply = answer(db, &transcript).await.unwrap_or_else(|e| {
+                            tracing::error!("telegram: voice answer failed: {e:#}");
                             ANSWER_FAILED_REPLY.to_string()
                         });
                         send_or_log(client, chat_id, &reply).await;
                     }
+                    Ok(_) => send_or_log(client, chat_id, VOICE_UNCLEAR_REPLY).await,
                     Err(e) => {
-                        tracing::error!("telegram: ingest failed: {e:#}");
-                        send_or_log(client, chat_id, INGEST_FAILED_REPLY).await;
+                        tracing::error!("telegram: transcription failed: {e:#}");
+                        send_or_log(client, chat_id, VOICE_FAILED_REPLY).await;
                     }
                 }
+                return;
             }
-            AttachmentPick::Unsupported => {
-                send_or_log(client, chat_id, UNSUPPORTED_FILE_REPLY).await;
+            match pick_attachment(&message) {
+                AttachmentPick::Some(attachment) => {
+                    match ingest_attachment(client, db, &attachment).await {
+                        Ok(items) if items.is_empty() => {
+                            send_or_log(client, chat_id, "Tidak ada transaksi yang terbaca dari file itu.").await;
+                        }
+                        Ok(items) => {
+                            let (seed, marker) = build_upload_seed(db, &items).await;
+                            let reply = kickoff_upload(db, &seed, &marker).await.unwrap_or_else(|e| {
+                                tracing::error!("telegram: upload kickoff failed: {e:#}");
+                                ANSWER_FAILED_REPLY.to_string()
+                            });
+                            send_or_log(client, chat_id, &reply).await;
+                        }
+                        Err(e) => {
+                            tracing::error!("telegram: ingest failed: {e:#}");
+                            // A model refusal gets its own guidance; everything else
+                            // (download/parse/timeout) keeps the generic retry hint.
+                            let reply = if e.downcast_ref::<crate::ingestion::ingest::ModelRefused>().is_some() {
+                                REFUSED_REPLY
+                            } else {
+                                INGEST_FAILED_REPLY
+                            };
+                            send_or_log(client, chat_id, reply).await;
+                        }
+                    }
+                }
+                AttachmentPick::Unsupported => {
+                    send_or_log(client, chat_id, UNSUPPORTED_FILE_REPLY).await;
+                }
+                AttachmentPick::None => {
+                    let Some(text) = message.text.as_deref().filter(|t| !t.trim().is_empty()) else {
+                        return;
+                    };
+                    let reply = answer(db, text).await.unwrap_or_else(|e| {
+                        tracing::error!("telegram: answer failed: {e:#}");
+                        ANSWER_FAILED_REPLY.to_string()
+                    });
+                    send_or_log(client, chat_id, &reply).await;
+                }
             }
-            AttachmentPick::None => {
-                let Some(text) = message.text.as_deref().filter(|t| !t.trim().is_empty()) else {
-                    return;
-                };
-                let reply = answer(db, text).await.unwrap_or_else(|e| {
-                    tracing::error!("telegram: answer failed: {e:#}");
-                    ANSWER_FAILED_REPLY.to_string()
-                });
-                send_or_log(client, chat_id, &reply).await;
-            }
-        },
+        }
         Action::TryLink => {
             // The link handshake is text-only; media from unlinked chats is ignored.
             let Some(text) = message.text.as_deref().filter(|t| !t.trim().is_empty()) else {
@@ -325,6 +359,33 @@ async fn kickoff_upload(db: &Db, seed: &str, marker: &str) -> anyhow::Result<Str
     let llm = crate::llm::claude::ClaudeClient::from_env()
         .map_err(|e| anyhow::anyhow!("chat unavailable: {e}"))?;
     crate::assistant::agent::handle_upload_event(db, &llm, "telegram", seed, marker).await
+}
+
+/// Whisper infers the audio format from the filename extension, so map the
+/// Telegram MIME type to a matching extension (default ogg — Telegram's usual).
+fn derive_voice_filename(mime: &str) -> String {
+    let ext = match mime {
+        "audio/mp4" | "audio/m4a" | "audio/x-m4a" => "mp4",
+        "audio/webm" => "webm",
+        "audio/mpeg" | "audio/mp3" => "mp3",
+        "audio/wav" | "audio/x-wav" => "wav",
+        _ => "ogg", // audio/ogg, audio/opus, unknown
+    };
+    format!("voice.{ext}")
+}
+
+/// Download a voice note and transcribe it via Whisper.
+async fn transcribe_voice(
+    client: &TelegramClient,
+    voice: &crate::telegram::client::TgVoice,
+) -> anyhow::Result<String> {
+    let file_path = client.get_file_path(&voice.file_id).await?;
+    let bytes = client.download_file(&file_path).await?;
+    let mime = voice.mime_type.as_deref().unwrap_or("audio/ogg");
+    let filename = derive_voice_filename(mime);
+    let llm = crate::llm::native::NativeLlmClient::from_env()
+        .map_err(|e| anyhow::anyhow!("transcription unavailable (check OPENAI_API_KEY): {e}"))?;
+    Ok(llm.transcribe(bytes, &filename, mime).await?)
 }
 
 /// Download an attachment and run it through the shared ingestion pipeline
@@ -416,7 +477,7 @@ mod tests {
     use client::{TgChat, TgDocument, TgMessage, TgPhotoSize};
 
     fn bare_message() -> TgMessage {
-        TgMessage { chat: TgChat { id: 1 }, from: None, text: None, photo: None, document: None }
+        TgMessage { chat: TgChat { id: 1 }, from: None, text: None, photo: None, document: None, voice: None }
     }
 
     #[test]
@@ -513,6 +574,14 @@ mod tests {
     #[test]
     fn seed_entry_line_handles_unreadable_entry() {
         assert_eq!(seed_entry_line(None), "(tidak terbaca)");
+    }
+
+    #[test]
+    fn voice_filename_extension_follows_mime() {
+        assert_eq!(derive_voice_filename("audio/ogg"), "voice.ogg");
+        assert_eq!(derive_voice_filename("audio/mp4"), "voice.mp4");
+        assert_eq!(derive_voice_filename("audio/webm"), "voice.webm");
+        assert_eq!(derive_voice_filename("application/weird"), "voice.ogg");
     }
 
     #[tokio::test]

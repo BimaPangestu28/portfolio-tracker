@@ -109,6 +109,14 @@ async fn ensure_access_token(db: &Db, cfg: &OAuthConfig, key: &[u8; 32]) -> anyh
     Ok(tokens.access_token)
 }
 
+/// A valid (refreshed-if-needed) Google access token for ad-hoc API calls
+/// (e.g. the Gmail tools). Errors when Google isn't connected.
+pub async fn current_access_token(db: &Db) -> anyhow::Result<String> {
+    let cfg = OAuthConfig::from_env()?;
+    let key = crate::google::crypto::key_from_env()?;
+    ensure_access_token(db, &cfg, &key).await
+}
+
 /// One full cycle including auth. Sets integration status + last_synced_at, and
 /// returns what changed. A not-connected/disconnected/errored account yields an
 /// empty summary (the caller reads the row's status separately).

@@ -104,6 +104,49 @@ pub fn stale_price_alerts(
         .collect()
 }
 
+/// Evaluate all active price alerts against the latest stored prices.
+///
+/// Alerts that have reached their target are marked triggered and returned as
+/// `Alert` values so the caller's claim-send loop dispatches the notification
+/// exactly once.
+pub async fn price_alert_triggers(db: &Db) -> Vec<Alert> {
+    let mut output = Vec::new();
+    let active = match crate::repo::price_alerts::list_active(db).await {
+        Ok(alerts) => alerts,
+        Err(error) => {
+            tracing::warn!("alerts: price_alerts unavailable: {error:#}");
+            return output;
+        }
+    };
+    for alert in active {
+        let target = match alert.target_price.parse::<rust_decimal::Decimal>() {
+            Ok(t) => t,
+            Err(_) => continue,
+        };
+        let latest = match crate::repo::prices::latest(db, alert.instrument_id).await {
+            Ok(Some(price)) => price,
+            _ => continue,
+        };
+        if crate::repo::price_alerts::is_triggered(&alert.direction, target, latest.price) {
+            let symbol = crate::repo::instruments::get(db, alert.instrument_id)
+                .await
+                .ok()
+                .map(|i| i.symbol)
+                .unwrap_or_default();
+            output.push(Alert {
+                dedup_key: format!("price_alert:{}", alert.id),
+                message: format!(
+                    "🔔 {symbol} {} Rp {}",
+                    alert.direction,
+                    group_id(&latest.price.round_dp(0))
+                ),
+            });
+            let _ = crate::repo::price_alerts::mark_triggered(db, alert.id).await;
+        }
+    }
+    output
+}
+
 /// Evaluate every trigger from stored data. Each section degrades
 /// independently: one failing source must not silence the others.
 pub async fn evaluate(
@@ -161,6 +204,8 @@ pub async fn evaluate(
         }
         Err(e) => tracing::warn!("alerts: portfolio summary unavailable: {e:#}"),
     }
+
+    alerts.extend(price_alert_triggers(db).await);
 
     alerts
 }
@@ -244,6 +289,90 @@ mod tests {
         let alert = review_backlog_alert(&db, "2026-06-12").await.unwrap().expect("alert");
         assert_eq!(alert.dedup_key, "review-backlog:2026-06-12");
         assert!(alert.message.contains('1'), "{}", alert.message);
+    }
+
+    #[tokio::test]
+    async fn price_alert_triggers_fires_and_marks_triggered() {
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        // Create an instrument.
+        let instrument = crate::repo::instruments::create(
+            &db,
+            &crate::repo::instruments::NewInstrument {
+                symbol: "BBCA".into(),
+                name: "BCA".into(),
+                instrument_type: "stock".into(),
+                native_currency: "IDR".into(),
+                category_id: None,
+                price_source: "manual".into(),
+                decimals: Some(0),
+                note: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        // Seed a current price at 8000 (below the 9000 target).
+        crate::repo::prices::upsert_latest(
+            &db,
+            instrument.id,
+            rust_decimal::Decimal::from(8000u32),
+            "IDR",
+            "manual",
+            "2026-06-15",
+        )
+        .await
+        .unwrap();
+
+        // Create an active alert: trigger when price goes below 9000.
+        let alert =
+            crate::repo::price_alerts::create(&db, instrument.id, "9000", "below").await.unwrap();
+
+        let triggered = price_alert_triggers(&db).await;
+        assert_eq!(triggered.len(), 1, "should have one triggered alert");
+        assert_eq!(triggered[0].dedup_key, format!("price_alert:{}", alert.id));
+        assert!(triggered[0].message.contains("BBCA"), "{}", triggered[0].message);
+        assert!(triggered[0].message.contains("below"), "{}", triggered[0].message);
+
+        // Alert must now be marked triggered (not active).
+        let remaining = crate::repo::price_alerts::list_active(&db).await.unwrap();
+        assert!(remaining.is_empty(), "alert should be marked triggered");
+    }
+
+    #[tokio::test]
+    async fn price_alert_triggers_does_not_fire_when_not_crossed() {
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        let instrument = crate::repo::instruments::create(
+            &db,
+            &crate::repo::instruments::NewInstrument {
+                symbol: "TLKM".into(),
+                name: "Telkom".into(),
+                instrument_type: "stock".into(),
+                native_currency: "IDR".into(),
+                category_id: None,
+                price_source: "manual".into(),
+                decimals: Some(0),
+                note: None,
+            },
+        )
+        .await
+        .unwrap();
+        // Price above target; "below 3000" not triggered when price is 4000.
+        crate::repo::prices::upsert_latest(
+            &db,
+            instrument.id,
+            rust_decimal::Decimal::from(4000u32),
+            "IDR",
+            "manual",
+            "2026-06-15",
+        )
+        .await
+        .unwrap();
+        crate::repo::price_alerts::create(&db, instrument.id, "3000", "below").await.unwrap();
+
+        let triggered = price_alert_triggers(&db).await;
+        assert!(triggered.is_empty(), "should not trigger when price has not crossed target");
+        // Still active.
+        assert_eq!(crate::repo::price_alerts::list_active(&db).await.unwrap().len(), 1);
     }
 
     async fn seed_review_item(db: &Db, created_at: &str) {

@@ -45,11 +45,25 @@ pub fn build_native_body(model: &str, system: &str, parts: &[Part]) -> Result<se
     Ok(serde_json::json!({
         "model": model,
         "max_tokens": 4096,
+        // Force a JSON-object reply. The OpenAI-shape `json_object` mode keeps the
+        // model from emitting free-form prose — including the stray "I'm sorry, I
+        // cannot fulfill this request." refusals that otherwise reach the parser as
+        // non-JSON. Requires the word "JSON" in the prompt, which SYSTEM_PROMPT has.
+        "response_format": { "type": "json_object" },
         "messages": [
             { "role": "system", "content": system },
             { "role": "user", "content": content },
         ],
     }))
+}
+
+/// Pull the transcript out of an OpenAI `audio/transcriptions` response
+/// (`{ "text": "..." }`), trimmed.
+pub fn extract_transcript(resp: &serde_json::Value) -> Result<String, LlmError> {
+    resp.get("text")
+        .and_then(|t| t.as_str())
+        .map(|s| s.trim().to_string())
+        .ok_or_else(|| LlmError::Shape("no text field in transcription response".into()))
 }
 
 /// Extract the assistant message text from an OpenAI `chat/completions` response.
@@ -117,6 +131,33 @@ impl NativeLlmClient {
         }
         extract_native_text(&json)
     }
+
+    /// Transcribe audio bytes via OpenAI Whisper (`/v1/audio/transcriptions`).
+    /// `WHISPER_MODEL` overrides the model (default `whisper-1`). Reuses the
+    /// vision provider's key/base_url.
+    pub async fn transcribe(&self, audio: Vec<u8>, filename: &str, mime: &str) -> Result<String, LlmError> {
+        let model = std::env::var("WHISPER_MODEL").unwrap_or_else(|_| "whisper-1".into());
+        let url = format!("{}/v1/audio/transcriptions", self.base_url);
+        let part = reqwest::multipart::Part::bytes(audio)
+            .file_name(filename.to_string())
+            .mime_str(mime)
+            .map_err(|e| LlmError::Http(e.to_string()))?;
+        let form = reqwest::multipart::Form::new().text("model", model).part("file", part);
+        let resp = self
+            .client
+            .post(&url)
+            .header("authorization", format!("Bearer {}", self.api_key))
+            .multipart(form)
+            .send()
+            .await
+            .map_err(|e| LlmError::Http(e.to_string()))?;
+        let status = resp.status();
+        let json: serde_json::Value = resp.json().await.map_err(|e| LlmError::Http(e.to_string()))?;
+        if !status.is_success() {
+            return Err(LlmError::Api { status: status.as_u16(), body: json.to_string() });
+        }
+        extract_transcript(&json)
+    }
 }
 
 #[cfg(test)]
@@ -131,6 +172,7 @@ mod tests {
             &[Part::Text("hi".into()), Part::Image("image/png".into(), "AAAA".into())],
         ).unwrap();
         assert_eq!(body["model"], "gpt-4o");
+        assert_eq!(body["response_format"]["type"], "json_object");
         let messages = body["messages"].as_array().unwrap();
         assert_eq!(messages[0]["role"], "system");
         assert_eq!(messages[0]["content"], "extract");
@@ -165,5 +207,17 @@ mod tests {
     fn extract_native_text_errors_on_empty_content() {
         let resp = serde_json::json!({ "choices": [ { "message": { "content": "" } } ] });
         assert!(matches!(extract_native_text(&resp), Err(LlmError::Shape(_))));
+    }
+
+    #[test]
+    fn extract_transcript_reads_text_field() {
+        let resp = serde_json::json!({ "text": "  catat beli kado  " });
+        assert_eq!(extract_transcript(&resp).unwrap(), "catat beli kado");
+    }
+
+    #[test]
+    fn extract_transcript_errors_without_text() {
+        let resp = serde_json::json!({ "error": "nope" });
+        assert!(extract_transcript(&resp).is_err());
     }
 }
