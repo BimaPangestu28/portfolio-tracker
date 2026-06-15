@@ -151,7 +151,7 @@ mod tests {
         assert!(!msg.contains("**"));
     }
 
-    use crate::clickup::client::{ClickUpApi, ClickUpError, NewTask, Project, Task};
+    use crate::clickup::client::{ClickUpApi, ClickUpError, NewTask, Project, RunningEntry, Task, TimeEntry};
     use crate::upwork::client::testkit::FakeUpwork;
     use crate::upwork::jobs::Notifier;
     use std::sync::Mutex;
@@ -170,6 +170,11 @@ mod tests {
         async fn create_task(&self, _list_id: &str, _task: &NewTask) -> Result<String, ClickUpError> { Ok("t".into()) }
         async fn list_tasks(&self, _list_id: &str) -> Result<Vec<Task>, ClickUpError> { Ok(vec![]) }
         async fn complete_task(&self, _task_id: &str) -> Result<(), ClickUpError> { Ok(()) }
+        async fn start_timer(&self, _task_id: &str) -> Result<(), ClickUpError> { Ok(()) }
+        async fn stop_timer(&self) -> Result<Option<TimeEntry>, ClickUpError> { Ok(None) }
+        async fn current_timer(&self) -> Result<Option<RunningEntry>, ClickUpError> { Ok(None) }
+        async fn time_entries(&self, _start_ms: i64, _end_ms: i64) -> Result<Vec<TimeEntry>, ClickUpError> { Ok(vec![]) }
+        async fn add_time_entry(&self, _task_id: &str, _duration_ms: i64, _start_ms: i64) -> Result<(), ClickUpError> { Ok(()) }
     }
 
     #[derive(Default)]

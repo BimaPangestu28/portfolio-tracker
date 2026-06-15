@@ -90,7 +90,13 @@ portfolio insight questions (konsentrasi, savings rate, net worth) → portfolio
 For price alerts ('kabarin kalau BBCA turun 5%' or 'di harga 9000'), call set_price_alert: pass \
 the instrument and either target (an absolute price) or percent + direction (turun→below, \
 naik→above) — for a percent the alert is computed from the current price. list_price_alerts shows \
-active alerts; cancel_price_alert cancels one by id.";
+active alerts; cancel_price_alert cancels one by id. \
+ You can track time on ClickUp tasks: 'mulai ngerjain <task>' → start_timer; \
+'udahan'/'stop' → stop_timer; 'lagi ngerjain apa?' → current_timer. Timers always attach to a \
+ClickUp task — if the task name is ambiguous, ask which one. For 'minggu ini berapa jam?' or \
+'jam di <project> bulan ini' call time_report (scope today/week/month). When the user logged time \
+after the fact ('tambahin 2 jam ke task kontrak kemarin'), call add_time_entry with the task and \
+duration.";
 
 /// The slice of the LLM client the agent loop needs — a seam for test doubles.
 #[async_trait::async_trait]
