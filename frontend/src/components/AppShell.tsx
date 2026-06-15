@@ -22,7 +22,6 @@ import {
   RefreshCw,
   Sun,
   Moon,
-  PieChart,
   PanelLeft,
   Sparkles,
   Lock,
@@ -120,9 +119,9 @@ function Sidebar({ collapsed, onCollapse }: { collapsed: boolean; onCollapse: ()
       {/* Brand */}
       <div className="pt-brand">
         <div className="pt-brand-mark">
-          <PieChart size={18} strokeWidth={2} />
+          <Sparkles size={18} strokeWidth={2} />
         </div>
-        <span className="pt-brand-name pt-nav-label">Portfolio</span>
+        <span className="pt-brand-name pt-nav-label">Noah</span>
       </div>
 
       {/* Nav */}
@@ -145,7 +144,7 @@ function Sidebar({ collapsed, onCollapse }: { collapsed: boolean; onCollapse: ()
           title="Kunci"
         >
           <Lock size={18} strokeWidth={1.8} />
-          <span className="pt-nav-label">Kunci portofolio</span>
+          <span className="pt-nav-label">Kunci</span>
         </button>
         <button
           type="button"
@@ -184,9 +183,9 @@ function MobileSheet({ open, onClose }: { open: boolean; onClose: () => void }) 
       <div className="pt-sheet-left">
         <div className="pt-brand">
           <div className="pt-brand-mark">
-            <PieChart size={18} strokeWidth={2} />
+            <Sparkles size={18} strokeWidth={2} />
           </div>
-          <span className="pt-brand-name">Portfolio</span>
+          <span className="pt-brand-name">Noah</span>
           <IconBtn className="ml-auto" onClick={onClose} title="Tutup">
             <X size={18} />
           </IconBtn>
@@ -208,7 +207,7 @@ function MobileSheet({ open, onClose }: { open: boolean; onClose: () => void }) 
             title="Kunci"
           >
             <Lock size={18} strokeWidth={1.8} />
-            <span>Kunci portofolio</span>
+            <span>Kunci</span>
           </button>
           <div
             style={{ padding: "8px 12px 2px", fontSize: 11, color: "hsl(var(--muted-foreground))" }}
@@ -266,7 +265,7 @@ function usePageTitle() {
     if (n.end) return location.pathname === n.to;
     return location.pathname.startsWith(n.to);
   });
-  return item?.label ?? "Portfolio";
+  return item?.label ?? "Noah";
 }
 
 /* ── Topbar ─────────────────────────────────────────────────────────── */

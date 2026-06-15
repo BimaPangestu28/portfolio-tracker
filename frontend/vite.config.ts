@@ -13,8 +13,8 @@ export default defineConfig({
       // Static assets copied as-is (referenced from index.html / manifest).
       includeAssets: ["favicon.svg", "apple-touch-icon.png"],
       manifest: {
-        name: "Portfolio Tracker",
-        short_name: "Portfolio",
+        name: "Noah",
+        short_name: "Noah",
         description: "Lacak portofolio investasi & tanya jawab dengan asisten.",
         lang: "id",
         theme_color: "#2977f5",
