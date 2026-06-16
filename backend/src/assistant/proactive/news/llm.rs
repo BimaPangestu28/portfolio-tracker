@@ -53,6 +53,30 @@ pub fn parse_quiz(raw: &str) -> Option<Vec<QuizItem>> {
     if valid.is_empty() { None } else { Some(valid) }
 }
 
+/// A deterministic retention quiz used when the LLM path yields nothing: one
+/// question per article, "which article covers this key point?", options = the
+/// article titles. Needs >= 2 articles to have distractors; else empty.
+pub fn fallback_quiz(items: &[(String, Vec<String>)]) -> Vec<QuizItem> {
+    let titles: Vec<String> = items.iter().map(|(t, _)| t.clone()).collect();
+    if titles.len() < 2 {
+        return vec![];
+    }
+    items
+        .iter()
+        .enumerate()
+        .filter_map(|(i, (_title, key_points))| {
+            let kp = key_points.first()?;
+            Some(QuizItem {
+                question: format!("Artikel mana yang membahas: \"{kp}\"?"),
+                options: titles.clone(),
+                answer_index: i as i64,
+                explanation: String::new(),
+                article_position: i as i64,
+            })
+        })
+        .collect()
+}
+
 /// Summarize one article; falls back to the snippet/title on any failure.
 pub async fn summarize(title: &str, source: &str, text: &str, fallback_snippet: &str) -> Summary {
     let fallback = || Summary { summary: if fallback_snippet.is_empty() { title.into() } else { fallback_snippet.into() }, key_points: vec![] };
@@ -113,5 +137,25 @@ mod tests {
         // A summary fenced without a language tag still parses.
         let s = parse_summary("```\n{\"summary\":\"r\",\"key_points\":[]}\n```").unwrap();
         assert_eq!(s.summary, "r");
+    }
+
+    #[test]
+    fn fallback_quiz_builds_one_question_per_article_with_key_point() {
+        let items = vec![
+            ("Rust 2.0".to_string(), vec!["lebih cepat".to_string()]),
+            ("K8s news".to_string(), vec!["operator baru".to_string()]),
+            ("No points".to_string(), vec![]),
+        ];
+        let q = fallback_quiz(&items);
+        assert_eq!(q.len(), 2); // the keypoint-less one is skipped
+        assert_eq!(q[0].answer_index, 0);
+        assert_eq!(q[0].options.len(), 3);
+        assert!(q[0].question.contains("lebih cepat"));
+        assert_eq!(q[1].answer_index, 1);
+    }
+
+    #[test]
+    fn fallback_quiz_needs_two_articles() {
+        assert!(fallback_quiz(&[("solo".into(), vec!["x".into()])]).is_empty());
     }
 }
