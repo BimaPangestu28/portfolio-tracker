@@ -1,0 +1,27 @@
+import { render, screen } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { http, HttpResponse } from "msw";
+import { server } from "../test/server";
+import NewsPage from "./NewsPage";
+
+function renderPage() {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(<QueryClientProvider client={qc}><NewsPage /></QueryClientProvider>);
+}
+
+test("renders articles and key points", async () => {
+  server.use(http.get("*/api/news/today", () => HttpResponse.json({
+    available: true, date: "2026-06-16",
+    articles: [{ position: 0, title: "Rust 2.0", url: "https://ex.com/r", source: "HN", summary: "rilis besar", key_points: ["lebih cepat"] }],
+    quiz: [],
+  })));
+  renderPage();
+  expect(await screen.findByText("Rust 2.0")).toBeInTheDocument();
+  expect(await screen.findByText("lebih cepat")).toBeInTheDocument();
+});
+
+test("shows an empty state when no digest yet", async () => {
+  server.use(http.get("*/api/news/today", () => HttpResponse.json({ available: false, date: null, articles: [], quiz: [] })));
+  renderPage();
+  expect(await screen.findByText(/belum siap/i)).toBeInTheDocument();
+});

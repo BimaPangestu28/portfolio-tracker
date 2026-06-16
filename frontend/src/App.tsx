@@ -14,6 +14,7 @@ import ChatPage from "./pages/ChatPage";
 import SettingsPage from "./pages/SettingsPage";
 import AgendaPage from "./pages/AgendaPage";
 import TugasPage from "./pages/TugasPage";
+import NewsPage from "./pages/NewsPage";
 
 export default function App() {
   const { isUnlocked } = useAuth();
@@ -38,6 +39,7 @@ export default function App() {
         <Route path="agenda" element={<AgendaPage />} />
         <Route path="tugas" element={<TugasPage />} />
         <Route path="chat" element={<ChatPage />} />
+        <Route path="news" element={<NewsPage />} />
         <Route path="settings" element={<SettingsPage />} />
 
         {/* ── Legacy route redirects ── */}
