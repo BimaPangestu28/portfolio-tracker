@@ -1,6 +1,7 @@
 pub mod gate;
 pub mod kb;
 pub mod limiter;
+pub mod public;
 pub mod tools;
 pub mod dispatcher;
 pub mod escalation;
