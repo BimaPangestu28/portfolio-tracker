@@ -3,6 +3,7 @@ pub mod cashflow;
 pub mod chat;
 pub mod cs_admin;
 pub mod cs_public;
+pub mod cs_whatsapp;
 pub mod connectors;
 pub mod crud;
 pub mod events;
