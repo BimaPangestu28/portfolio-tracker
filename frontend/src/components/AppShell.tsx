@@ -28,6 +28,9 @@ import {
   Lock,
   Settings,
   Newspaper,
+  BookOpen,
+  Tag,
+  Package,
 } from "lucide-react";
 import { useTheme } from "@/components/theme-provider";
 import { useRefreshPrices } from "@/api/hooks";
@@ -68,6 +71,15 @@ const NAV_GROUPS: NavGroup[] = [
       { to: "/portfolio", label: "Portofolio", icon: Wallet },
       { to: "/data",      label: "Data",       icon: Inbox },
       { to: "/invoices",  label: "Invoice",    icon: FileText },
+    ],
+  },
+  {
+    title: "Admin (CS)",
+    items: [
+      { to: "/cs/admin/inbox",   label: "CS Inbox",       icon: Inbox },
+      { to: "/cs/admin/docs",    label: "Knowledge Base", icon: BookOpen },
+      { to: "/cs/admin/pricing", label: "Harga",          icon: Tag },
+      { to: "/cs/admin/orders",  label: "Order",          icon: Package },
     ],
   },
 ];
