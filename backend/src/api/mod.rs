@@ -20,11 +20,25 @@ pub mod whatsapp;
 
 use crate::AppState;
 use axum::{
+    http::{HeaderName, Method},
     middleware,
     routing::{delete, get, post},
     Router,
 };
-use tower_http::cors::CorsLayer;
+use tower_http::cors::{AllowOrigin, CorsLayer};
+
+/// CORS for the public CS endpoints: only the configured origins, GET/POST,
+/// content-type header. Empty/unset allowlist => no origins allowed (fail closed).
+fn cs_cors_layer() -> CorsLayer {
+    let origins: Vec<_> = crate::cs::gate::allowed_origins()
+        .into_iter()
+        .filter_map(|o| o.parse().ok())
+        .collect();
+    CorsLayer::new()
+        .allow_origin(AllowOrigin::list(origins))
+        .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
+        .allow_headers([HeaderName::from_static("content-type")])
+}
 
 pub fn router(state: AppState) -> Router {
     // Open to anyone — no token required.
@@ -144,11 +158,20 @@ pub fn router(state: AppState) -> Router {
         .route("/ingest/review/:id/reject", post(ingest::reject_review))
         .route_layer(middleware::from_fn(auth::require_auth));
 
-    public
+    // Public CS widget endpoints: their OWN strict CORS (origin allowlist), so the
+    // global permissive layer below does NOT relax them.
+    let cs = Router::new()
+        .route("/public/cs/session", post(cs_public::session))
+        .route("/public/cs/message", post(cs_public::message))
+        .route("/public/cs/history", post(cs_public::history))
+        .layer(cs_cors_layer());
+
+    let core = public
         .merge(gateway)
         .merge(protected)
-        .layer(CorsLayer::permissive())
-        .with_state(state)
+        .layer(CorsLayer::permissive());
+
+    core.merge(cs).with_state(state)
 }
 
 #[cfg(test)]

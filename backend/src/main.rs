@@ -38,6 +38,9 @@ async fn main() -> anyhow::Result<()> {
     if let Err(e) = auth::validate_env_config() {
         anyhow::bail!("{e}");
     }
+    if let Err(e) = cs::gate::validate_config() {
+        anyhow::bail!("{e}");
+    }
     let url = std::env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite://portfolio.db".into());
     let db = db::connect(&url).await?;
     let state = AppState {
