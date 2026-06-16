@@ -383,6 +383,39 @@ pub async fn product_list_all(db: &Db) -> anyhow::Result<Vec<ProductRow>> {
     Ok(rows)
 }
 
+pub async fn product_update(
+    db: &Db,
+    id: i64,
+    name: &str,
+    description: Option<&str>,
+    price: Option<f64>,
+    currency: Option<&str>,
+    availability: Option<&str>,
+) -> anyhow::Result<()> {
+    let now = chrono::Utc::now().to_rfc3339();
+    let res = sqlx::query(
+        "UPDATE cs_product SET name = ?, description = ?, price = ?, currency = ?, availability = ?, updated_at = ? WHERE id = ?",
+    )
+    .bind(name)
+    .bind(description)
+    .bind(price)
+    .bind(currency)
+    .bind(availability)
+    .bind(&now)
+    .bind(id)
+    .execute(db)
+    .await?;
+    if res.rows_affected() == 0 {
+        anyhow::bail!("product {id} not found");
+    }
+    Ok(())
+}
+
+pub async fn product_delete(db: &Db, id: i64) -> anyhow::Result<()> {
+    sqlx::query("DELETE FROM cs_product WHERE id = ?").bind(id).execute(db).await?;
+    Ok(())
+}
+
 // --- Order ---
 
 #[derive(Debug, Serialize, sqlx::FromRow)]
@@ -452,6 +485,20 @@ pub async fn order_list(db: &Db, limit: i64) -> anyhow::Result<Vec<OrderRow>> {
         .fetch_all(db)
         .await?;
     Ok(rows)
+}
+
+/// Fetch a single order by its row id.
+pub async fn order_get(db: &Db, id: i64) -> anyhow::Result<Option<OrderRow>> {
+    let row = sqlx::query_as::<_, OrderRow>("SELECT * FROM cs_order WHERE id = ?")
+        .bind(id)
+        .fetch_optional(db)
+        .await?;
+    Ok(row)
+}
+
+pub async fn order_delete(db: &Db, id: i64) -> anyhow::Result<()> {
+    sqlx::query("DELETE FROM cs_order WHERE id = ?").bind(id).execute(db).await?;
+    Ok(())
 }
 
 // --- Escalation ---
@@ -785,5 +832,38 @@ mod tests {
     async fn mark_handled_on_missing_escalation_errors() {
         let db = mem_db().await;
         assert!(escalation_mark_handled(&db, 999).await.is_err());
+    }
+
+    // --- Task 1 (Plan 4a): product_update / product_delete ---
+
+    #[tokio::test]
+    async fn product_update_and_delete() {
+        let db = mem_db().await;
+        let id = product_insert(&db, "A", Some("x"), Some(100.0), Some("IDR"), Some("ready")).await.unwrap();
+        product_update(&db, id, "A2", Some("y"), Some(200.0), Some("USD"), Some("soon")).await.unwrap();
+        let all = product_list_all(&db).await.unwrap();
+        let p = all.iter().find(|p| p.id == id).unwrap();
+        assert_eq!(p.name, "A2");
+        assert_eq!(p.price, Some(200.0));
+        assert_eq!(p.currency.as_deref(), Some("USD"));
+
+        product_delete(&db, id).await.unwrap();
+        assert!(product_list_all(&db).await.unwrap().iter().all(|p| p.id != id));
+        // updating a missing row errors
+        assert!(product_update(&db, 999, "z", None, None, None, None).await.is_err());
+    }
+
+    // --- Task 1 (Plan 4a): order_get / order_delete ---
+
+    #[tokio::test]
+    async fn order_get_and_delete() {
+        let db = mem_db().await;
+        order_upsert(&db, "ORD-1", Some("Budi"), Some("b@x.com"), "shipped", None).await.unwrap();
+        let all = order_list(&db, 10).await.unwrap();
+        let oid = all[0].id;
+        let got = order_get(&db, oid).await.unwrap().unwrap();
+        assert_eq!(got.external_ref, "ORD-1");
+        order_delete(&db, oid).await.unwrap();
+        assert!(order_get(&db, oid).await.unwrap().is_none());
     }
 }
