@@ -3,8 +3,13 @@ import { rm } from "node:fs/promises";
 
 const BACKEND = process.env.BACKEND_URL ?? "http://localhost:8080";
 const GATEWAY_TOKEN = process.env.GATEWAY_TOKEN ?? "";
-const AUTH_DIR = "auth_state";
+// "" = owner gateway; "/cs" = customer-service gateway. Prefixes every backend path.
+const PATH_PREFIX = process.env.PATH_PREFIX ?? "";
+const AUTH_DIR = process.env.AUTH_DIR ?? "auth_state";
 const COMMAND_POLL_MS = 3000;
+// Outbound (proactive send) only exists on the CS backend; enable per-instance.
+const OUTBOUND_ENABLED = process.env.OUTBOUND_ENABLED === "1";
+const OUTBOUND_POLL_MS = 3000;
 
 const authHeaders = { "content-type": "application/json", "x-gateway-token": GATEWAY_TOKEN };
 
@@ -14,7 +19,7 @@ let currentSock = null;
 /** Push the current connection state to the backend so the web UI can show it. */
 async function reportState(status, extra = {}) {
   try {
-    await fetch(`${BACKEND}/whatsapp/state`, {
+    await fetch(`${BACKEND}${PATH_PREFIX}/whatsapp/state`, {
       method: "POST",
       headers: authHeaders,
       body: JSON.stringify({ status, ...extra }),
@@ -27,7 +32,7 @@ async function reportState(status, extra = {}) {
 /** Ask the backend for a pending control command (consumed once). */
 async function fetchCommand() {
   try {
-    const res = await fetch(`${BACKEND}/whatsapp/commands`, { headers: authHeaders });
+    const res = await fetch(`${BACKEND}${PATH_PREFIX}/whatsapp/commands`, { headers: authHeaders });
     if (!res.ok) return null;
     const { command } = await res.json();
     return command ?? null;
@@ -40,14 +45,14 @@ async function fetchCommand() {
 /** Forward one inbound WhatsApp message to the chatbot and reply. */
 async function forwardInbound(sock, from, text) {
   try {
-    const res = await fetch(`${BACKEND}/chat/whatsapp/inbound`, {
+    const res = await fetch(`${BACKEND}${PATH_PREFIX}/chat/whatsapp/inbound`, {
       method: "POST",
       headers: authHeaders,
       body: JSON.stringify({ from, message: text }),
     });
     if (!res.ok) { console.error("backend error", res.status); return; }
     const { reply } = await res.json();
-    await sock.sendMessage(from, { text: reply });
+    if (reply) await sock.sendMessage(from, { text: reply }); // null reply = bot silent / human took over
   } catch (e) {
     console.error("gateway error", e);
   }
