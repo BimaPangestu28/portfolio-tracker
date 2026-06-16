@@ -134,7 +134,7 @@ use crate::repo::cs::KbChunkVec;
 
 /// Embed every chunk that currently lacks an embedding. Returns how many were
 /// embedded. Safe to call repeatedly (idempotent once all chunks are embedded).
-pub async fn embed_pending<E: Embedder>(db: &Db, embedder: &E) -> anyhow::Result<usize> {
+pub async fn embed_pending<E: Embedder + ?Sized>(db: &Db, embedder: &E) -> anyhow::Result<usize> {
     let pending = crate::repo::cs::kb_chunks_without_embedding(db).await?;
     if pending.is_empty() {
         return Ok(0);
@@ -159,7 +159,7 @@ pub async fn embed_pending<E: Embedder>(db: &Db, embedder: &E) -> anyhow::Result
 }
 
 /// Embed the query and return the `top_k` most cosine-similar chunks, best first.
-pub async fn search<E: Embedder>(
+pub async fn search<E: Embedder + ?Sized>(
     db: &Db,
     embedder: &E,
     query: &str,
