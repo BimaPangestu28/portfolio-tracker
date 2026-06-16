@@ -66,6 +66,11 @@ spec:
                 secretKeyRef:
                   name: portfolio-secrets
                   key: GATEWAY_TOKEN
+            - name: CS_GATEWAY_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: portfolio-secrets
+                  key: CS_GATEWAY_TOKEN
             - name: AUTH_PASSWORD
               valueFrom:
                 secretKeyRef:
