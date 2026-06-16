@@ -255,6 +255,8 @@ mod tests {
     fn news_digest_due_inside_the_window_only() {
         assert_eq!(news_digest_due(wib(2026, 6, 12, 5, 59), Some(6)), None);
         assert_eq!(news_digest_due(wib(2026, 6, 12, 6, 0), Some(6)), Some("news_digest:2026-06-12".to_string()));
+        // Last valid hour: window is [6, 11), so 10:59 is still in.
+        assert_eq!(news_digest_due(wib(2026, 6, 12, 10, 59), Some(6)), Some("news_digest:2026-06-12".to_string()));
         assert_eq!(news_digest_due(wib(2026, 6, 12, 11, 0), Some(6)), None);
         assert_eq!(news_digest_due(wib(2026, 6, 12, 6, 0), None), None);
     }
