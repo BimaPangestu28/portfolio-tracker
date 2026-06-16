@@ -19,6 +19,7 @@ import CsDocsPage from "./pages/CsDocsPage";
 import CsPricingPage from "./pages/CsPricingPage";
 import CsOrdersPage from "./pages/CsOrdersPage";
 import CsInboxPage from "./pages/CsInboxPage";
+import CsWhatsAppPage from "./pages/CsWhatsAppPage";
 
 export default function App() {
   const { isUnlocked } = useAuth();
@@ -51,6 +52,7 @@ export default function App() {
         <Route path="cs/admin/pricing" element={<CsPricingPage />} />
         <Route path="cs/admin/orders" element={<CsOrdersPage />} />
         <Route path="cs/admin/inbox" element={<CsInboxPage />} />
+        <Route path="cs/admin/whatsapp" element={<CsWhatsAppPage />} />
 
         {/* ── Legacy route redirects ── */}
         <Route path="holdings" element={<Navigate to="/portfolio" replace />} />
