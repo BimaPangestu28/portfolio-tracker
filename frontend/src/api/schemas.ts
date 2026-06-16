@@ -442,6 +442,8 @@ export const NewsArticleSchema = z.object({
   source: z.string(),
   summary: z.string(),
   key_points: z.array(z.string()),
+  image_url: z.string().nullable(),
+  read_minutes: z.number().nullable(),
 });
 
 export const NewsQuizSchema = z.object({

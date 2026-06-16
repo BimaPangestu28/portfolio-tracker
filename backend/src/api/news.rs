@@ -12,6 +12,8 @@ pub struct ArticleDto {
     pub source: String,
     pub summary: String,
     pub key_points: Vec<String>,
+    pub image_url: Option<String>,
+    pub read_minutes: Option<i64>,
 }
 
 #[derive(Serialize)]
@@ -66,6 +68,8 @@ pub async fn today(State(s): State<AppState>) -> Result<Json<TodayDto>, AppError
                 source: a.source,
                 summary: a.summary,
                 key_points: decode_str_array(&a.key_points, "key_points"),
+                image_url: a.image_url,
+                read_minutes: a.read_minutes,
             })
             .collect(),
         quiz: quiz
@@ -125,6 +129,7 @@ mod tests {
                 position: 0, title: "Rust 2.0".into(), url: "https://ex.com/r".into(),
                 source: "HN".into(), score: 10, summary: "rilis".into(),
                 key_points_json: "[\"cepat\"]".into(),
+                image_url: Some("https://ex.com/i.png".into()), read_minutes: Some(4),
             }],
             &[crate::repo::news::NewQuiz {
                 position: 0, article_pos: Some(0), question: "apa?".into(),
@@ -145,5 +150,7 @@ mod tests {
         assert_eq!(v["articles"][0]["key_points"][0], "cepat");
         assert_eq!(v["quiz"][0]["answer_index"], 1);
         assert_eq!(v["quiz"][0]["article_position"], 0);
+        assert_eq!(v["articles"][0]["image_url"], "https://ex.com/i.png");
+        assert_eq!(v["articles"][0]["read_minutes"], 4);
     }
 }
