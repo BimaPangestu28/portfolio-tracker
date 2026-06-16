@@ -3,6 +3,7 @@ mod api;
 mod assistant;
 mod auth;
 mod clickup;
+mod cs;
 mod connectors;
 mod google;
 mod db;
