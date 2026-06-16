@@ -106,6 +106,28 @@ function startCommandLoop() {
   }, COMMAND_POLL_MS);
 }
 
+/** Poll the backend for queued outbound messages and send them (CS gateway only). */
+function startOutboundLoop() {
+  setInterval(async () => {
+    try {
+      const res = await fetch(`${BACKEND}${PATH_PREFIX}/whatsapp/outbound`, { headers: authHeaders });
+      if (!res.ok) return;
+      const { messages } = await res.json();
+      for (const m of messages ?? []) {
+        if (!m?.jid || !m?.text) continue;
+        try {
+          await currentSock?.sendMessage(m.jid, { text: m.text });
+        } catch (e) {
+          console.error("outbound send failed", e);
+        }
+      }
+    } catch (e) {
+      console.error("fetchOutbound failed", e);
+    }
+  }, OUTBOUND_POLL_MS);
+}
+
 reportState("connecting");
 startCommandLoop();
+if (OUTBOUND_ENABLED) startOutboundLoop();
 start();
