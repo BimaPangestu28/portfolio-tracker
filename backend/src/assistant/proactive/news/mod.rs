@@ -1,11 +1,12 @@
 //! IT-news candidates: fetch (HN + RSS), keyword-score for the owner's stack,
 //! merge/dedup, and shortlist. Selection of the final 3 happens in `digest`.
 
+pub mod digest;
 pub mod extract;
 pub mod hackernews;
+pub mod llm;
 pub mod rss;
 pub mod seen;
-// `pub mod digest;` and `pub mod llm;` are added in the next task.
 
 use crate::db::Db;
 
