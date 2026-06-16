@@ -157,4 +157,21 @@ export const handlers = [
   http.get("/api/portfolio/benchmark", () => HttpResponse.json([])),
 ];
 
-export const server = setupServer(...handlers);
+// ── CS Admin handlers ───────────────────────────────────────────────────────
+const csHandlers = [
+  http.get("/api/cs/admin/products", () =>
+    HttpResponse.json([
+      { id: 1, name: "Paket A", description: null, price: 150000, currency: "IDR", availability: "ready", active: 1, updated_at: "2026-06-16T00:00:00Z" },
+    ]),
+  ),
+  http.get("/api/cs/admin/escalations", () =>
+    HttpResponse.json([
+      { id: 7, conversation_id: 3, reason: "cannot_answer", summary: "needs quote", status: "open", created_at: "2026-06-16T00:00:00Z", handled_at: null },
+    ]),
+  ),
+  http.get("/api/cs/admin/docs", () => HttpResponse.json([])),
+  http.get("/api/cs/admin/orders", () => HttpResponse.json([])),
+  http.get("/api/cs/admin/conversations", () => HttpResponse.json([])),
+];
+
+export const server = setupServer(...handlers, ...csHandlers);
