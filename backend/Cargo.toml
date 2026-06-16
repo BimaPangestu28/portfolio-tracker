@@ -27,6 +27,9 @@ aes-gcm = "0.10"
 typst-as-lib = "0.15.5"
 typst-pdf = "0.14.2"
 typst-assets = { version = "0.14.2", features = ["fonts"] }
+feed-rs = "2"
+readability = "0.3"
+sha2 = "0.10"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
