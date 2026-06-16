@@ -319,7 +319,7 @@ pub fn render_data_block(d: &BriefingData) -> String {
 
     if !d.news.is_empty() {
         out.push_str("Bacaan pagi (sertakan apa adanya, jangan ubah link):\n");
-        for a in &d.news {
+        for a in d.news.iter().take(3) {
             out.push_str(&format!("- {} — {} {}\n", a.title, a.summary, a.url));
         }
     }
