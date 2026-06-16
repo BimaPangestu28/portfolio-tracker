@@ -21,7 +21,7 @@ fn check_cs_gateway_token(headers: &HeaderMap) -> Result<(), AppError> {
         Some(exp) => got == Some(exp.as_str()),
         None      => true, // unset = open (dev)
     };
-    if ok { Ok(()) } else { Err(AppError::BadRequest("bad gateway token".into())) }
+    if ok { Ok(()) } else { Err(AppError::Unauthorized("bad gateway token".into())) }
 }
 
 fn lock_cs_wa(s: &AppState) -> Result<std::sync::MutexGuard<'_, WaState>, AppError> {
