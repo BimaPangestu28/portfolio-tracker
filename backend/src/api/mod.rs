@@ -52,9 +52,14 @@ pub fn router(state: AppState) -> Router {
 
     // Authenticated by the shared x-gateway-token (checked inside the handlers).
     let gateway = Router::new()
-        .route("/chat/whatsapp/inbound", post(whatsapp::inbound))
-        .route("/whatsapp/state", post(whatsapp::push_state))
-        .route("/whatsapp/commands", get(whatsapp::poll_commands));
+        .route("/chat/whatsapp/inbound",        post(whatsapp::inbound))
+        .route("/whatsapp/state",               post(whatsapp::push_state))
+        .route("/whatsapp/commands",            get(whatsapp::poll_commands))
+        // CS WhatsApp gateway (second connection, CS_GATEWAY_TOKEN)
+        .route("/cs/chat/whatsapp/inbound",     post(cs_whatsapp::inbound))
+        .route("/cs/whatsapp/state",            post(cs_whatsapp::push_state))
+        .route("/cs/whatsapp/commands",         get(cs_whatsapp::poll_commands))
+        .route("/cs/whatsapp/outbound",         get(cs_whatsapp::poll_outbound));
 
     // Require a valid JWT (when auth is configured).
     let protected = Router::new()
@@ -158,6 +163,10 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/ingest/review/:id/confirm", post(ingest::confirm_review))
         .route("/ingest/review/:id/reject", post(ingest::reject_review))
+        .route("/cs/whatsapp/status",             get(cs_whatsapp::status))
+        .route("/cs/whatsapp/connect",            post(cs_whatsapp::connect))
+        .route("/cs/whatsapp/disconnect",         post(cs_whatsapp::disconnect))
+        .route("/cs/admin/conversations/:id/reply", post(cs_admin::reply_conversation))
         .route("/cs/admin/docs", get(cs_admin::list_docs).post(cs_admin::create_doc))
         .route(
             "/cs/admin/docs/:id",
