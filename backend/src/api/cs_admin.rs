@@ -255,3 +255,40 @@ pub async fn handle_escalation(
         .map_err(|e| AppError::BadRequest(e.to_string()))?;
     Ok(Json(()))
 }
+
+// ----------------------------- Owner reply -----------------------------
+
+#[derive(Deserialize)]
+pub struct ReplyIn {
+    pub text: String,
+}
+
+/// Owner reply to a CS conversation from the inbox. Stored as an assistant
+/// message; for WhatsApp conversations with a `wa_jid`, the message is also
+/// enqueued for delivery to the customer over the CS number.
+pub async fn reply_conversation(
+    State(s): State<AppState>,
+    Path(id): Path<i64>,
+    Json(b): Json<ReplyIn>,
+) -> Result<Json<()>, AppError> {
+    let text = b.text.trim();
+    if text.is_empty() {
+        return Err(AppError::BadRequest("empty reply".into()));
+    }
+
+    // Use conversation_get for O(1) lookup rather than scanning the list.
+    let conv = repo::conversation_get(&s.db, id)
+        .await
+        .map_err(AppError::Other)?
+        .ok_or(AppError::NotFound)?;
+
+    repo::message_add(&s.db, id, "assistant", text).await.map_err(AppError::Other)?;
+    repo::conversation_touch(&s.db, id).await.map_err(AppError::Other)?;
+
+    if conv.channel == "whatsapp" {
+        if let Some(jid) = conv.wa_jid.as_deref() {
+            crate::cs::wa_outbound::push(&s.cs_outbound, jid, text);
+        }
+    }
+    Ok(Json(()))
+}
