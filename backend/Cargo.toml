@@ -30,6 +30,7 @@ typst-assets = { version = "0.14.2", features = ["fonts"] }
 feed-rs = "2"
 readability = "0.3"
 sha2 = "0.10"
+url = "2"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

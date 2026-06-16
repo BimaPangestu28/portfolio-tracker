@@ -6,6 +6,7 @@ pub mod briefing;
 pub mod compose;
 pub mod evening_review;
 pub mod monthly_recap;
+pub mod news;
 pub mod plan;
 pub mod recap;
 pub mod tick;
