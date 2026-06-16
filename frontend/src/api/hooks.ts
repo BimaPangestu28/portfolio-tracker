@@ -406,3 +406,35 @@ export const useCsEscalations = () =>
   useQuery({ queryKey: ["cs-escalations"], queryFn: () => api.get("/cs/admin/escalations", z.array(CsEscalationSchema)) });
 export const useHandleEscalation = () =>
   useInvalidatingMutation((id: number) => api.post(`/cs/admin/escalations/${id}/handle`, z.unknown(), {}), ["cs-escalations", "cs-conversations"]);
+
+export const useReplyConversation = () =>
+  useInvalidatingMutation(
+    (args: { id: number; text: string }) =>
+      api.post(`/cs/admin/conversations/${args.id}/reply`, z.unknown(), { text: args.text }),
+    ["cs-transcript"],
+  );
+
+// ── CS WhatsApp connection hooks ───────────────────────────────────────────
+
+export const useCsWhatsappStatus = () =>
+  useQuery({
+    queryKey: ["cs-whatsapp-status"],
+    queryFn: () => api.get("/cs/whatsapp/status", WhatsappStatusSchema),
+    refetchInterval: 2000,
+  });
+
+export const useConnectCsWhatsapp = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.post("/cs/whatsapp/connect", z.unknown(), {}),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["cs-whatsapp-status"] }); },
+  });
+};
+
+export const useDisconnectCsWhatsapp = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.post("/cs/whatsapp/disconnect", z.unknown(), {}),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["cs-whatsapp-status"] }); },
+  });
+};

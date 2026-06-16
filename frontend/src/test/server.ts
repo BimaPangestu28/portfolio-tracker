@@ -172,6 +172,12 @@ const csHandlers = [
   http.get("/api/cs/admin/docs", () => HttpResponse.json([])),
   http.get("/api/cs/admin/orders", () => HttpResponse.json([])),
   http.get("/api/cs/admin/conversations", () => HttpResponse.json([])),
+  http.post("/api/cs/admin/conversations/:id/reply", () => HttpResponse.json(null)),
+  http.get("/api/cs/whatsapp/status", () =>
+    HttpResponse.json({ status: "disconnected", qr: null, number: null }),
+  ),
+  http.post("/api/cs/whatsapp/connect", () => HttpResponse.json(null)),
+  http.post("/api/cs/whatsapp/disconnect", () => HttpResponse.json(null)),
 ];
 
 export const server = setupServer(...handlers, ...csHandlers);
