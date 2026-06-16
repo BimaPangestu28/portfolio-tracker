@@ -336,4 +336,10 @@ export const useInvoice = (id: number | null) =>
 // ── News digest hook ───────────────────────────────────────────────────────────
 
 export const useNewsToday = () =>
-  useQuery({ queryKey: ["news", "today"], queryFn: () => api.get("/news/today", NewsTodaySchema) });
+  // The digest is regenerated once each morning, so it's stable all day —
+  // avoid refetching on every window focus.
+  useQuery({
+    queryKey: ["news", "today"],
+    queryFn: () => api.get("/news/today", NewsTodaySchema),
+    staleTime: 60 * 60 * 1000,
+  });

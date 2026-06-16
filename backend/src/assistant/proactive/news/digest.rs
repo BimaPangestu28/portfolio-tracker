@@ -9,13 +9,20 @@ const TOP_N: usize = 3;
 const SEEN_RETENTION_DAYS: i64 = 14;
 
 /// A digest article shaped for the briefing/API (decoded key_points).
+/// A faithful in-memory article from the persisted digest. The briefing only
+/// reads `title`/`summary`/`url` today; the other fields are kept for
+/// completeness (and a future briefing that shows source/points) — hence the
+/// targeted `allow(dead_code)` rather than dropping data the store already holds.
 #[derive(Debug, Clone)]
 pub struct DigestArticle {
+    #[allow(dead_code)]
     pub position: i64,
     pub title: String,
     pub url: String,
+    #[allow(dead_code)]
     pub source: String,
     pub summary: String,
+    #[allow(dead_code)]
     pub key_points: Vec<String>,
 }
 

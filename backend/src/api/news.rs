@@ -32,6 +32,15 @@ pub struct TodayDto {
     pub quiz: Vec<QuizDto>,
 }
 
+/// Decode a stored JSON string-array column, warning (not silently defaulting)
+/// when a row holds malformed JSON — mirrors `digest::load`'s handling.
+fn decode_str_array(json: &str, field: &str) -> Vec<String> {
+    serde_json::from_str(json).unwrap_or_else(|e| {
+        tracing::warn!("news api: malformed {field} json: {e}");
+        Vec::new()
+    })
+}
+
 /// Read-only: today's persisted digest. Never triggers generation.
 pub async fn today(State(s): State<AppState>) -> Result<Json<TodayDto>, AppError> {
     let date = chrono::Utc::now()
@@ -56,7 +65,7 @@ pub async fn today(State(s): State<AppState>) -> Result<Json<TodayDto>, AppError
                 url: a.url,
                 source: a.source,
                 summary: a.summary,
-                key_points: serde_json::from_str(&a.key_points).unwrap_or_default(),
+                key_points: decode_str_array(&a.key_points, "key_points"),
             })
             .collect(),
         quiz: quiz
@@ -64,7 +73,7 @@ pub async fn today(State(s): State<AppState>) -> Result<Json<TodayDto>, AppError
             .map(|q| QuizDto {
                 position: q.position,
                 question: q.question,
-                options: serde_json::from_str(&q.options).unwrap_or_default(),
+                options: decode_str_array(&q.options, "options"),
                 answer_index: q.answer_index,
                 explanation: q.explanation,
                 article_position: q.article_pos,
