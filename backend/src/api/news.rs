@@ -92,7 +92,13 @@ mod tests {
 
     async fn state_with_db() -> AppState {
         let db = crate::db::connect("sqlite::memory:").await.unwrap();
-        AppState { db, wa: Default::default(), tg: Default::default() }
+        AppState {
+            db,
+            wa:          Default::default(),
+            tg:          Default::default(),
+            cs_wa:       Default::default(),
+            cs_outbound: crate::cs::wa_outbound::new_queue(),
+        }
     }
 
     fn today_wib() -> String {

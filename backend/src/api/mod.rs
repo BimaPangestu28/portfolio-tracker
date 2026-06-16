@@ -216,8 +216,10 @@ mod router_tests {
         let db = crate::db::connect("sqlite::memory:").await.unwrap();
         AppState {
             db,
-            wa: Default::default(),
-            tg: Default::default(),
+            wa:          Default::default(),
+            tg:          Default::default(),
+            cs_wa:       Default::default(),
+            cs_outbound: crate::cs::wa_outbound::new_queue(),
         }
     }
 
