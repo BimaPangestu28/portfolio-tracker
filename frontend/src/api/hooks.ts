@@ -16,6 +16,7 @@ import {
   MoverSchema, BenchmarkRowSchema, EventSchema,
   TodoSchema, ReminderSchema, InboxItemSchema,
   InvoiceSchema, ClientSchema,
+  NewsTodaySchema,
   type Account, type Category, type Instrument, type Transaction, type ReviewItem,
   type CashflowCategory, type Cashflow, type Connector, type Goal,
 } from "./schemas";
@@ -331,3 +332,14 @@ export const useClients = () =>
 
 export const useInvoice = (id: number | null) =>
   useQuery({ queryKey: ["invoice", id], enabled: id != null, queryFn: () => api.get(`/invoices/${id}`, InvoiceSchema) });
+
+// ── News digest hook ───────────────────────────────────────────────────────────
+
+export const useNewsToday = () =>
+  // The digest is regenerated once each morning, so it's stable all day —
+  // avoid refetching on every window focus.
+  useQuery({
+    queryKey: ["news", "today"],
+    queryFn: () => api.get("/news/today", NewsTodaySchema),
+    staleTime: 60 * 60 * 1000,
+  });

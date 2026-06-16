@@ -22,6 +22,7 @@ pub mod todos;
 pub mod reminders;
 pub mod clients;
 pub mod invoices;
+pub mod news;
 
 use rust_decimal::Decimal;
 use std::str::FromStr;

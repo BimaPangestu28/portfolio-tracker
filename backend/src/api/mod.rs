@@ -9,6 +9,7 @@ pub mod google;
 pub mod inbox;
 pub mod ingest;
 pub mod invoices;
+pub mod news;
 pub mod reminders;
 pub mod todos;
 pub mod upwork;
@@ -108,6 +109,7 @@ pub fn router(state: AppState) -> Router {
         .route("/invoices/:id", get(invoices::get))
         .route("/invoices/:id/pdf", get(invoices::pdf))
         .route("/clients", get(invoices::list_clients))
+        .route("/news/today", get(news::today))
         .route("/goals", get(goals::list_goals).post(goals::create_goal))
         .route("/goals/:id", delete(goals::delete_goal))
         .route(

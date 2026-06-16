@@ -27,6 +27,7 @@ import {
   Sparkles,
   Lock,
   Settings,
+  Newspaper,
 } from "lucide-react";
 import { useTheme } from "@/components/theme-provider";
 import { useRefreshPrices } from "@/api/hooks";
@@ -58,6 +59,7 @@ const NAV_GROUPS: NavGroup[] = [
       { to: "/tugas",   label: "Tugas",     icon: ListChecks },
       { to: "/planner", label: "Rencana",   icon: Target },
       { to: "/budget",  label: "Budget",    icon: Banknote },
+      { to: "/news",    label: "Berita",    icon: Newspaper },
     ],
   },
   {
