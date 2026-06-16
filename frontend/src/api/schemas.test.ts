@@ -50,10 +50,11 @@ test("account schema requires core fields", () => {
 test("NewsTodaySchema parses an available digest", () => {
   const parsed = NewsTodaySchema.parse({
     available: true, date: "2026-06-16",
-    articles: [{ position: 0, title: "Rust 2.0", url: "https://ex.com/r", source: "HN", summary: "rilis", key_points: ["a"] }],
+    articles: [{ position: 0, title: "Rust 2.0", url: "https://ex.com/r", source: "HN", summary: "rilis", key_points: ["a"], image_url: "https://ex.com/i.png", read_minutes: 4 }],
     quiz: [{ position: 0, question: "apa?", options: ["x", "y"], answer_index: 1, explanation: "krn", article_position: 0 }],
   });
   expect(parsed.articles[0].title).toBe("Rust 2.0");
+  expect(parsed.articles[0].read_minutes).toBe(4);
   expect(parsed.quiz[0].answer_index).toBe(1);
 });
 

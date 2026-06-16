@@ -18,6 +18,23 @@ export default function NewsPage() {
           </header>
           {q.data.articles.map((a) => (
             <article key={a.position} className="card card-pad">
+              {a.image_url != null && (
+                <img
+                  src={a.image_url}
+                  alt=""
+                  loading="lazy"
+                  className="w-full h-40 object-cover rounded-md mb-3"
+                  onError={(e) => { e.currentTarget.style.display = "none"; }}
+                />
+              )}
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+                <span className="badge badge-neutral">{a.source}</span>
+                {a.read_minutes != null && (
+                  <span style={{ fontSize: 12, color: "hsl(var(--muted-foreground))" }}>
+                    ⏱ {a.read_minutes} mnt baca
+                  </span>
+                )}
+              </div>
               <a
                 href={a.url}
                 target="_blank"
@@ -28,15 +45,6 @@ export default function NewsPage() {
               >
                 {a.title}
               </a>
-              <span
-                style={{
-                  marginLeft: 8,
-                  fontSize: 12,
-                  color: "hsl(var(--muted-foreground))",
-                }}
-              >
-                {a.source}
-              </span>
               <p style={{ marginTop: 8 }}>{a.summary}</p>
               {a.key_points.length > 0 && (
                 <ul style={{ marginTop: 8, paddingLeft: 20, fontSize: 13 }}>
@@ -47,7 +55,7 @@ export default function NewsPage() {
               )}
             </article>
           ))}
-          <NewsQuiz questions={q.data.quiz} />
+          <NewsQuiz questions={q.data.quiz} date={q.data.date ?? ""} />
         </div>
       ) : null}
     </QueryState>
