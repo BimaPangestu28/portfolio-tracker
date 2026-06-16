@@ -41,8 +41,8 @@ export default function CsOrdersPage() {
     <div>
       <div className="flex items-center justify-between" style={{ marginBottom: 18, flexWrap: "wrap", gap: 10 }}>
         <div>
-          <h1 className="t-h1">Order / Booking</h1>
-          <div className="t-sm t-muted" style={{ marginTop: 2 }}>Lacak pesanan &amp; status pelanggan</div>
+          <h1 className="t-h1">Order / Booking / Proyek</h1>
+          <div className="t-sm t-muted" style={{ marginTop: 2 }}>Lacak status pesanan, booking, atau proyek/kontrak. Bot menjawab via referensi + kontak.</div>
         </div>
         <button
           type="button"

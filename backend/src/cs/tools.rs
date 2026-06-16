@@ -29,12 +29,12 @@ pub fn definitions() -> serde_json::Value {
         },
         {
             "name": "lookup_order",
-            "description": "Look up the status of an order/booking. Requires BOTH the order reference AND the email or phone the customer used — for their privacy you cannot look up an order without a matching contact.",
+            "description": "Look up the status of an order, booking, or project/contract. Requires BOTH the reference AND the email or phone the customer used — for their privacy you cannot look anything up without a matching contact.",
             "input_schema": {
                 "type": "object",
                 "properties": {
-                    "order_ref": { "type": "string", "description": "The order/booking reference the customer quotes" },
-                    "contact":   { "type": "string", "description": "The email or phone on the order, to verify ownership" }
+                    "order_ref": { "type": "string", "description": "The order, booking, or project/contract reference the customer quotes" },
+                    "contact":   { "type": "string", "description": "The email or phone on record, to verify ownership" }
                 },
                 "required": ["order_ref", "contact"]
             }
