@@ -101,7 +101,17 @@ async fn generate(db: &Db, date: &str) -> anyhow::Result<()> {
         } else {
             Some((((text.split_whitespace().count() as i64) + 199) / 200).max(1))
         };
-        let s = llm::summarize(&a.title, &a.source, &text, &snippet).await;
+        let mut material = text.clone();
+        if a.source == "HN" {
+            if let Some(oid) = &a.hn_object_id {
+                let comments = super::hackernews::fetch_top_comments(&client, oid).await;
+                if !comments.is_empty() {
+                    material.push_str("\n\nDiskusi Hacker News (komentar teratas):\n");
+                    material.push_str(&comments.join("\n---\n"));
+                }
+            }
+        }
+        let s = llm::summarize(&a.title, &a.source, &material, &snippet).await;
         summaries_block.push_str(&format!(
             "Artikel {i} — {}\nRingkasan: {}\nPoin: {}\n\n",
             a.title, s.summary, s.key_points.join("; ")

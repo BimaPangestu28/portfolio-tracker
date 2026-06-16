@@ -19,6 +19,7 @@ pub struct Article {
     pub score: i64,
     pub published_at: Option<String>,
     pub relevance: i32,
+    pub hn_object_id: Option<String>,
 }
 
 /// Stack keywords (lowercase). Each distinct match in a title adds 1 to relevance.
@@ -126,7 +127,7 @@ mod tests {
     }
 
     fn art(url: &str, rel: i32, score: i64) -> Article {
-        Article { title: url.into(), url: url.into(), source: "t".into(), score, published_at: None, relevance: rel }
+        Article { title: url.into(), url: url.into(), source: "t".into(), score, published_at: None, relevance: rel, hn_object_id: None }
     }
 
     #[test]
