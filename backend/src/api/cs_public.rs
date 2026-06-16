@@ -100,21 +100,23 @@ pub async fn message(
 
     let conv = crate::repo::cs::conversation_by_token(&s.db, &b.session_token)
         .await
-        .map_err(AppError::Other)?
+        .map_err(|e| AppError::PublicInternal(format!("{e:#}")))?
         .ok_or_else(|| AppError::Unauthorized("unknown session".into()))?;
 
-    let count = crate::repo::cs::message_all(&s.db, conv.id).await.map_err(AppError::Other)?.len() as i64;
+    let count = crate::repo::cs::message_count(&s.db, conv.id)
+        .await
+        .map_err(|e| AppError::PublicInternal(format!("{e:#}")))?;
     if count >= MAX_MESSAGES_PER_CONVERSATION {
         return Err(AppError::BadRequest("conversation limit reached; please start a new chat or contact us directly".into()));
     }
 
     let model = ClaudeClient::from_env()
-        .map_err(|e| AppError::Other(anyhow::anyhow!("chat unavailable: {e}")))?;
+        .map_err(|e| AppError::PublicInternal(format!("chat unavailable: {e:#}")))?;
     let embedder = CsEmbedder::from_env()
-        .map_err(|e| AppError::Other(anyhow::anyhow!("cs unavailable: {e}")))?;
+        .map_err(|e| AppError::PublicInternal(format!("cs unavailable: {e:#}")))?;
     let reply = crate::cs::agent::handle_message(&s.db, &embedder, &model, conv.id, msg)
         .await
-        .map_err(AppError::Other)?;
+        .map_err(|e| AppError::PublicInternal(format!("{e:#}")))?;
     Ok(Json(MessageOut { reply }))
 }
 

@@ -53,6 +53,11 @@ pub fn allow(key: &str, window_secs: u64, max: u32) -> bool {
         Ok(g) => g,
         Err(poisoned) => poisoned.into_inner(),
     };
+    // Evict stale entries when the map grows large to bound memory usage.
+    if map.len() > 5_000 {
+        let now = now_secs();
+        map.retain(|_, w| now.saturating_sub(w.window_start) < window_secs.saturating_mul(2));
+    }
     check(&mut map, key, now_secs(), window_secs, max)
 }
 

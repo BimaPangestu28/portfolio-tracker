@@ -312,6 +312,65 @@ mod router_tests {
 
     #[serial]
     #[tokio::test]
+    async fn cs_cors_rejects_unlisted_origin_and_allows_listed_origin() {
+        std::env::set_var("CS_WIDGET_KEY", "test-key");
+        std::env::set_var("CS_ALLOWED_ORIGINS", "https://allowed.example.com");
+
+        let app = router(test_state().await);
+
+        // Negative case: evil.com must NOT receive an Allow-Origin echo.
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("OPTIONS")
+                    .uri("/public/cs/session")
+                    .header("origin", "https://evil.com")
+                    .header("access-control-request-method", "POST")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let acao = res
+            .headers()
+            .get("access-control-allow-origin")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("");
+        assert!(
+            acao != "*" && acao != "https://evil.com",
+            "evil.com must not be echoed in ACAO, got: {acao:?}",
+        );
+
+        // Positive case: allowed.example.com SHOULD be echoed.
+        let res2 = app
+            .oneshot(
+                Request::builder()
+                    .method("OPTIONS")
+                    .uri("/public/cs/session")
+                    .header("origin", "https://allowed.example.com")
+                    .header("access-control-request-method", "POST")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let acao2 = res2
+            .headers()
+            .get("access-control-allow-origin")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("");
+        assert_eq!(
+            acao2, "https://allowed.example.com",
+            "allowed.example.com must be echoed in ACAO",
+        );
+
+        std::env::remove_var("CS_WIDGET_KEY");
+        std::env::remove_var("CS_ALLOWED_ORIGINS");
+    }
+
+    #[serial]
+    #[tokio::test]
     async fn reminder_create_inbox_unresolve_protected() {
         std::env::set_var("AUTH_PASSWORD", "pw");
         std::env::set_var("JWT_SECRET", "router-test-rem-create");

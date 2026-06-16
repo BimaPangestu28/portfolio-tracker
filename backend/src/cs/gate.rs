@@ -1,6 +1,7 @@
 //! Public-channel gatekeeping: env config validation, Origin allowlist, widget
 //! site-key check, and opaque session-token generation.
 
+use constant_time_eq::constant_time_eq;
 use rand::RngCore;
 
 /// `Ok` when CS public config is coherent: both `CS_ALLOWED_ORIGINS` and
@@ -46,7 +47,7 @@ pub fn origin_allowed(allow: &[String], origin: Option<&str>) -> bool {
 /// key is configured (the endpoint must be explicitly enabled).
 pub fn site_key_ok(configured: Option<&str>, presented: Option<&str>) -> bool {
     match (configured, presented) {
-        (Some(c), Some(p)) => c == p,
+        (Some(c), Some(p)) => constant_time_eq(c.as_bytes(), p.as_bytes()),
         _ => false,
     }
 }

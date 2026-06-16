@@ -156,6 +156,17 @@ pub async fn message_all(db: &Db, conversation_id: i64) -> anyhow::Result<Vec<Me
     Ok(rows)
 }
 
+/// COUNT(*) of messages in a conversation — cheaper than fetching all rows.
+pub async fn message_count(db: &Db, conversation_id: i64) -> anyhow::Result<i64> {
+    let count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM cs_message WHERE conversation_id = ?",
+    )
+    .bind(conversation_id)
+    .fetch_one(db)
+    .await?;
+    Ok(count)
+}
+
 /// Last `limit` messages for one conversation, oldest first — LLM context window.
 pub async fn message_recent(db: &Db, conversation_id: i64, limit: i64) -> anyhow::Result<Vec<MessageRow>> {
     let mut rows = sqlx::query_as::<_, MessageRow>(
@@ -601,6 +612,17 @@ mod tests {
         let recent = message_recent(&db, conv.id, 2).await.unwrap();
         let recent_contents: Vec<&str> = recent.iter().map(|m| m.content.as_str()).collect();
         assert_eq!(recent_contents, vec!["halo juga", "harga berapa?"]); // last 2, oldest first
+    }
+
+    #[tokio::test]
+    async fn message_count_returns_correct_total() {
+        let db = mem_db().await;
+        let conv = conversation_create(&db, "web", None, None, None, "tok-cnt").await.unwrap();
+        assert_eq!(message_count(&db, conv.id).await.unwrap(), 0);
+        message_add(&db, conv.id, "user", "a").await.unwrap();
+        message_add(&db, conv.id, "assistant", "b").await.unwrap();
+        message_add(&db, conv.id, "user", "c").await.unwrap();
+        assert_eq!(message_count(&db, conv.id).await.unwrap(), 3);
     }
 
     #[tokio::test]
