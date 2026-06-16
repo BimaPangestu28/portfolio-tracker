@@ -89,6 +89,17 @@ pub async fn conversation_touch(db: &Db, id: i64) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Look up a single conversation by its row id. Returns None when not found.
+pub async fn conversation_get(db: &Db, id: i64) -> anyhow::Result<Option<ConversationRow>> {
+    let row = sqlx::query_as::<_, ConversationRow>(
+        "SELECT * FROM cs_conversation WHERE id = ?",
+    )
+    .bind(id)
+    .fetch_optional(db)
+    .await?;
+    Ok(row)
+}
+
 /// Conversations most-recently-active first — for the admin CS inbox.
 pub async fn conversation_list_recent(db: &Db, limit: i64) -> anyhow::Result<Vec<ConversationRow>> {
     let rows = sqlx::query_as::<_, ConversationRow>(
@@ -517,6 +528,20 @@ mod tests {
     }
 
     // --- Task 2: Conversation ---
+
+    #[tokio::test]
+    async fn conversation_get_returns_row_and_none_for_missing() {
+        let db   = mem_db().await;
+        let conv = conversation_create(&db, "web", Some("Ani"), None, None, "tok-get")
+            .await
+            .unwrap();
+        let found = conversation_get(&db, conv.id).await.unwrap();
+        assert!(found.is_some());
+        assert_eq!(found.unwrap().id, conv.id);
+
+        let missing = conversation_get(&db, 99999).await.unwrap();
+        assert!(missing.is_none());
+    }
 
     #[tokio::test]
     async fn create_and_fetch_conversation_by_token() {
