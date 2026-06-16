@@ -1,4 +1,4 @@
-import { PortfolioSummarySchema, AccountSchema } from "./schemas";
+import { PortfolioSummarySchema, AccountSchema, NewsTodaySchema } from "./schemas";
 
 test("parses a portfolio summary", () => {
   const json = {
@@ -45,4 +45,19 @@ test("xirr may be null", () => {
 test("account schema requires core fields", () => {
   const a = AccountSchema.parse({ id: 1, name: "M", account_type: "manual", institution: null, native_currency: "USD", note: null, created_at: "2026-01-01T00:00:00Z" });
   expect(a.name).toBe("M");
+});
+
+test("NewsTodaySchema parses an available digest", () => {
+  const parsed = NewsTodaySchema.parse({
+    available: true, date: "2026-06-16",
+    articles: [{ position: 0, title: "Rust 2.0", url: "https://ex.com/r", source: "HN", summary: "rilis", key_points: ["a"] }],
+    quiz: [{ position: 0, question: "apa?", options: ["x", "y"], answer_index: 1, explanation: "krn", article_position: 0 }],
+  });
+  expect(parsed.articles[0].title).toBe("Rust 2.0");
+  expect(parsed.quiz[0].answer_index).toBe(1);
+});
+
+test("NewsTodaySchema parses an empty (unavailable) digest", () => {
+  const parsed = NewsTodaySchema.parse({ available: false, date: null, articles: [], quiz: [] });
+  expect(parsed.available).toBe(false);
 });

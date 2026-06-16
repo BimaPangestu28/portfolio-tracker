@@ -432,3 +432,34 @@ export const InvoiceLineItemSchema = z.object({
   amount: z.number(),
 });
 export type InvoiceLineItem = z.infer<typeof InvoiceLineItemSchema>;
+
+// ── News digest ────────────────────────────────────────────────────────────────
+
+export const NewsArticleSchema = z.object({
+  position: z.number(),
+  title: z.string(),
+  url: z.string(),
+  source: z.string(),
+  summary: z.string(),
+  key_points: z.array(z.string()),
+});
+
+export const NewsQuizSchema = z.object({
+  position: z.number(),
+  question: z.string(),
+  options: z.array(z.string()),
+  answer_index: z.number(),
+  explanation: z.string().nullable(),
+  article_position: z.number().nullable(),
+});
+
+export const NewsTodaySchema = z.object({
+  available: z.boolean(),
+  date: z.string().nullable(),
+  articles: z.array(NewsArticleSchema),
+  quiz: z.array(NewsQuizSchema),
+});
+
+export type NewsToday = z.infer<typeof NewsTodaySchema>;
+export type NewsArticle = z.infer<typeof NewsArticleSchema>;
+export type NewsQuiz = z.infer<typeof NewsQuizSchema>;
