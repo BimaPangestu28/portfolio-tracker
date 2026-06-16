@@ -4,10 +4,14 @@
 use crate::llm::claude::{ClaudeClient, Part};
 use serde::Deserialize;
 
-pub const SUMMARY_SYSTEM: &str = "You summarize one IT/dev news article in Indonesian for a \
-senior engineer. Output ONLY minified JSON: {\"summary\": string, \"key_points\": string[]}. \
-summary = 2-3 calm sentences. key_points = 2-4 short bullets. Use ONLY the provided text; never \
-invent facts. No markdown, no code fences.";
+pub const SUMMARY_SYSTEM: &str = "You summarize one IT/dev news item in Indonesian for a senior \
+engineer who wants the substance, not fluff. Output ONLY minified JSON: {\"summary\": string, \
+\"key_points\": string[]}. Write summary as ONE substantial paragraph of about 5-7 sentences that \
+explains concretely WHAT the thing is, WHAT it actually does, WHY it matters, and the key technical \
+or practical detail — extract specifics. Do NOT merely restate or paraphrase the title. If the \
+provided text includes a 'Diskusi Hacker News' section, use those comments to explain what the \
+project really does and the community's reaction. key_points = 3-5 concrete, specific bullets (not \
+vague restatements). Use ONLY the provided text; never invent facts. No markdown, no code fences.";
 
 pub const QUIZ_SYSTEM: &str = "You write a short retention quiz in Indonesian from the day's \
 article summaries. Output ONLY minified JSON: an array of \

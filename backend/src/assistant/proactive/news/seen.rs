@@ -53,7 +53,7 @@ mod tests {
     use super::*;
 
     fn art(url: &str) -> Article {
-        Article { title: "t".into(), url: url.into(), source: "s".into(), score: 0, published_at: None, relevance: 1 }
+        Article { title: "t".into(), url: url.into(), source: "s".into(), score: 0, published_at: None, relevance: 1, hn_object_id: None }
     }
 
     #[tokio::test]

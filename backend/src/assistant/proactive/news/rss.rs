@@ -43,6 +43,7 @@ pub fn parse(body: &[u8], source: &str) -> anyhow::Result<Vec<Article>> {
                 source: src.clone(),
                 score: 0,
                 published_at: e.published.or(e.updated).map(|d| d.to_rfc3339()),
+                hn_object_id: None,
             })
         })
         .collect())
