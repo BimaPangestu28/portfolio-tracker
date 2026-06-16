@@ -29,8 +29,8 @@ export function mountWidget(cfg: WidgetConfig) {
   root.innerHTML = `
     <style>${STYLE}</style>
     <button class="bubble" aria-label="Chat">💬</button>
-    <div class="panel" role="dialog" aria-label="${cfg.title}">
-      <div class="header">${cfg.title}</div>
+    <div class="panel" role="dialog" aria-label="chat">
+      <div class="header"></div>
       <div class="body"></div>
       <form class="form">
         <input name="name" placeholder="Nama" autocomplete="name" />
@@ -47,6 +47,10 @@ export function mountWidget(cfg: WidgetConfig) {
 
   const $ = <T extends Element>(sel: string) => root.querySelector(sel) as T;
   const panel = $<HTMLDivElement>(".panel");
+
+  // Fix 1 (XSS): set dynamic values via textContent/setAttribute after innerHTML is set
+  ($<HTMLDivElement>(".header")).textContent = cfg.title;
+  panel.setAttribute("aria-label", cfg.title);
   const body = $<HTMLDivElement>(".body");
   const form = $<HTMLFormElement>(".form");
   const foot = $<HTMLDivElement>(".foot");
@@ -65,8 +69,10 @@ export function mountWidget(cfg: WidgetConfig) {
 
   $(".bubble").addEventListener("click", () => panel.classList.toggle("open"));
 
+  let starting = false;
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
+    if (starting) return;
     const data = new FormData(form);
     const lead: Lead = {
       name: String(data.get("name") ?? ""),
@@ -76,6 +82,9 @@ export function mountWidget(cfg: WidgetConfig) {
     const problem = validateLead(lead);
     if (problem) { err.textContent = problem; return; }
     err.textContent = "";
+    const submitBtn = $<HTMLButtonElement>('button[type="submit"]');
+    starting = true;
+    submitBtn.disabled = true;
     try {
       token = await api.startSession(lead);
       form.style.display = "none";
@@ -83,12 +92,19 @@ export function mountWidget(cfg: WidgetConfig) {
       addMsg(`Halo ${lead.name}! Ada yang bisa kami bantu?`, "bot");
     } catch (e2) {
       err.textContent = (e2 as Error).message;
+    } finally {
+      starting = false;
+      submitBtn.disabled = false;
     }
   });
 
+  let sending = false;
   const send = async () => {
     const text = input.value.trim();
-    if (!text || !token) return;
+    if (!text || !token || sending) return;
+    const sendBtn = $<HTMLButtonElement>(".send");
+    sending = true;
+    sendBtn.disabled = true;
     addMsg(text, "user");
     input.value = "";
     try {
@@ -96,6 +112,9 @@ export function mountWidget(cfg: WidgetConfig) {
       addMsg(reply, "bot");
     } catch (e2) {
       addMsg(`⚠️ ${(e2 as Error).message}`, "bot");
+    } finally {
+      sending = false;
+      sendBtn.disabled = false;
     }
   };
   $(".send").addEventListener("click", send);

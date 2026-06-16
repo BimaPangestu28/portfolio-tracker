@@ -26,4 +26,8 @@ describe("readConfig", () => {
   it("throws when data-key is missing", () => {
     expect(() => readConfig(scriptEl({}))).toThrow(/data-key/);
   });
+
+  it("throws when data-key is present but empty", () => {
+    expect(() => readConfig(scriptEl({ "data-key": "" }))).toThrow(/data-key/);
+  });
 });

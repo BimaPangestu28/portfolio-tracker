@@ -36,4 +36,30 @@ describe("CsApi", () => {
     const api = new CsApi({ siteKey: "k", apiBase: "/api", title: "x" });
     await expect(api.sendMessage("tok", "hi")).rejects.toThrow(/slow down/);
   });
+
+  it("history() posts to /public/cs/history with site_key+session_token and returns array", async () => {
+    const messages = [
+      { role: "user", content: "Halo", created_at: "2024-01-01T00:00:00Z" },
+      { role: "assistant", content: "Hai!", created_at: "2024-01-01T00:00:01Z" },
+    ];
+    const f = mockFetch(200, messages);
+    vi.stubGlobal("fetch", f);
+    const api = new CsApi({ siteKey: "site-abc", apiBase: "/api", title: "x" });
+    const result = await api.history("tok-history");
+    expect(result).toEqual(messages);
+    const [url, init] = f.mock.calls[0];
+    expect(url).toBe("/api/public/cs/history");
+    expect(JSON.parse((init as RequestInit).body as string)).toMatchObject({
+      site_key: "site-abc",
+      session_token: "tok-history",
+    });
+  });
+
+  it("surfaces friendly message when fetch rejects (network error)", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("Failed to fetch")));
+    const api = new CsApi({ siteKey: "k", apiBase: "/api", title: "x" });
+    await expect(api.sendMessage("tok", "hi")).rejects.toThrow(
+      "Tidak dapat terhubung ke server. Periksa koneksi internet kamu.",
+    );
+  });
 });

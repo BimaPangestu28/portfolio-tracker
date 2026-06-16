@@ -5,7 +5,7 @@ import { mountWidget } from "./ui";
 // fall back to the last script with data-key for async/defer edge cases).
 function ownScript(): HTMLScriptElement | null {
   if (document.currentScript instanceof HTMLScriptElement) return document.currentScript;
-  const all = Array.from(document.querySelectorAll("script[data-key]"));
+  const all = Array.from(document.querySelectorAll('script[src$="cs-widget.js"][data-key]'));
   return (all[all.length - 1] as HTMLScriptElement) ?? null;
 }
 

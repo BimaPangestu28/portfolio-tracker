@@ -7,11 +7,16 @@ export class CsApi {
   constructor(private cfg: WidgetConfig) {}
 
   private async post<T>(path: string, body: unknown): Promise<T> {
-    const res = await fetch(`${this.cfg.apiBase}${path}`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-    });
+    let res: Response;
+    try {
+      res = await fetch(`${this.cfg.apiBase}${path}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    } catch {
+      throw new Error("Tidak dapat terhubung ke server. Periksa koneksi internet kamu.");
+    }
     if (!res.ok) {
       let msg = `HTTP ${res.status}`;
       try { const b = await res.json(); if (b?.error) msg = b.error; } catch { /* keep default */ }
