@@ -31,6 +31,7 @@ feed-rs = "2"
 readability = "0.3"
 sha2 = "0.10"
 url = "2"
+scraper = "0.20"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
