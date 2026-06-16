@@ -65,6 +65,9 @@ pub async fn update_doc(
     Path(id): Path<i64>,
     Json(b): Json<DocIn>,
 ) -> Result<Json<()>, AppError> {
+    if b.title.trim().is_empty() || b.body.trim().is_empty() {
+        return Err(AppError::BadRequest("title and body are required".into()));
+    }
     repo::kb_doc_update(&s.db, id, b.title.trim(), b.source.as_deref(), &b.body)
         .await
         .map_err(AppError::Other)?;
