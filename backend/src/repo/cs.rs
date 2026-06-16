@@ -65,21 +65,27 @@ pub async fn conversation_set_status(db: &Db, id: i64, status: &str) -> anyhow::
     if !matches!(status, "bot" | "needs_human" | "resolved") {
         anyhow::bail!("invalid status '{}'", status);
     }
-    sqlx::query("UPDATE cs_conversation SET status = ? WHERE id = ?")
+    let res = sqlx::query("UPDATE cs_conversation SET status = ? WHERE id = ?")
         .bind(status)
         .bind(id)
         .execute(db)
         .await?;
+    if res.rows_affected() == 0 {
+        anyhow::bail!("conversation {id} not found");
+    }
     Ok(())
 }
 
 pub async fn conversation_touch(db: &Db, id: i64) -> anyhow::Result<()> {
     let now = chrono::Utc::now().to_rfc3339();
-    sqlx::query("UPDATE cs_conversation SET last_msg_at = ? WHERE id = ?")
+    let res = sqlx::query("UPDATE cs_conversation SET last_msg_at = ? WHERE id = ?")
         .bind(&now)
         .bind(id)
         .execute(db)
         .await?;
+    if res.rows_affected() == 0 {
+        anyhow::bail!("conversation {id} not found");
+    }
     Ok(())
 }
 
@@ -203,7 +209,7 @@ pub async fn kb_doc_insert(db: &Db, title: &str, source: Option<&str>, body: &st
 
 pub async fn kb_doc_update(db: &Db, id: i64, title: &str, source: Option<&str>, body: &str) -> anyhow::Result<()> {
     let now = chrono::Utc::now().to_rfc3339();
-    sqlx::query("UPDATE cs_kb_doc SET title = ?, source = ?, body = ?, updated_at = ? WHERE id = ?")
+    let res = sqlx::query("UPDATE cs_kb_doc SET title = ?, source = ?, body = ?, updated_at = ? WHERE id = ?")
         .bind(title)
         .bind(source)
         .bind(body)
@@ -211,6 +217,9 @@ pub async fn kb_doc_update(db: &Db, id: i64, title: &str, source: Option<&str>, 
         .bind(id)
         .execute(db)
         .await?;
+    if res.rows_affected() == 0 {
+        anyhow::bail!("kb_doc {id} not found");
+    }
     Ok(())
 }
 
@@ -323,12 +332,15 @@ pub async fn product_insert(
 
 pub async fn product_set_active(db: &Db, id: i64, active: bool) -> anyhow::Result<()> {
     let now = chrono::Utc::now().to_rfc3339();
-    sqlx::query("UPDATE cs_product SET active = ?, updated_at = ? WHERE id = ?")
+    let res = sqlx::query("UPDATE cs_product SET active = ?, updated_at = ? WHERE id = ?")
         .bind(if active { 1 } else { 0 })
         .bind(&now)
         .bind(id)
         .execute(db)
         .await?;
+    if res.rows_affected() == 0 {
+        anyhow::bail!("product {id} not found");
+    }
     Ok(())
 }
 
@@ -395,6 +407,11 @@ pub async fn order_upsert(
 
 /// Guarded lookup: only returns the order when BOTH the ref and the contact match
 /// (contact compared case-insensitively). Prevents enumeration by ref alone.
+///
+/// Orders whose `customer_contact` is NULL are intentionally unreachable via this
+/// function — a customer cannot prove ownership without a contact to match against.
+/// This is part of the anti-enumeration guard, not a bug: NULL-contact orders can
+/// only be accessed through the admin `order_list` path.
 pub async fn order_lookup(db: &Db, external_ref: &str, contact: &str) -> anyhow::Result<Option<OrderRow>> {
     let row = sqlx::query_as::<_, OrderRow>(
         "SELECT * FROM cs_order WHERE external_ref = ? AND LOWER(customer_contact) = LOWER(?)",
@@ -468,11 +485,14 @@ pub async fn escalation_get(db: &Db, id: i64) -> anyhow::Result<Option<Escalatio
 
 pub async fn escalation_mark_handled(db: &Db, id: i64) -> anyhow::Result<()> {
     let now = chrono::Utc::now().to_rfc3339();
-    sqlx::query("UPDATE cs_escalation SET status = 'handled', handled_at = ? WHERE id = ?")
+    let res = sqlx::query("UPDATE cs_escalation SET status = 'handled', handled_at = ? WHERE id = ?")
         .bind(&now)
         .bind(id)
         .execute(db)
         .await?;
+    if res.rows_affected() == 0 {
+        anyhow::bail!("escalation {id} not found");
+    }
     Ok(())
 }
 
@@ -686,5 +706,37 @@ mod tests {
         let handled = escalation_get(&db, esc.id).await.unwrap().unwrap();
         assert_eq!(handled.status, "handled");
         assert!(handled.handled_at.is_some());
+    }
+
+    // --- Fix 1: not-found errors on UPDATE functions ---
+
+    #[tokio::test]
+    async fn set_status_on_missing_conversation_errors() {
+        let db = mem_db().await;
+        assert!(conversation_set_status(&db, 999, "resolved").await.is_err());
+    }
+
+    #[tokio::test]
+    async fn touch_on_missing_conversation_errors() {
+        let db = mem_db().await;
+        assert!(conversation_touch(&db, 999).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn kb_doc_update_on_missing_doc_errors() {
+        let db = mem_db().await;
+        assert!(kb_doc_update(&db, 999, "Title", None, "body").await.is_err());
+    }
+
+    #[tokio::test]
+    async fn product_set_active_on_missing_product_errors() {
+        let db = mem_db().await;
+        assert!(product_set_active(&db, 999, false).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn mark_handled_on_missing_escalation_errors() {
+        let db = mem_db().await;
+        assert!(escalation_mark_handled(&db, 999).await.is_err());
     }
 }
