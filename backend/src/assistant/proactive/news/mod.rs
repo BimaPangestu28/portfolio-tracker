@@ -60,7 +60,7 @@ pub fn norm_url(url: &str) -> String {
 /// (keep the higher score/relevance), sort by (relevance desc, score desc), truncate.
 pub fn rank(mut all: Vec<Article>, limit: usize) -> Vec<Article> {
     all.retain(|a| a.relevance > 0);
-    all.sort_by(|a, b| norm_url(&a.url).cmp(&norm_url(&b.url)));
+    all.sort_by_key(|a| norm_url(&a.url));
     all.dedup_by(|a, b| {
         if norm_url(&a.url) == norm_url(&b.url) {
             b.score = b.score.max(a.score);
@@ -75,13 +75,15 @@ pub fn rank(mut all: Vec<Article>, limit: usize) -> Vec<Article> {
     all
 }
 
-/// Build a reqwest client with a sane timeout for all news fetches.
+/// Build a reqwest client with a sane timeout for all news fetches. The builder
+/// only fails on TLS-backend init (effectively never); a clear panic beats
+/// silently dropping the timeout via `unwrap_or_default`.
 fn http_client() -> reqwest::Client {
     reqwest::Client::builder()
         .user_agent("portfolio-tracker-news/0.1")
         .timeout(std::time::Duration::from_secs(15))
         .build()
-        .unwrap_or_default()
+        .expect("news: failed to build HTTP client")
 }
 
 /// Fetch all sources (degrading each independently), rank, and drop
