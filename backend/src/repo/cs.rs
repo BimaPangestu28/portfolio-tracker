@@ -14,6 +14,7 @@ pub struct ConversationRow {
     pub status: String,
     pub created_at: String,
     pub last_msg_at: String,
+    pub wa_jid: Option<String>,
 }
 
 pub async fn conversation_create(
@@ -109,6 +110,52 @@ pub async fn conversation_list_recent(db: &Db, limit: i64) -> anyhow::Result<Vec
     .fetch_all(db)
     .await?;
     Ok(rows)
+}
+
+/// Look up a WhatsApp CS conversation by the sender JID. Returns None if no
+/// conversation for this JID exists yet.
+pub async fn conversation_by_wa_jid(db: &Db, jid: &str) -> anyhow::Result<Option<ConversationRow>> {
+    let row = sqlx::query_as::<_, ConversationRow>(
+        "SELECT * FROM cs_conversation WHERE wa_jid = ?",
+    )
+    .bind(jid)
+    .fetch_optional(db)
+    .await?;
+    Ok(row)
+}
+
+/// Create a new WhatsApp CS conversation for a sender JID. The `session_token`
+/// is caller-supplied (the row needs one for uniqueness); `wa_jid` is the
+/// per-sender lookup key.
+pub async fn conversation_create_wa(
+    db: &Db,
+    jid: &str,
+    phone: &str,
+    session_token: &str,
+) -> anyhow::Result<ConversationRow> {
+    let now = chrono::Utc::now().to_rfc3339();
+    let id = sqlx::query(
+        "INSERT INTO cs_conversation \
+         (channel, visitor_name, visitor_email, visitor_phone, session_token, \
+          status, created_at, last_msg_at, wa_jid) \
+         VALUES ('whatsapp', NULL, NULL, ?, ?, 'bot', ?, ?, ?)",
+    )
+    .bind(phone)
+    .bind(session_token)
+    .bind(&now)
+    .bind(&now)
+    .bind(jid)
+    .execute(db)
+    .await?
+    .last_insert_rowid();
+
+    let row = sqlx::query_as::<_, ConversationRow>(
+        "SELECT * FROM cs_conversation WHERE id = ?",
+    )
+    .bind(id)
+    .fetch_one(db)
+    .await?;
+    Ok(row)
 }
 
 // --- Message ---
@@ -865,5 +912,27 @@ mod tests {
         assert_eq!(got.external_ref, "ORD-1");
         order_delete(&db, oid).await.unwrap();
         assert!(order_get(&db, oid).await.unwrap().is_none());
+    }
+
+    // --- Task 1 (Plan A): wa_jid column + per-JID conversation ---
+
+    #[tokio::test]
+    async fn wa_conversation_find_or_create_is_idempotent_per_jid() {
+        let db  = mem_db().await;
+        let jid = "628123@s.whatsapp.net";
+        let c1  = conversation_create_wa(&db, jid, "628123", "tok-wa-1").await.unwrap();
+        assert_eq!(c1.channel, "whatsapp");
+        assert_eq!(c1.visitor_phone.as_deref(), Some("628123"));
+
+        // lookup returns the same row
+        let found = conversation_by_wa_jid(&db, jid).await.unwrap().unwrap();
+        assert_eq!(found.id, c1.id);
+
+        // a different jid is a different conversation
+        let c2 = conversation_create_wa(&db, "628999@s.whatsapp.net", "628999", "tok-wa-2")
+            .await
+            .unwrap();
+        assert_ne!(c2.id, c1.id);
+        assert!(conversation_by_wa_jid(&db, "000@none").await.unwrap().is_none());
     }
 }
