@@ -26,6 +26,9 @@ pub struct BriefingData {
     pub clickup_due: Option<Vec<(String, Vec<String>)>>,
     /// Important unread emails. `None` when Gmail isn't reachable (section omitted).
     pub gmail_important: Option<Vec<crate::google::gmail::EmailSummary>>,
+    /// Top news articles for today's digest; empty when news is disabled or
+    /// generation failed (section omitted, briefing unaffected).
+    pub news: Vec<crate::assistant::proactive::news::digest::DigestArticle>,
 }
 
 /// One briefing line for a task that is overdue or due today; None otherwise
@@ -185,6 +188,11 @@ pub async fn gather(db: &Db) -> anyhow::Result<BriefingData> {
         Err(_) => None, // not connected → section omitted
     };
 
+    let news = crate::assistant::proactive::news::digest::ensure_today(db).await.unwrap_or_else(|e| {
+        tracing::warn!("briefing: news digest unavailable: {e:#}");
+        Vec::new()
+    });
+
     Ok(BriefingData {
         date_wib: today,
         weekday: crate::assistant::time::weekday_id(now_wib.weekday()).to_string(),
@@ -199,6 +207,7 @@ pub async fn gather(db: &Db) -> anyhow::Result<BriefingData> {
         memory_facts,
         clickup_due,
         gmail_important,
+        news,
     })
 }
 
@@ -308,6 +317,13 @@ pub fn render_data_block(d: &BriefingData) -> String {
         }
     }
 
+    if !d.news.is_empty() {
+        out.push_str("Bacaan pagi (sertakan apa adanya, jangan ubah link):\n");
+        for a in &d.news {
+            out.push_str(&format!("- {} — {} {}\n", a.title, a.summary, a.url));
+        }
+    }
+
     if !d.memory_facts.is_empty() {
         out.push_str("Fakta tersimpan yang mungkin relevan:\n");
         for f in &d.memory_facts {
@@ -358,6 +374,7 @@ mod tests {
             memory_facts: vec![],
             clickup_due: None,
             gmail_important: None,
+            news: vec![],
         }
     }
 
@@ -512,5 +529,18 @@ mod tests {
         let block = render_data_block(&d);
         assert!(block.contains("Email penting:"), "{block}");
         assert!(block.contains("Budi — Invoice"), "{block}");
+    }
+
+    #[test]
+    fn news_section_renders_when_present_and_omitted_when_empty() {
+        let mut d = data();
+        assert!(!render_data_block(&d).contains("Bacaan pagi"));
+        d.news = vec![crate::assistant::proactive::news::digest::DigestArticle {
+            position: 0, title: "Rust 2.0".into(), url: "https://ex.com/r".into(),
+            source: "HN".into(), summary: "rilis besar".into(), key_points: vec![],
+        }];
+        let block = render_data_block(&d);
+        assert!(block.contains("Bacaan pagi"), "{block}");
+        assert!(block.contains("Rust 2.0 — rilis besar https://ex.com/r"), "{block}");
     }
 }

@@ -11,7 +11,9 @@ Frame it as a plan for the day, not a flat list: open with a one-line greeting (
 then the agenda at its fixed times, then the todos in the order given (highest priority first) — \
 suggest a sensible flow around the events. Add a one-or-two-line portfolio summary (net worth, \
 change, notable movers, pending reviews when present), remembered facts only if clearly relevant \
-today, and one short grounded closing line. Skip any section whose data is empty.";
+today, and one short grounded closing line. Skip any section whose data is empty. \
+If a 'Bacaan pagi' section is present, include those lines exactly as given (keep each link \
+unchanged, one line each) under a short 'Bacaan pagi:' heading; skip it when absent.";
 
 pub const RECAP_SYSTEM: &str = "You write a short weekly recap in Indonesian for the app \
 owner, delivered over Telegram on Sunday evening. Use ONLY the data block provided — copy \
@@ -82,5 +84,10 @@ mod tests {
             assert!(lower.contains("exactly"), "{prompt}");
             assert!(lower.contains("no markdown"), "{prompt}");
         }
+    }
+
+    #[test]
+    fn briefing_prompt_mentions_reading_section() {
+        assert!(BRIEFING_SYSTEM.to_lowercase().contains("bacaan pagi"));
     }
 }
