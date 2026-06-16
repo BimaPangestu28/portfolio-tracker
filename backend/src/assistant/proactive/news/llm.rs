@@ -103,4 +103,15 @@ mod tests {
     fn parse_summary_rejects_garbage() {
         assert!(parse_summary("not json").is_none());
     }
+
+    #[test]
+    fn strip_fences_handles_plain_and_unlabelled_fences() {
+        // No fence.
+        assert_eq!(strip_fences("{\"a\":1}"), "{\"a\":1}");
+        // Unlabelled ``` fence (some models omit the `json` tag).
+        assert_eq!(strip_fences("```\n{\"a\":1}\n```"), "{\"a\":1}");
+        // A summary fenced without a language tag still parses.
+        let s = parse_summary("```\n{\"summary\":\"r\",\"key_points\":[]}\n```").unwrap();
+        assert_eq!(s.summary, "r");
+    }
 }

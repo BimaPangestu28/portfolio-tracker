@@ -32,6 +32,10 @@ pub async fn ensure_today(db: &Db) -> anyhow::Result<Vec<DigestArticle>> {
     let now_wib = chrono::Utc::now().with_timezone(&crate::assistant::time::wib());
     let date = now_wib.format("%Y-%m-%d").to_string();
 
+    // The claim is permanent (like the other proactive jobs): if `generate`
+    // fails — e.g. the LLM is down at this hour — the day is forfeited and there
+    // is no retry, only the warning below. A missed news digest is a low-stakes
+    // outcome (no reading material that morning); it recovers the next day.
     if !repo::exists(db, &date).await?
         && crate::repo::proactive_log::try_claim(db, "news_digest", &format!("news_digest:{date}")).await?
     {
@@ -47,13 +51,19 @@ pub async fn load(db: &Db, date: &str) -> anyhow::Result<Vec<DigestArticle>> {
     Ok(repo::articles(db, date)
         .await?
         .into_iter()
-        .map(|a| DigestArticle {
-            position: a.position,
-            title: a.title,
-            url: a.url,
-            source: a.source,
-            summary: a.summary,
-            key_points: serde_json::from_str(&a.key_points).unwrap_or_default(),
+        .map(|a| {
+            let key_points = serde_json::from_str::<Vec<String>>(&a.key_points).unwrap_or_else(|e| {
+                tracing::warn!("news: malformed key_points (article {}): {e}", a.position);
+                Vec::new()
+            });
+            DigestArticle {
+                position: a.position,
+                title: a.title,
+                url: a.url,
+                source: a.source,
+                summary: a.summary,
+                key_points,
+            }
         })
         .collect())
 }

@@ -63,7 +63,10 @@ pub async fn insert(
     quiz: &[NewQuiz],
 ) -> anyhow::Result<()> {
     let mut tx = db.begin().await?;
-    sqlx::query("INSERT OR IGNORE INTO news_digest (digest_date, created_at) VALUES (?, ?)")
+    // Plain INSERT (not OR IGNORE): `ensure_today` guarantees this runs exactly
+    // once per date via the proactive_log claim, so a duplicate here is a real
+    // bug we want to surface (PK violation → rollback) rather than swallow.
+    sqlx::query("INSERT INTO news_digest (digest_date, created_at) VALUES (?, ?)")
         .bind(date).bind(created_at).execute(&mut *tx).await?;
     for a in articles {
         sqlx::query(
