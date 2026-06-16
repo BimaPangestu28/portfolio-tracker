@@ -6,6 +6,7 @@ import {
   useHandleEscalation,
   useCsTranscript,
   useResolveConversation,
+  useReplyConversation,
 } from "@/api/hooks";
 
 export default function CsInboxPage() {
@@ -13,7 +14,9 @@ export default function CsInboxPage() {
   const escalations = useCsEscalations();
   const handle = useHandleEscalation();
   const resolve = useResolveConversation();
+  const reply = useReplyConversation();
   const [selected, setSelected] = useState<number | null>(null);
+  const [replyText, setReplyText] = useState("");
   const transcript = useCsTranscript(selected);
 
   const convoList = convos.data ?? [];
@@ -153,6 +156,50 @@ export default function CsInboxPage() {
               ))
             )}
           </div>
+
+          {selected != null && (
+            <div style={{ padding: "0 16px 16px", display: "flex", gap: 8 }}>
+              <textarea
+                className="t-sm"
+                rows={2}
+                value={replyText}
+                onChange={(e) => setReplyText(e.target.value)}
+                placeholder="Balas sebagai owner…"
+                style={{
+                  flex: 1,
+                  resize: "vertical",
+                  padding: "8px 10px",
+                  borderRadius: "var(--radius)",
+                  border: "1px solid hsl(var(--border))",
+                  background: "hsl(var(--background))",
+                  color: "hsl(var(--foreground))",
+                  fontFamily: "inherit",
+                }}
+              />
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                disabled={reply.isPending || replyText.trim() === ""}
+                onClick={() => {
+                  const text = replyText.trim();
+                  if (!text) return;
+                  reply.mutate(
+                    { id: selected, text },
+                    {
+                      onSuccess: () => {
+                        toast.success("Balasan terkirim");
+                        setReplyText("");
+                        transcript.refetch();
+                      },
+                      onError: (err) => toast.error((err as Error).message),
+                    },
+                  );
+                }}
+              >
+                Kirim
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </div>
