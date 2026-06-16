@@ -157,6 +157,34 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/ingest/review/:id/confirm", post(ingest::confirm_review))
         .route("/ingest/review/:id/reject", post(ingest::reject_review))
+        .route("/cs/admin/docs", get(cs_admin::list_docs).post(cs_admin::create_doc))
+        .route(
+            "/cs/admin/docs/:id",
+            axum::routing::patch(cs_admin::update_doc).delete(cs_admin::delete_doc),
+        )
+        .route("/cs/admin/kb/reindex", post(cs_admin::reindex_kb))
+        .route("/cs/admin/products", get(cs_admin::list_products).post(cs_admin::create_product))
+        .route(
+            "/cs/admin/products/:id",
+            axum::routing::patch(cs_admin::update_product).delete(cs_admin::delete_product),
+        )
+        .route("/cs/admin/products/:id/active", post(cs_admin::set_product_active))
+        .route("/cs/admin/orders", get(cs_admin::list_orders).post(cs_admin::upsert_order))
+        .route("/cs/admin/orders/:id", axum::routing::delete(cs_admin::delete_order))
+        .route("/cs/admin/conversations", get(cs_admin::list_conversations))
+        .route(
+            "/cs/admin/conversations/:id/messages",
+            get(cs_admin::conversation_messages),
+        )
+        .route(
+            "/cs/admin/conversations/:id/resolve",
+            post(cs_admin::resolve_conversation),
+        )
+        .route("/cs/admin/escalations", get(cs_admin::list_escalations))
+        .route(
+            "/cs/admin/escalations/:id/handle",
+            post(cs_admin::handle_escalation),
+        )
         .route_layer(middleware::from_fn(auth::require_auth));
 
     // Public CS widget endpoints: their OWN strict CORS (origin allowlist), so the
@@ -416,6 +444,30 @@ mod router_tests {
                 Request::builder().method("GET").uri(uri).body(Body::empty()).unwrap()
             ).await.unwrap();
             assert_eq!(res.status(), StatusCode::UNAUTHORIZED, "GET {uri} should be protected");
+        }
+        std::env::remove_var("AUTH_PASSWORD");
+        std::env::remove_var("JWT_SECRET");
+    }
+
+    #[serial]
+    #[tokio::test]
+    async fn cs_admin_routes_are_protected() {
+        std::env::set_var("AUTH_PASSWORD", "pw");
+        std::env::set_var("JWT_SECRET", "router-test-cs-admin");
+        let app = router(test_state().await);
+        let cases = [
+            ("/cs/admin/docs",            "GET"),
+            ("/cs/admin/docs",            "POST"),
+            ("/cs/admin/products",        "GET"),
+            ("/cs/admin/orders",          "GET"),
+            ("/cs/admin/conversations",   "GET"),
+            ("/cs/admin/escalations",     "GET"),
+        ];
+        for (uri, method) in cases {
+            let res = app.clone().oneshot(
+                Request::builder().method(method).uri(uri).body(Body::empty()).unwrap()
+            ).await.unwrap();
+            assert_eq!(res.status(), StatusCode::UNAUTHORIZED, "{method} {uri} should be JWT-protected");
         }
         std::env::remove_var("AUTH_PASSWORD");
         std::env::remove_var("JWT_SECRET");
