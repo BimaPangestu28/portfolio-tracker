@@ -17,6 +17,7 @@ pub struct ProactiveConfig {
     pub recap_hour: Option<u32>,
     pub evening_review_hour: Option<u32>,
     pub monthly_recap_hour: Option<u32>,
+    pub news_digest_hour: Option<u32>,
     pub mover_alert_pct: f64,
     pub milestone_step_idr: i64,
 }
@@ -43,6 +44,7 @@ impl ProactiveConfig {
             recap_hour: parse_hour(std::env::var("RECAP_HOUR_WIB").ok(), 17),
             evening_review_hour: parse_hour(std::env::var("EVENING_REVIEW_HOUR_WIB").ok(), 21),
             monthly_recap_hour: parse_hour(std::env::var("MONTHLY_RECAP_HOUR_WIB").ok(), 8),
+            news_digest_hour: parse_hour(std::env::var("NEWS_DIGEST_HOUR_WIB").ok(), 6),
             mover_alert_pct: std::env::var("MOVER_ALERT_PCT")
                 .ok()
                 .and_then(|v| v.parse().ok())
@@ -62,6 +64,18 @@ pub fn briefing_due(now_wib: DateTime<FixedOffset>, briefing_hour: Option<u32>) 
     let h = now_wib.hour();
     if h >= hour && h < hour + GRACE_HOURS {
         Some(format!("briefing:{}", now_wib.format("%Y-%m-%d")))
+    } else {
+        None
+    }
+}
+
+/// Dedup key when the morning news digest is due (its own hour, default 6 WIB),
+/// using the same fixed-hour grace window as the briefing.
+pub fn news_digest_due(now_wib: DateTime<FixedOffset>, news_hour: Option<u32>) -> Option<String> {
+    let hour = news_hour?;
+    let h = now_wib.hour();
+    if h >= hour && h < hour + GRACE_HOURS {
+        Some(format!("news_digest:{}", now_wib.format("%Y-%m-%d")))
     } else {
         None
     }
@@ -110,10 +124,19 @@ pub async fn run_once(
     client: &TelegramClient,
     config: &ProactiveConfig,
 ) -> anyhow::Result<()> {
+    let now_wib = chrono::Utc::now().with_timezone(&crate::assistant::time::wib());
+
+    // The news digest generates regardless of the Telegram chat link — the web
+    // page consumes it too. ensure_today is idempotent and claims internally.
+    if news_digest_due(now_wib, config.news_digest_hour).is_some() {
+        if let Err(e) = super::news::digest::ensure_today(db).await {
+            tracing::warn!("news digest tick failed: {e:#}");
+        }
+    }
+
     let Some(link) = crate::repo::telegram_link::get(db).await? else {
         return Ok(());
     };
-    let now_wib = chrono::Utc::now().with_timezone(&crate::assistant::time::wib());
     let today = now_wib.format("%Y-%m-%d").to_string();
 
     if let Some(key) = briefing_due(now_wib, config.briefing_hour) {
@@ -229,6 +252,14 @@ mod tests {
     }
 
     #[test]
+    fn news_digest_due_inside_the_window_only() {
+        assert_eq!(news_digest_due(wib(2026, 6, 12, 5, 59), Some(6)), None);
+        assert_eq!(news_digest_due(wib(2026, 6, 12, 6, 0), Some(6)), Some("news_digest:2026-06-12".to_string()));
+        assert_eq!(news_digest_due(wib(2026, 6, 12, 11, 0), Some(6)), None);
+        assert_eq!(news_digest_due(wib(2026, 6, 12, 6, 0), None), None);
+    }
+
+    #[test]
     fn recap_due_sunday_evening_with_monday_grace() {
         // Friday: never.
         assert_eq!(recap_due(wib(2026, 6, 12, 18, 0), Some(17)), None);
@@ -260,6 +291,7 @@ mod tests {
         assert!((config.mover_alert_pct - 5.0).abs() < f64::EPSILON);
         assert_eq!(config.milestone_step_idr, 50_000_000);
         assert_eq!(config.evening_review_hour, Some(21));
+        assert_eq!(config.news_digest_hour, Some(6));
     }
 
     #[test]
@@ -328,6 +360,8 @@ mod tests {
             recap_hour: Some(0),
             evening_review_hour: Some(0),
             monthly_recap_hour: Some(0),
+            // None: keep this no-link smoke test from doing a network digest fetch
+            news_digest_hour: None,
             mover_alert_pct: 5.0,
             milestone_step_idr: 50_000_000,
         };
