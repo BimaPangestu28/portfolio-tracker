@@ -107,6 +107,11 @@ impl Embedder for CsEmbedder {
 
 /// Extract the embedding vectors from an OpenAI `/v1/embeddings` response,
 /// restoring request order via each item's `index`.
+///
+/// Assumes each item carries an `index` field (OpenAI always does). The
+/// `unwrap_or(arrival position)` fallback only preserves order when items
+/// arrive in the same order as the request — it is a safety net, not a
+/// guarantee. If `index` is absent, callers should not rely on ordering.
 pub fn parse_embeddings_response(json: &serde_json::Value) -> Result<Vec<Vec<f32>>, LlmError> {
     let data = json
         .get("data")
@@ -174,6 +179,9 @@ pub async fn search<E: Embedder + ?Sized>(
         .await
         .map_err(|e| anyhow::anyhow!("embed error: {e}"))?;
     let qvec = q.into_iter().next().unwrap_or_default();
+    if qvec.is_empty() {
+        anyhow::bail!("embedder returned no vector for query");
+    }
     let mut scored: Vec<(f32, KbChunkVec)> =
         chunks.into_iter().map(|c| (cosine(&qvec, &c.vector), c)).collect();
     scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
@@ -298,5 +306,31 @@ mod tests {
         let db   = mem_db().await;
         let hits = search(&db, &MockEmbedder, "anything", 3).await.unwrap();
         assert!(hits.is_empty());
+    }
+
+    /// An embedder that always returns an empty vector list — simulates a broken
+    /// embedder or a provider that returns no data for the query.
+    struct EmptyEmbedder;
+    #[async_trait::async_trait]
+    impl Embedder for EmptyEmbedder {
+        async fn embed(&self, _inputs: &[String]) -> Result<Vec<Vec<f32>>, crate::llm::claude::LlmError> {
+            Ok(vec![])
+        }
+    }
+
+    #[tokio::test]
+    async fn search_errors_when_embedder_returns_empty_vector() {
+        let db  = mem_db().await;
+        // Insert a doc + chunk + embedding so KB is non-empty (search won't short-circuit).
+        let doc = crate::repo::cs::kb_doc_insert(&db, "Doc", None, "body text").await.unwrap();
+        crate::repo::cs::kb_replace_chunks(&db, doc, &["apple".into()])
+            .await
+            .unwrap();
+        embed_pending(&db, &MockEmbedder).await.unwrap();
+
+        let result = search(&db, &EmptyEmbedder, "anything", 3).await;
+        assert!(result.is_err(), "expected error when embedder returns empty vec");
+        let msg = result.err().unwrap().to_string();
+        assert!(msg.contains("no vector"), "error message should mention 'no vector', got: {msg}");
     }
 }

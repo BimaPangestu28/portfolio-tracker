@@ -18,7 +18,9 @@ pub async fn escalate(
 
     // Build an inbox line with the visitor's identity for context.
     let label = inbox_label(db, conversation_id).await;
-    crate::repo::inbox::create(db, &format!("[CS] {label}: {summary}")).await?;
+    if let Err(e) = crate::repo::inbox::create(db, &format!("[CS] {label}: {summary}")).await {
+        tracing::warn!("cs escalation: inbox create failed: {e}");
+    }
 
     notify_owner_telegram(db, &format!("🆘 CS butuh kamu — {label}\n{summary}")).await;
     Ok(())

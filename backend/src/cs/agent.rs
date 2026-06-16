@@ -116,7 +116,14 @@ async fn run_loop<M: ToolModel + Sync>(
         }
         messages.push(serde_json::json!({ "role": "user", "content": results }));
     }
-    Ok("Maaf, aku belum bisa menyelesaikan ini. Aku teruskan ke tim ya.".to_string())
+    let summary = "Bot mentok setelah beberapa langkah dan tidak bisa menyelesaikan permintaan pelanggan.";
+    match crate::cs::escalation::escalate(ctx.db, ctx.conversation_id, "cannot_answer", summary).await {
+        Ok(()) => Ok("Maaf, ini perlu bantuan tim kami. Sudah aku teruskan — mereka akan menghubungi kamu lewat kontak yang kamu berikan.".to_string()),
+        Err(e) => {
+            tracing::warn!("cs agent: iteration-cap escalation failed: {e}");
+            Ok("Maaf, aku belum bisa menjawab ini sekarang. Coba hubungi kami langsung ya.".to_string())
+        }
+    }
 }
 
 #[cfg(test)]
@@ -180,6 +187,52 @@ mod tests {
         let msgs  = crate::repo::cs::message_all(&db, conv.id).await.unwrap();
         let roles: Vec<&str> = msgs.iter().map(|m| m.role.as_str()).collect();
         assert_eq!(roles, vec!["user", "assistant"]);
+    }
+
+    /// A model that always returns a tool_use response, never a terminal text reply.
+    /// Used to exhaust MAX_ITERATIONS and trigger the iteration-cap escalation path.
+    struct AlwaysToolModel;
+    #[async_trait::async_trait]
+    impl crate::assistant::agent::ToolModel for AlwaysToolModel {
+        async fn complete_tools(
+            &self,
+            _system: &str,
+            _messages: &[serde_json::Value],
+            _tools: &serde_json::Value,
+        ) -> Result<serde_json::Value, crate::llm::claude::LlmError> {
+            Ok(serde_json::json!({
+                "content": [ { "type": "tool_use", "id": "tu_x", "name": "get_pricing", "input": {} } ]
+            }))
+        }
+    }
+
+    #[tokio::test]
+    async fn iteration_cap_triggers_real_escalation() {
+        let db   = mem_db().await;
+        let conv = crate::repo::cs::conversation_create(
+            &db, "web", Some("Toni"), Some("toni@x.com"), None, "t-iter",
+        )
+        .await
+        .unwrap();
+
+        let reply = handle_message(&db, &MockEmbedder, &AlwaysToolModel, conv.id, "help me")
+            .await
+            .unwrap();
+
+        // reply must mention forwarding (teruskan / diteruskan)
+        assert!(
+            reply.contains("teruskan") || reply.contains("hubungi"),
+            "expected forwarding hint in reply, got: {reply}"
+        );
+
+        // an escalation row must have been created
+        let open = crate::repo::cs::escalation_list_open(&db).await.unwrap();
+        assert_eq!(open.len(), 1, "expected one escalation row");
+        assert_eq!(open[0].conversation_id, conv.id);
+
+        // conversation status must be needs_human
+        let after = crate::repo::cs::conversation_by_token(&db, "t-iter").await.unwrap().unwrap();
+        assert_eq!(after.status, "needs_human");
     }
 
     #[tokio::test]
