@@ -88,51 +88,8 @@ pub fn build_confirm_payload(item: &ReviewItemRow) -> Result<ConfirmPayload, Str
     })
 }
 
-use crate::repo::{instruments::InstrumentRow, prices, review_items, transactions};
+use crate::repo::{prices, review_items, transactions};
 use rust_decimal::Decimal;
-
-/// Resolve an amount-only trade into (quantity, price). For bibit-sourced
-/// funds with a stored NAV quote, derive real units (amount / NAV, 4 dp —
-/// Bibit's unit precision). Otherwise: quantity = amount at price 1. Never
-/// touches the network; reads only the quote table.
-async fn amount_only_qty_price(
-    db: &Db,
-    ins: &InstrumentRow,
-    amount: &str,
-    note: &mut Option<String>,
-) -> anyhow::Result<(String, String)> {
-    let amount_dec = crate::repo::dec(amount)?;
-    if ins.price_source.starts_with("bibit:") {
-        // Once an instrument has value-based (price = 1) rows, stay on that
-        // convention: mixing NAV-derived units with rupiah-as-units rows would
-        // make the position unreconcilable (a derived sell could never close a
-        // price-1 buy). Edit the legacy rows to real units to unlock derivation.
-        if transactions::has_price_one_txn(db, ins.id).await? {
-            append_note(note, "dicatat nominal di harga 1 agar konsisten dengan transaksi sebelumnya");
-            return Ok((amount_dec.normalize().to_string(), "1".to_string()));
-        }
-        if let Some(lp) = prices::latest(db, ins.id).await? {
-            if lp.source == "bibit" && lp.price > Decimal::ZERO {
-                let qty = (amount_dec / lp.price).round_dp(4);
-                append_note(note, &format!("unit dihitung dari NAV {} per {}", lp.price.normalize(), lp.as_of));
-                return Ok((qty.normalize().to_string(), lp.price.normalize().to_string()));
-            }
-        }
-        append_note(note, "NAV belum tersedia; dicatat nominal di harga 1");
-    }
-    Ok((amount_dec.normalize().to_string(), "1".to_string()))
-}
-
-fn append_note(note: &mut Option<String>, msg: &str) {
-    match note {
-        Some(n) => {
-            n.push_str(" (");
-            n.push_str(msg);
-            n.push(')');
-        }
-        None => *note = Some(format!("({msg})")),
-    }
-}
 
 /// Confirm a review item: build a ledger transaction from the payload and mark the item confirmed.
 /// FX fields default from the latest USD/IDR rate when absent. Returns the new txn id.
@@ -149,24 +106,29 @@ pub async fn confirm(db: &Db, item_id: i64, p: &ConfirmPayload) -> anyhow::Resul
     let fx_to_idr = p.fx_to_idr.clone().unwrap_or_else(|| usd_idr.to_string());
     let fx_to_usd = p.fx_to_usd.clone().unwrap_or_else(|| "1".to_string());
 
-    // Amount-only mutual fund trades (e.g. Bibit "Order" screenshots) carry a
-    // total IDR amount but no units/NAV. With a stored NAV quote (bibit:* price
-    // source, refreshed daily) we derive real units: quantity = amount / NAV at
-    // price = NAV. Without one we fall back to quantity = amount at price 1,
-    // which values the position at cost via the avg_cost fallback
-    // (service/portfolio.rs).
     let mut note = p.note.clone();
-    let (quantity, price_native) = if p.quantity.trim().is_empty() && p.price_native.trim().is_empty() {
-        let amount = p.amount_native.as_deref().map(str::trim).filter(|a| !a.is_empty());
-        match (amount, p.entry_type.as_str()) {
-            (Some(a), "buy" | "sell") => amount_only_qty_price(db, &ins, a, &mut note).await?,
-            _ => return Err(anyhow::anyhow!(
+    let has_qp = !p.quantity.trim().is_empty() || !p.price_native.trim().is_empty();
+    let (quantity, price_native) = if has_qp {
+        (p.quantity.clone(), p.price_native.clone())
+    } else {
+        let q = (!p.quantity.trim().is_empty()).then(|| p.quantity.as_str());
+        let pr = (!p.price_native.trim().is_empty()).then(|| p.price_native.as_str());
+        let amt = p.amount_native.as_deref().map(str::trim).filter(|a| !a.is_empty());
+        if amt.is_none() {
+            return Err(anyhow::anyhow!(
                 "quantity/price or amount_native is required for a {} entry",
                 p.entry_type
-            )),
+            ));
         }
-    } else {
-        (p.quantity.clone(), p.price_native.clone())
+        match crate::service::txn_entry::resolve_qty_price(
+            db, &ins, &p.entry_type, q, pr, amt, /* allow_price_one_fallback */ true, &mut note,
+        ).await {
+            Ok(pair) => pair,
+            Err(crate::service::txn_entry::ResolveError::NeedNavOrUnits) => {
+                return Err(anyhow::anyhow!("butuh NAV atau jumlah unit untuk {}", p.entry_type));
+            }
+            Err(crate::service::txn_entry::ResolveError::Other(e)) => return Err(e),
+        }
     };
 
     let nt = transactions::NewTransaction {
