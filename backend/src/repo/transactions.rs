@@ -90,6 +90,13 @@ pub async fn list_all(db: &Db) -> anyhow::Result<Vec<Transaction>> {
     raws.into_iter().map(|r| r.into_domain()).collect()
 }
 
+#[allow(dead_code)] // exercised by tests; not yet called from non-test code
+pub async fn list_for_instrument(db: &Db, instrument_id: i64) -> anyhow::Result<Vec<Transaction>> {
+    let raws = sqlx::query_as::<_, TxnRowRaw>("SELECT id, account_id, instrument_id, txn_type, executed_at, quantity, price_native, fee_native, currency, fx_to_idr, fx_to_usd, note FROM txn WHERE instrument_id = ? ORDER BY executed_at")
+        .bind(instrument_id).fetch_all(db).await?;
+    raws.into_iter().map(|r| r.into_domain()).collect()
+}
+
 /// Recent transactions, newest first, optionally filtered by instrument/account.
 pub async fn list_recent(
     db: &Db,
@@ -104,13 +111,6 @@ pub async fn list_recent(
          ORDER BY executed_at DESC, id DESC LIMIT ?3")
         .bind(instrument_id).bind(account_id).bind(limit)
         .fetch_all(db).await?;
-    raws.into_iter().map(|r| r.into_domain()).collect()
-}
-
-#[allow(dead_code)] // exercised by tests; not yet called from non-test code
-pub async fn list_for_instrument(db: &Db, instrument_id: i64) -> anyhow::Result<Vec<Transaction>> {
-    let raws = sqlx::query_as::<_, TxnRowRaw>("SELECT id, account_id, instrument_id, txn_type, executed_at, quantity, price_native, fee_native, currency, fx_to_idr, fx_to_usd, note FROM txn WHERE instrument_id = ? ORDER BY executed_at")
-        .bind(instrument_id).fetch_all(db).await?;
     raws.into_iter().map(|r| r.into_domain()).collect()
 }
 
@@ -357,6 +357,11 @@ mod tests {
         assert_eq!(recent[0].executed_at.format("%Y-%m-%d").to_string(), "2026-06-03");
         let by_ins = list_recent(&db, 10, Some(ins.id), None).await.unwrap();
         assert_eq!(by_ins.len(), 3);
+        let by_acc = list_recent(&db, 10, None, Some(acc.id)).await.unwrap();
+        assert_eq!(by_acc.len(), 3);
+        // A non-existent account filters everything out.
+        let none = list_recent(&db, 10, None, Some(acc.id + 999)).await.unwrap();
+        assert!(none.is_empty());
     }
 
     #[tokio::test]
