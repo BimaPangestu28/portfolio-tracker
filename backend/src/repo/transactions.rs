@@ -90,6 +90,23 @@ pub async fn list_all(db: &Db) -> anyhow::Result<Vec<Transaction>> {
     raws.into_iter().map(|r| r.into_domain()).collect()
 }
 
+/// Recent transactions, newest first, optionally filtered by instrument/account.
+pub async fn list_recent(
+    db: &Db,
+    limit: i64,
+    instrument_id: Option<i64>,
+    account_id: Option<i64>,
+) -> anyhow::Result<Vec<Transaction>> {
+    let raws = sqlx::query_as::<_, TxnRowRaw>(
+        "SELECT id, account_id, instrument_id, txn_type, executed_at, quantity, price_native, fee_native, currency, fx_to_idr, fx_to_usd, note \
+         FROM txn \
+         WHERE (?1 IS NULL OR instrument_id = ?1) AND (?2 IS NULL OR account_id = ?2) \
+         ORDER BY executed_at DESC, id DESC LIMIT ?3")
+        .bind(instrument_id).bind(account_id).bind(limit)
+        .fetch_all(db).await?;
+    raws.into_iter().map(|r| r.into_domain()).collect()
+}
+
 #[allow(dead_code)] // exercised by tests; not yet called from non-test code
 pub async fn list_for_instrument(db: &Db, instrument_id: i64) -> anyhow::Result<Vec<Transaction>> {
     let raws = sqlx::query_as::<_, TxnRowRaw>("SELECT id, account_id, instrument_id, txn_type, executed_at, quantity, price_native, fee_native, currency, fx_to_idr, fx_to_usd, note FROM txn WHERE instrument_id = ? ORDER BY executed_at")
@@ -319,6 +336,27 @@ mod tests {
         // empty for an instrument with no history
         let ins2 = instruments::create(&db, &instruments::NewInstrument { symbol:"VOO".into(), name:"VOO".into(), instrument_type:"etf".into(), native_currency:"USD".into(), category_id:None, price_source:"manual".into(), decimals:Some(8), note:None }).await.unwrap();
         assert!(accounts_for_instrument(&db, ins2.id).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn list_recent_orders_newest_first_and_filters() {
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        let acc = accounts::create(&db, &accounts::NewAccount { name:"A".into(), account_type:"manual".into(), institution:None, native_currency:"IDR".into(), note:None }).await.unwrap();
+        let ins = instruments::create(&db, &instruments::NewInstrument { symbol:"BBCA".into(), name:"BCA".into(), instrument_type:"stock_id".into(), native_currency:"IDR".into(), category_id:None, price_source:"manual".into(), decimals:Some(0), note:None }).await.unwrap();
+        for (d, q) in [("2026-06-01", "1"), ("2026-06-03", "2"), ("2026-06-02", "3")] {
+            create(&db, &NewTransaction {
+                account_id: acc.id, instrument_id: ins.id, txn_type: "buy".into(),
+                executed_at: chrono::DateTime::parse_from_rfc3339(&format!("{d}T00:00:00Z")).unwrap().with_timezone(&chrono::Utc),
+                quantity: q.into(), price_native: "1000".into(), fee_native: None,
+                currency: "IDR".into(), fx_to_idr: "1".into(), fx_to_usd: "1".into(),
+                note: None, source: None, external_id: None,
+            }).await.unwrap();
+        }
+        let recent = list_recent(&db, 2, None, None).await.unwrap();
+        assert_eq!(recent.len(), 2);
+        assert_eq!(recent[0].executed_at.format("%Y-%m-%d").to_string(), "2026-06-03");
+        let by_ins = list_recent(&db, 10, Some(ins.id), None).await.unwrap();
+        assert_eq!(by_ins.len(), 3);
     }
 
     #[tokio::test]
