@@ -27,6 +27,7 @@ pub async fn dispatch(db: &Db, name: &str, input: &serde_json::Value) -> Result<
         "create_account" => create_account(db, input).await,
         "list_pending_reviews" => list_pending_reviews(db).await,
         "confirm_review" => confirm_review(db, input).await,
+        "create_transaction" => create_transaction(db, input).await,
         "list_instruments" => list_instruments(db).await,
         "list_projects" => match crate::clickup::ClickUpClient::from_env() {
             Ok(api) => clickup_list_projects(&api).await,
@@ -915,6 +916,72 @@ async fn confirm_review(db: &Db, input: &serde_json::Value) -> Result<String, St
         .await
         .map_err(|e| format!("{e}"))?;
     Ok(format!("transaksi #{txn_id} dibuat dari review #{review_id}"))
+}
+
+async fn create_transaction(db: &Db, input: &serde_json::Value) -> Result<String, String> {
+    let entry_type = str_arg(input, "entry_type").ok_or("missing required argument 'entry_type'")?;
+
+    // Resolve instrument: id wins, else match by name/symbol.
+    let instrument_id = match optional_id(input, "instrument_id")? {
+        Some(id) => id,
+        None => {
+            let name = str_arg(input, "instrument")
+                .ok_or("butuh 'instrument' (nama/simbol) atau 'instrument_id'")?;
+            crate::ingestion::matching::suggest_instrument_for_entry(db, Some(name), Some(name))
+                .await
+                .map_err(|e| format!("db error: {e}"))?
+                .ok_or_else(|| format!("instrumen '{name}' belum terdaftar — tambah dulu di Web UI → Data"))?
+        }
+    };
+    // Resolve account: id wins, else case-insensitive name match.
+    let account_id = match optional_id(input, "account_id")? {
+        Some(id) => id,
+        None => {
+            let name = str_arg(input, "account").ok_or("butuh 'account' (nama) atau 'account_id'")?;
+            let accounts = crate::repo::accounts::list(db).await.map_err(|e| format!("db error: {e}"))?;
+            accounts.iter().find(|a| a.name.eq_ignore_ascii_case(name)).map(|a| a.id)
+                .ok_or_else(|| format!("akun '{name}' nggak ketemu — cek list_accounts"))?
+        }
+    };
+
+    let ins = crate::repo::instruments::get(db, instrument_id).await
+        .map_err(|_| format!("instrumen #{instrument_id} nggak ada"))?;
+    crate::repo::accounts::get(db, account_id).await
+        .map_err(|_| format!("akun #{account_id} nggak ada"))?;
+
+    let executed_at = match str_arg(input, "executed_at") {
+        Some(raw) => crate::ingestion::review::to_rfc3339(raw)
+            .ok_or_else(|| format!("tanggal nggak terbaca: {raw}"))?,
+        None => chrono::Utc::now().to_rfc3339(),
+    };
+    let currency = str_arg(input, "currency").unwrap_or("IDR").to_string();
+    let mut note = str_arg(input, "note").map(str::to_string);
+
+    let (quantity, price_native) = match crate::service::txn_entry::resolve_qty_price(
+        db, &ins, entry_type,
+        str_arg(input, "quantity"), str_arg(input, "price_native"), str_arg(input, "amount_native"),
+        /* allow_price_one_fallback */ false, &mut note,
+    ).await {
+        Ok(pair) => pair,
+        Err(crate::service::txn_entry::ResolveError::NeedNavOrUnits) =>
+            return Err("aku butuh NAV atau jumlah unit-nya dulu buat reksadana ini — kasih salah satu ya".into()),
+        Err(crate::service::txn_entry::ResolveError::Other(e)) => return Err(format!("{e}")),
+    };
+
+    let usd_idr = crate::repo::prices::latest_fx(db, "USD", "IDR").await
+        .map_err(|e| format!("db error: {e}"))?
+        .unwrap_or(rust_decimal::Decimal::ONE);
+    let fx_to_idr = if currency == "IDR" { "1".to_string() } else { usd_idr.to_string() };
+
+    let nt = crate::repo::transactions::NewTransaction {
+        account_id, instrument_id, txn_type: entry_type.to_string(),
+        executed_at: chrono::DateTime::parse_from_rfc3339(&executed_at)
+            .map_err(|e| format!("tanggal: {e}"))?.with_timezone(&chrono::Utc),
+        quantity, price_native, fee_native: str_arg(input, "fee_native").map(str::to_string),
+        currency, fx_to_idr, fx_to_usd: "1".to_string(), note, source: Some("chat".into()), external_id: None,
+    };
+    let txn = crate::repo::transactions::create(db, &nt).await.map_err(|e| format!("{e}"))?;
+    Ok(format!("transaksi #{} dicatat: {} {} @ {} di {}", txn.id, txn.txn_type.as_str(), txn.quantity.normalize(), txn.price_native.normalize(), account_id))
 }
 
 async fn capture_to_inbox(db: &Db, input: &serde_json::Value) -> Result<String, String> {
@@ -2688,5 +2755,48 @@ mod tests {
         .unwrap();
         assert!(out.contains("dibatalkan") || out.contains("cancelled"), "{out}");
         assert!(crate::repo::price_alerts::list_active(&db).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn create_transaction_records_fund_buy_with_units_and_nav() {
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        let acc = crate::repo::accounts::create(&db, &crate::repo::accounts::NewAccount {
+            name: "Bibit #4".into(), account_type: "fund".into(), institution: None,
+            native_currency: "IDR".into(), note: None,
+        }).await.unwrap();
+        let ins = crate::repo::instruments::create(&db, &crate::repo::instruments::NewInstrument {
+            symbol: "MJR".into(), name: "Majoris Pasar Uang Indonesia".into(), instrument_type: "fund".into(),
+            native_currency: "IDR".into(), category_id: None, price_source: "bibit:MJR02".into(),
+            decimals: Some(4), note: None,
+        }).await.unwrap();
+        let input = serde_json::json!({
+            "account_id": acc.id, "instrument_id": ins.id, "entry_type": "buy",
+            "executed_at": "2026-06-18", "quantity": "1236.7898", "price_native": "1617.0896",
+        });
+        let out = create_transaction(&db, &input).await.unwrap();
+        assert!(out.contains("transaksi"));
+        let txns = crate::repo::transactions::list_recent(&db, 10, Some(ins.id), None).await.unwrap();
+        assert_eq!(txns.len(), 1);
+        assert_eq!(txns[0].quantity.to_string(), "1236.7898");
+        assert_eq!(txns[0].price_native.to_string(), "1617.0896");
+    }
+
+    #[tokio::test]
+    async fn create_transaction_fund_amount_only_asks_for_nav() {
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        let ins = crate::repo::instruments::create(&db, &crate::repo::instruments::NewInstrument {
+            symbol: "MJR".into(), name: "Majoris".into(), instrument_type: "fund".into(),
+            native_currency: "IDR".into(), category_id: None, price_source: "bibit:MJR02".into(),
+            decimals: Some(4), note: None,
+        }).await.unwrap();
+        let acc = crate::repo::accounts::create(&db, &crate::repo::accounts::NewAccount {
+            name: "Bibit #4".into(), account_type: "fund".into(), institution: None, native_currency: "IDR".into(), note: None,
+        }).await.unwrap();
+        let input = serde_json::json!({
+            "account_id": acc.id, "instrument_id": ins.id, "entry_type": "buy",
+            "amount_native": "2000000",
+        });
+        let err = create_transaction(&db, &input).await.unwrap_err();
+        assert!(err.to_lowercase().contains("nav") || err.to_lowercase().contains("unit"));
     }
 }
