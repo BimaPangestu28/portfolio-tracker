@@ -29,7 +29,7 @@ export default function CsInboxPage() {
         <div className="t-sm t-muted" style={{ marginTop: 2 }}>Percakapan, eskalasi, &amp; transkrip</div>
       </div>
 
-      <div className="grid" style={{ gridTemplateColumns: "320px 1fr", gap: 16, alignItems: "start" }}>
+      <div className="lay-side" style={{ gap: 16, alignItems: "start" }}>
         {/* Left column: escalations + conversations */}
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           {/* Escalations */}

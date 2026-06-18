@@ -169,6 +169,7 @@ export default function ChatPage() {
                 className="chip"
                 onClick={() => setInput(s)}
                 aria-label={`Saran: ${s}`}
+                style={{ maxWidth: "100%", height: "auto", minHeight: 30, whiteSpace: "normal", textAlign: "left" }}
               >
                 {s}
               </button>

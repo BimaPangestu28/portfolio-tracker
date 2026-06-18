@@ -50,7 +50,7 @@ export default function InvoicesPage() {
         <div className="t-sm t-muted">Daftar invoice & unduh PDF</div>
       </div>
 
-      <div className="grid gap-5" style={{ gridTemplateColumns: "minmax(0,1.3fr) minmax(0,1fr)" }}>
+      <div className="grid gap-5 lay-2-13">
         <div className="card">
           <div className="card-head"><div className="card-title">Semua invoice</div></div>
           <div className="card-pad flex col gap-1" style={{ paddingTop: 12 }}>

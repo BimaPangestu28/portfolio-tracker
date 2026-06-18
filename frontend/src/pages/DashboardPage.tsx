@@ -184,10 +184,7 @@ function HeroSection({
   const trend = yearTrend(snapshots, new Date());
 
   return (
-    <div
-      className="grid gap-5"
-      style={{ gridTemplateColumns: "minmax(0,1.15fr) minmax(0,1fr)" }}
-    >
+    <div className="grid gap-5 lay-2-15">
       {/* Hero net-worth card */}
       <div
         className="card card-pad"
@@ -244,7 +241,7 @@ function HeroSection({
       </div>
 
       {/* 2×2 KPI stat-cards */}
-      <div className="grid gap-5" style={{ gridTemplateColumns: "1fr 1fr" }}>
+      <div className="grid gap-5 lay-2-sm">
         <StatCard
           label="Unrealized P&L"
           icon={<TrendingUp size={15} />}
@@ -301,16 +298,13 @@ function HeroSection({
 
 function HeroRowSkeleton() {
   return (
-    <div
-      className="grid gap-5"
-      style={{ gridTemplateColumns: "minmax(0,1.15fr) minmax(0,1fr)" }}
-    >
+    <div className="grid gap-5 lay-2-15">
       <div className="card card-pad" style={{ minHeight: 200 }}>
         <div className="skeleton" style={{ width: 200, height: 12, marginBottom: 16 }} />
         <div className="skeleton" style={{ width: 320, height: 44, marginBottom: 12 }} />
         <div className="skeleton" style={{ width: "100%", height: 46 }} />
       </div>
-      <div className="grid gap-5" style={{ gridTemplateColumns: "1fr 1fr" }}>
+      <div className="grid gap-5 lay-2-sm">
         {[0, 1, 2, 3].map((i) => (
           <div key={i} className="card stat-card">
             <div className="skeleton" style={{ width: 90, height: 12 }} />
@@ -1162,7 +1156,7 @@ export default function DashboardPage() {
       {/* ── Hari ini (assistant section) ──────────────────────────────────── */}
       <div>
         <div className="t-h3" style={{ marginBottom: 12 }}>Hari ini</div>
-        <div className="grid gap-5" style={{ gridTemplateColumns: "repeat(2, minmax(0,1fr))" }}>
+        <div className="grid gap-5 lay-2">
           <DashboardTodoCard />
           <DashboardAgendaCard />
           <DashboardReminderCard />
@@ -1207,10 +1201,7 @@ export default function DashboardPage() {
       ) : null}
 
       {/* ── 2. Alokasi + Drift side by side ───────────────────────────────── */}
-      <div
-        className="grid gap-5"
-        style={{ gridTemplateColumns: "minmax(0,1fr) minmax(0,1.25fr)" }}
-      >
+      <div className="grid gap-5 lay-2-125">
         {summary.isLoading ? (
           <CardSkeleton rows={3} height={12} />
         ) : summary.data ? (
@@ -1225,7 +1216,7 @@ export default function DashboardPage() {
       </div>
 
       {/* ── 3. Rebalancing + Kesehatan side by side ───────────────────────── */}
-      <div className="grid gap-5" style={{ gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)" }}>
+      <div className="grid gap-5 lay-2">
         {summary.isLoading ? (
           <CardSkeleton rows={3} height={44} />
         ) : summary.data ? (
@@ -1257,13 +1248,13 @@ export default function DashboardPage() {
       ) : null}
 
       {/* ── 5. Pergerakan + Tujuan side by side ───────────────────────────── */}
-      <div className="grid gap-5" style={{ gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)" }}>
+      <div className="grid gap-5 lay-2">
         <MoversCard movers={movers.data ?? []} loading={movers.isLoading} />
         <HyperliquidCard />
       </div>
 
       {/* ── 5b. Tujuan Keuangan full row ──────────────────────────────────── */}
-      <div className="grid gap-5" style={{ gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)" }}>
+      <div className="grid gap-5 lay-2">
         {goals.isLoading ? (
           <CardSkeleton rows={2} height={60} />
         ) : (
@@ -1275,7 +1266,7 @@ export default function DashboardPage() {
       <HyperliquidCard />
 
       {/* ── 6. Posisi Terbesar + Aktivitas side by side ───────────────────── */}
-      <div className="grid gap-5" style={{ gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)" }}>
+      <div className="grid gap-5 lay-2">
         <TopHoldingsCard
           positions={summary.data?.positions ?? []}
           instruments={instruments.data ?? []}

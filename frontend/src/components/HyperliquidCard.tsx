@@ -40,7 +40,7 @@ export function HyperliquidCard() {
                     tickLine={false}
                     axisLine={false}
                     stroke="hsl(var(--muted-foreground))"
-                    minTickGap={28}
+                    minTickGap={40}
                   />
                   <YAxis
                     tickFormatter={(v: number) => `${v.toFixed(0)}%`}

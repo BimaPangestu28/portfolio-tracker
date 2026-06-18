@@ -142,7 +142,7 @@ export default function CsPricingPage() {
             <span className="field-label">Deskripsi</span>
             <input className="input" value={form.description} onChange={set("description")} />
           </label>
-          <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <div className="grid form-stack" style={{ gridTemplateColumns: "1fr 1fr", gap: 12 }}>
             <label className="field">
               <span className="field-label">Harga</span>
               <input type="number" className="input" value={form.price} onChange={set("price")} />
