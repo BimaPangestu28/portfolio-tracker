@@ -42,6 +42,7 @@ import { DashboardAgendaCard } from "../components/DashboardAgendaCard";
 import { DashboardTodoCard } from "../components/DashboardTodoCard";
 import { DashboardReminderCard } from "../components/DashboardReminderCard";
 import { DashboardInboxCard } from "../components/DashboardInboxCard";
+import { HyperliquidCard } from "../components/HyperliquidCard";
 import { HeroSparkline } from "../components/charts/HeroSparkline";
 import { DonutChart } from "../components/charts/DonutChart";
 import { DriftBarsChart } from "../components/charts/DriftBarsChart";
@@ -1265,6 +1266,9 @@ export default function DashboardPage() {
           <GoalsCard goals={goals.data ?? []} />
         )}
       </div>
+
+      {/* ── 5b. Hyperliquid equity card ───────────────────────────────────── */}
+      <HyperliquidCard />
 
       {/* ── 6. Posisi Terbesar + Aktivitas side by side ───────────────────── */}
       <div className="grid gap-5" style={{ gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)" }}>
