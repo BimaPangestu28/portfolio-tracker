@@ -238,6 +238,15 @@ pub fn definitions() -> serde_json::Value {
             }
         },
         {
+            "name": "delete_transaction",
+            "description": "Delete a recorded transaction by id (e.g. a wrong entry). Get the id from list_transactions. Always confirm with the owner before calling — this permanently removes data.",
+            "input_schema": {
+                "type": "object",
+                "properties": { "id": { "type": "integer", "description": "Transaction id from list_transactions." } },
+                "required": ["id"]
+            }
+        },
+        {
             "name": "list_instruments",
             "description": "List the owner's known instruments (id, symbol, name, type). Use to find an instrument_id for confirm_review when a review item's instrument shows 'belum dikenali' but the instrument may already exist under a slightly different name. If it genuinely doesn't exist, tell the user to add it in the web UI → Data (instruments can't be created from chat).",
             "input_schema": { "type": "object", "properties": {} }
@@ -477,7 +486,7 @@ mod tests {
                 "get_portfolio_summary", "search_memory", "remember",
                 "create_event", "list_events", "cancel_event",
                 "reject_review", "list_accounts", "create_account",
-                "list_pending_reviews", "confirm_review", "create_transaction", "list_transactions", "edit_transaction", "list_instruments",
+                "list_pending_reviews", "confirm_review", "create_transaction", "list_transactions", "edit_transaction", "delete_transaction", "list_instruments",
                 "list_projects",
                 "create_project",
                 "create_task",

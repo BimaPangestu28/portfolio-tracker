@@ -30,6 +30,7 @@ pub async fn dispatch(db: &Db, name: &str, input: &serde_json::Value) -> Result<
         "create_transaction" => create_transaction(db, input).await,
         "list_transactions" => list_transactions(db, input).await,
         "edit_transaction" => edit_transaction(db, input).await,
+        "delete_transaction" => delete_transaction(db, input).await,
         "list_instruments" => list_instruments(db).await,
         "list_projects" => match crate::clickup::ClickUpClient::from_env() {
             Ok(api) => clickup_list_projects(&api).await,
@@ -1057,6 +1058,13 @@ async fn edit_transaction(db: &Db, input: &serde_json::Value) -> Result<String, 
     };
     let t = crate::repo::transactions::update(db, id, &patch).await.map_err(|e| format!("{e}"))?;
     Ok(format!("transaksi #{} diperbarui: {} @ {}", t.id, t.quantity.normalize(), t.price_native.normalize()))
+}
+
+async fn delete_transaction(db: &Db, input: &serde_json::Value) -> Result<String, String> {
+    let id = id_arg(input, "id")?;
+    crate::repo::transactions::get(db, id).await.map_err(|_| format!("transaksi #{id} nggak ada"))?;
+    crate::repo::transactions::delete(db, id).await.map_err(|e| format!("{e}"))?;
+    Ok(format!("transaksi #{id} dihapus"))
 }
 
 async fn capture_to_inbox(db: &Db, input: &serde_json::Value) -> Result<String, String> {
@@ -2894,6 +2902,27 @@ mod tests {
         let out = list_transactions(&db, &serde_json::json!({})).await.unwrap();
         assert!(out.contains("#"));
         assert!(out.contains("MJR") || out.contains("Majoris"));
+    }
+
+    #[tokio::test]
+    async fn delete_transaction_removes_the_row() {
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        let acc = crate::repo::accounts::create(&db, &crate::repo::accounts::NewAccount {
+            name: "Bibit #4".into(), account_type: "fund".into(), institution: None, native_currency: "IDR".into(), note: None,
+        }).await.unwrap();
+        let ins = crate::repo::instruments::create(&db, &crate::repo::instruments::NewInstrument {
+            symbol: "MJR".into(), name: "Majoris".into(), instrument_type: "fund".into(),
+            native_currency: "IDR".into(), category_id: None, price_source: "bibit:MJR02".into(), decimals: Some(4), note: None,
+        }).await.unwrap();
+        let t = crate::repo::transactions::create(&db, &crate::repo::transactions::NewTransaction {
+            account_id: acc.id, instrument_id: ins.id, txn_type: "buy".into(),
+            executed_at: chrono::Utc::now(), quantity: "1".into(), price_native: "1000".into(),
+            fee_native: None, currency: "IDR".into(), fx_to_idr: "1".into(), fx_to_usd: "1".into(),
+            note: None, source: None, external_id: None,
+        }).await.unwrap();
+        let out = delete_transaction(&db, &serde_json::json!({"id": t.id})).await.unwrap();
+        assert!(out.contains(&format!("#{}", t.id)));
+        assert!(crate::repo::transactions::get(&db, t.id).await.is_err());
     }
 
     #[tokio::test]
