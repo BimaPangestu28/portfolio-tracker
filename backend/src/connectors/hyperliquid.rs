@@ -74,10 +74,11 @@ pub fn parse_ledger(body: &serde_json::Value, _wallet: &str) -> Result<Vec<Exter
             external_id: format!("{hash}:{kind}"),
             occurred_at,
             kind: kind.to_string(),
-            symbol: "USDC".into(),
+            symbol: "HL-USDC".into(),
             quantity: usdc,
             fee: None,
             currency: "USD".into(),
+            price_native: Some("1".into()),
         });
     }
     Ok(out)
@@ -102,8 +103,11 @@ mod tests {
         assert_eq!(out.len(), 2);
         assert_eq!(out[0].kind, "deposit");
         assert_eq!(out[0].quantity, "500.0");
-        assert_eq!(out[0].symbol, "USDC");
+        assert_eq!(out[0].symbol, "HL-USDC");
         assert_eq!(out[0].currency, "USD");
+        assert_eq!(out[0].price_native, Some("1".to_string()));
         assert_eq!(out[1].kind, "withdrawal");
+        assert_eq!(out[1].symbol, "HL-USDC");
+        assert_eq!(out[1].price_native, Some("1".to_string()));
     }
 }
