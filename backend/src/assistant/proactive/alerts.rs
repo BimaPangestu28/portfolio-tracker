@@ -181,6 +181,7 @@ pub async fn evaluate(
     db: &Db,
     mover_threshold_pct: f64,
     milestone_step_idr: i64,
+    hl_drawdown_pct: f64,
     today_wib: &str,
 ) -> Vec<Alert> {
     let mut alerts = Vec::new();
@@ -231,6 +232,22 @@ pub async fn evaluate(
             }
         }
         Err(e) => tracing::warn!("alerts: portfolio summary unavailable: {e:#}"),
+    }
+
+    match crate::repo::instruments::find_by_symbol(db, crate::setup::HL_SYMBOL).await {
+        Ok(Some(ins)) => match crate::repo::prices::series(db, ins.id).await {
+            Ok(series) if !series.is_empty() => {
+                let current = series.last().map(|(_, p)| *p).unwrap_or_default();
+                let peak = series.iter().map(|(_, p)| *p).max().unwrap_or(current);
+                if let Some(a) = hyperliquid_drawdown_alert(current, peak, hl_drawdown_pct, today_wib) {
+                    alerts.push(a);
+                }
+            }
+            Ok(_) => {}
+            Err(e) => tracing::warn!("alerts: hl prices unavailable: {e:#}"),
+        },
+        Ok(None) => {}
+        Err(e) => tracing::warn!("alerts: hl instrument lookup failed: {e:#}"),
     }
 
     alerts.extend(price_alert_triggers(db).await);
