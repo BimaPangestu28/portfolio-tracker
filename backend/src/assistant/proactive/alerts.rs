@@ -40,6 +40,34 @@ pub fn mover_alerts(movers: &[Mover], threshold_pct: f64, today_wib: &str) -> Ve
         .collect()
 }
 
+/// Drawdown of current equity from its peak. One alert per day when the decline
+/// meets `threshold_pct`. `current`/`peak` are USD equity.
+pub fn hyperliquid_drawdown_alert(
+    current: rust_decimal::Decimal,
+    peak: rust_decimal::Decimal,
+    threshold_pct: f64,
+    today_wib: &str,
+) -> Option<Alert> {
+    use rust_decimal::prelude::ToPrimitive;
+    if peak <= rust_decimal::Decimal::ZERO || current >= peak {
+        return None;
+    }
+    let dd_pct = ((peak - current) / peak * rust_decimal::Decimal::from(100))
+        .to_f64()
+        .unwrap_or(0.0);
+    if dd_pct < threshold_pct {
+        return None;
+    }
+    Some(Alert {
+        dedup_key: format!("hl-drawdown:{today_wib}"),
+        message: format!(
+            "📉 Hyperliquid drawdown {:.1}% dari puncak (equity ${})",
+            dd_pct,
+            current.round_dp(2)
+        ),
+    })
+}
+
 /// Milestone values crossed moving upward from prev to curr (inclusive curr).
 pub fn milestones_crossed(prev_idr: i64, curr_idr: i64, step: i64) -> Vec<i64> {
     if step <= 0 || curr_idr <= prev_idr {
@@ -373,6 +401,20 @@ mod tests {
         assert!(triggered.is_empty(), "should not trigger when price has not crossed target");
         // Still active.
         assert_eq!(crate::repo::price_alerts::list_active(&db).await.unwrap().len(), 1);
+    }
+
+    #[test]
+    fn drawdown_alerts_only_at_or_beyond_threshold() {
+        // Peak 1000, current 800 → 20% drawdown.
+        let a = hyperliquid_drawdown_alert(dec!(800), dec!(1000), 15.0, "2026-06-18");
+        let a = a.expect("alert");
+        assert_eq!(a.dedup_key, "hl-drawdown:2026-06-18");
+        assert!(a.message.contains("Hyperliquid"), "{}", a.message);
+        assert!(a.message.contains("20"), "{}", a.message);
+        // 5% drawdown under a 15% threshold → silent.
+        assert!(hyperliquid_drawdown_alert(dec!(950), dec!(1000), 15.0, "2026-06-18").is_none());
+        // No peak → silent.
+        assert!(hyperliquid_drawdown_alert(dec!(0), dec!(0), 15.0, "2026-06-18").is_none());
     }
 
     async fn seed_review_item(db: &Db, created_at: &str) {
