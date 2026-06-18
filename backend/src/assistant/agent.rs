@@ -4,7 +4,10 @@ use crate::db::Db;
 use crate::llm::claude::{extract_blocks, ClaudeClient, LlmError, ResponseBlock};
 
 /// Hard cap on model round-trips per user message (cost / runaway guard).
-pub const MAX_ITERATIONS: usize = 5;
+/// Sized for the longest legitimate flow — confirming a photo review needs
+/// list_pending_reviews → list_accounts → list_instruments → confirm_review —
+/// so a single tool failure doesn't blow the budget before the model can reply.
+pub const MAX_ITERATIONS: usize = 8;
 
 /// How many prior messages of the channel's conversation the model sees.
 const HISTORY_LIMIT: i64 = 12;
@@ -119,6 +122,15 @@ pub trait ToolModel {
         messages: &[serde_json::Value],
         tools: &serde_json::Value,
     ) -> Result<serde_json::Value, LlmError>;
+
+    /// A tool-free turn (`tool_choice: none`) that forces a text reply. Used to
+    /// extract a final explanation once the loop has spent its iteration budget.
+    async fn complete_tools_text_only(
+        &self,
+        system: &str,
+        messages: &[serde_json::Value],
+        tools: &serde_json::Value,
+    ) -> Result<serde_json::Value, LlmError>;
 }
 
 #[async_trait::async_trait]
@@ -130,6 +142,15 @@ impl ToolModel for ClaudeClient {
         tools: &serde_json::Value,
     ) -> Result<serde_json::Value, LlmError> {
         ClaudeClient::complete_tools(self, system, messages, tools).await
+    }
+
+    async fn complete_tools_text_only(
+        &self,
+        system: &str,
+        messages: &[serde_json::Value],
+        tools: &serde_json::Value,
+    ) -> Result<serde_json::Value, LlmError> {
+        ClaudeClient::complete_tools_text_only(self, system, messages, tools).await
     }
 }
 
@@ -240,13 +261,7 @@ async fn run_tool_loop<M: ToolModel + Sync>(
             .collect();
 
         if tool_uses.is_empty() {
-            let mut reply: String = blocks
-                .into_iter()
-                .filter_map(|b| match b {
-                    ResponseBlock::Text(t) => Some(t),
-                    _ => None,
-                })
-                .collect();
+            let mut reply = text_of_blocks(blocks);
             if reply.trim().is_empty() {
                 reply = NO_TEXT_REPLY.to_string();
             }
@@ -265,7 +280,48 @@ async fn run_tool_loop<M: ToolModel + Sync>(
         }
         messages.push(serde_json::json!({ "role": "user", "content": results }));
     }
-    Ok(ITERATION_CAP_REPLY.to_string())
+    // Budget spent. Rather than apologise blindly, give the model one tool-free
+    // turn so it must answer in text — the accumulated tool_results (including
+    // errors like "instrumen belum dikenali") are still in `messages`, so it can
+    // tell the user what actually blocked the request.
+    force_final_reply(model, system, &messages, &tools).await
+}
+
+/// Concatenate the text blocks of a response, dropping any tool_use blocks.
+fn text_of_blocks(blocks: Vec<ResponseBlock>) -> String {
+    blocks
+        .into_iter()
+        .filter_map(|b| match b {
+            ResponseBlock::Text(t) => Some(t),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Force a final text reply after the iteration cap. Runs one tool-free turn so
+/// the model summarises what happened; falls back to the generic apology only if
+/// even that yields no usable text (or the model still tries to call a tool).
+async fn force_final_reply<M: ToolModel + Sync>(
+    model: &M,
+    system: &str,
+    messages: &[serde_json::Value],
+    tools: &serde_json::Value,
+) -> anyhow::Result<String> {
+    let resp = model
+        .complete_tools_text_only(system, messages, tools)
+        .await
+        .map_err(|e| anyhow::anyhow!("llm error: {e}"))?;
+    let reply = match extract_blocks(&resp) {
+        Ok(blocks) => text_of_blocks(blocks),
+        Err(e) => {
+            tracing::warn!("assistant: unusable final response ({e}); using apology");
+            String::new()
+        }
+    };
+    if reply.trim().is_empty() {
+        return Ok(ITERATION_CAP_REPLY.to_string());
+    }
+    Ok(reply)
 }
 
 /// Run the agent loop for one inbound message. Stores the user message and
@@ -349,6 +405,21 @@ mod tests {
         }
     }
 
+    impl ScriptedModel {
+        /// Shared body for both trait methods: record the transcript, count the
+        /// call, and pop the next scripted response (defaulting to a tool_use so
+        /// an empty script loops forever).
+        fn next_response(&self, messages: &[serde_json::Value]) -> serde_json::Value {
+            self.seen.lock().unwrap().push(messages.to_vec());
+            *self.calls.lock().unwrap() += 1;
+            self.responses
+                .lock()
+                .unwrap()
+                .pop_front()
+                .unwrap_or_else(tool_use_response)
+        }
+    }
+
     #[async_trait::async_trait]
     impl ToolModel for ScriptedModel {
         async fn complete_tools(
@@ -357,21 +428,27 @@ mod tests {
             messages: &[serde_json::Value],
             _tools: &serde_json::Value,
         ) -> Result<serde_json::Value, LlmError> {
-            self.seen.lock().unwrap().push(messages.to_vec());
-            *self.calls.lock().unwrap() += 1;
-            Ok(self
-                .responses
-                .lock()
-                .unwrap()
-                .pop_front()
-                .unwrap_or(serde_json::json!({ "content": [
-                    { "type": "tool_use", "id": "loop", "name": "list_todos", "input": {} }
-                ]})))
+            Ok(self.next_response(messages))
+        }
+
+        async fn complete_tools_text_only(
+            &self,
+            _system: &str,
+            messages: &[serde_json::Value],
+            _tools: &serde_json::Value,
+        ) -> Result<serde_json::Value, LlmError> {
+            Ok(self.next_response(messages))
         }
     }
 
     fn text_response(text: &str) -> serde_json::Value {
         serde_json::json!({ "content": [{ "type": "text", "text": text }] })
+    }
+
+    fn tool_use_response() -> serde_json::Value {
+        serde_json::json!({ "content": [
+            { "type": "tool_use", "id": "loop", "name": "list_todos", "input": {} }
+        ]})
     }
 
     #[tokio::test]
@@ -435,13 +512,29 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn iteration_cap_returns_apology() {
+    async fn iteration_cap_makes_a_final_tool_free_call_to_explain() {
         let db = mem_db().await;
-        // Empty script: every call falls back to a tool_use response, forever.
+        // Exhaust the budget with tool_use responses; the forced final call —
+        // which runs without tools — must surface a real explanation instead of
+        // the generic apology.
+        let mut responses: Vec<serde_json::Value> =
+            (0..MAX_ITERATIONS).map(|_| tool_use_response()).collect();
+        responses.push(text_response("instrumen Majoris belum dikenali, tambahin di web dulu"));
+        let model = ScriptedModel::new(responses);
+        let reply = handle_message(&db, &model, "telegram", "masukin review #101").await.unwrap();
+        assert_eq!(reply, "instrumen Majoris belum dikenali, tambahin di web dulu");
+        assert_eq!(model.call_count(), MAX_ITERATIONS + 1);
+    }
+
+    #[tokio::test]
+    async fn iteration_cap_still_apologises_when_the_final_call_yields_no_text() {
+        let db = mem_db().await;
+        // Empty script: every call (incl. the forced final one) falls back to a
+        // tool_use response — no text anywhere — so we land on the apology.
         let model = ScriptedModel::new(vec![]);
         let reply = handle_message(&db, &model, "telegram", "x").await.unwrap();
         assert_eq!(reply, ITERATION_CAP_REPLY);
-        assert_eq!(model.call_count(), MAX_ITERATIONS);
+        assert_eq!(model.call_count(), MAX_ITERATIONS + 1);
     }
 
     #[tokio::test]
