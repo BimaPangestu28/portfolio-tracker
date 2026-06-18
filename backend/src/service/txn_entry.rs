@@ -99,10 +99,11 @@ pub async fn resolve_qty_price(
         let qty = (crate::repo::dec(a)? / price).round_dp(4);
         return Ok((qty.normalize().to_string(), price.normalize().to_string()));
     }
-    // amount + units: price = amount / units.
+    // amount + units: price = amount / units. Round to 4 dp (NAV precision) so a
+    // long repeating quotient doesn't surface as a 28-digit price in the UI.
     if let (Some(a), Some(q)) = (a, q) {
         let units = crate::repo::dec(q)?;
-        let price = crate::repo::dec(a)? / units;
+        let price = (crate::repo::dec(a)? / units).round_dp(4);
         return Ok((units.normalize().to_string(), price.normalize().to_string()));
     }
     // amount only: fund-aware derivation (buy/sell only).
@@ -161,7 +162,7 @@ mod tests {
         let mut note = None;
         let (q, p) = resolve_qty_price(&db, &ins, "buy", Some("12367.8985"), None, Some("20000000"), false, &mut note).await.ok().unwrap();
         assert_eq!(q, "12367.8985");
-        assert_eq!(p, "1617.0895969109060848130343243"); // 20000000 / 12367.8985
+        assert_eq!(p, "1617.0896"); // 20000000 / 12367.8985 = 1617.08959..., rounded to 4 dp (NAV precision)
     }
 
     #[tokio::test]
