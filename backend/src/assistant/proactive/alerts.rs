@@ -104,6 +104,41 @@ pub fn stale_price_alerts(
         .collect()
 }
 
+/// Drawdown of current equity from its all-time peak within the stored series.
+///
+/// Emits one alert per day when the decline from peak meets `threshold_pct`.
+/// `current` and `peak` are denominated in USD equity.
+///
+/// @param current - Current equity value in USD
+/// @param peak - Peak equity value in USD observed in the stored series
+/// @param threshold_pct - Minimum drawdown percentage to trigger the alert
+/// @param today_wib - ISO date string (YYYY-MM-DD) used in the dedup key
+/// @returns `Some(Alert)` when drawdown >= threshold, `None` otherwise
+pub fn hyperliquid_drawdown_alert(
+    current: rust_decimal::Decimal,
+    peak: rust_decimal::Decimal,
+    threshold_pct: f64,
+    today_wib: &str,
+) -> Option<Alert> {
+    use rust_decimal::prelude::ToPrimitive;
+    if peak <= rust_decimal::Decimal::ZERO || current >= peak {
+        return None;
+    }
+    let drawdown_pct = ((peak - current) / peak * rust_decimal::Decimal::from(100))
+        .to_f64()
+        .unwrap_or(0.0);
+    if drawdown_pct < threshold_pct {
+        return None;
+    }
+    Some(Alert {
+        dedup_key: format!("hl-drawdown:{today_wib}"),
+        message: format!(
+            "📉 Hyperliquid drawdown {:.1}% dari puncak (equity ${:.2})",
+            drawdown_pct, current
+        ),
+    })
+}
+
 /// Evaluate all active price alerts against the latest stored prices.
 ///
 /// Alerts that have reached their target are marked triggered and returned as
@@ -153,6 +188,7 @@ pub async fn evaluate(
     db: &Db,
     mover_threshold_pct: f64,
     milestone_step_idr: i64,
+    hl_drawdown_pct: f64,
     today_wib: &str,
 ) -> Vec<Alert> {
     let mut alerts = Vec::new();
@@ -203,6 +239,22 @@ pub async fn evaluate(
             }
         }
         Err(e) => tracing::warn!("alerts: portfolio summary unavailable: {e:#}"),
+    }
+
+    match crate::repo::instruments::find_by_symbol(db, crate::setup::HL_SYMBOL).await {
+        Ok(Some(instrument)) => match crate::repo::prices::series(db, instrument.id).await {
+            Ok(series) if !series.is_empty() => {
+                let current = series.last().map(|(_, price)| *price).unwrap_or_default();
+                let peak = series.iter().map(|(_, price)| *price).max().unwrap_or(current);
+                if let Some(alert) = hyperliquid_drawdown_alert(current, peak, hl_drawdown_pct, today_wib) {
+                    alerts.push(alert);
+                }
+            }
+            Ok(_) => {}
+            Err(error) => tracing::warn!("alerts: hl prices unavailable: {error:#}"),
+        },
+        Ok(None) => {}
+        Err(error) => tracing::warn!("alerts: hl instrument lookup failed: {error:#}"),
     }
 
     alerts.extend(price_alert_triggers(db).await);
@@ -373,6 +425,16 @@ mod tests {
         assert!(triggered.is_empty(), "should not trigger when price has not crossed target");
         // Still active.
         assert_eq!(crate::repo::price_alerts::list_active(&db).await.unwrap().len(), 1);
+    }
+
+    #[test]
+    fn drawdown_alerts_only_at_or_beyond_threshold() {
+        let alert = hyperliquid_drawdown_alert(dec!(800), dec!(1000), 15.0, "2026-06-18").expect("alert");
+        assert_eq!(alert.dedup_key, "hl-drawdown:2026-06-18");
+        assert!(alert.message.contains("Hyperliquid"));
+        assert!(alert.message.contains("20"));
+        assert!(hyperliquid_drawdown_alert(dec!(950), dec!(1000), 15.0, "2026-06-18").is_none());
+        assert!(hyperliquid_drawdown_alert(dec!(0), dec!(0), 15.0, "2026-06-18").is_none());
     }
 
     async fn seed_review_item(db: &Db, created_at: &str) {
