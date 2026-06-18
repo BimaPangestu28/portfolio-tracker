@@ -1,7 +1,7 @@
 use crate::db::Db;
 use serde::{Deserialize, Serialize};
 
-const VALID_KINDS: &[&str] = &["evm_wallet", "binance", "mock"];
+const VALID_KINDS: &[&str] = &["evm_wallet", "binance", "mock", "hyperliquid"];
 
 #[derive(Debug, Clone, Serialize, sqlx::FromRow)]
 pub struct ConnectorRow {

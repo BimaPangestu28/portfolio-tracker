@@ -1,5 +1,6 @@
 pub mod evm;
 pub mod factory;
+pub mod hyperliquid;
 pub mod mock;
 
 use async_trait::async_trait;
@@ -13,6 +14,9 @@ pub struct ExternalTxn {
     pub quantity: String,
     pub fee: Option<String>,
     pub currency: String,
+    /// Per-unit price in `currency`. None → caller defaults to "0" (legacy
+    /// connectors like EVM). Stablecoin cash flows set "1" so TWR values them.
+    pub price_native: Option<String>,
 }
 
 #[derive(Debug)]

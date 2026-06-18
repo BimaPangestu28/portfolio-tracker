@@ -1,0 +1,56 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: cs-gateway-auth
+  namespace: portfolio
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 256Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cs-gateway
+  namespace: portfolio
+spec:
+  replicas: 1
+  # Baileys credentials live on a ReadWriteOnce volume; only one pod at a time.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: cs-gateway
+  template:
+    metadata:
+      labels:
+        app: cs-gateway
+    spec:
+      imagePullSecrets:
+        - name: ghcr-creds
+      containers:
+        - name: cs-gateway
+          image: ghcr.io/bimapangestu28/portfolio-gateway:latest
+          imagePullPolicy: Always
+          env:
+            - name: BACKEND_URL
+              value: "http://backend:8080"
+            - name: PATH_PREFIX
+              value: "/cs"
+            - name: OUTBOUND_ENABLED
+              value: "1"
+            - name: AUTH_DIR
+              value: "/app/auth_state"
+            - name: GATEWAY_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: portfolio-secrets
+                  key: CS_GATEWAY_TOKEN
+          volumeMounts:
+            - name: auth
+              mountPath: /app/auth_state
+      volumes:
+        - name: auth
+          persistentVolumeClaim:
+            claimName: cs-gateway-auth

@@ -155,6 +155,39 @@ export const handlers = [
   // ── Dashboard: movers + benchmark ──────────────────────────────────────────
   http.get("/api/portfolio/movers", () => HttpResponse.json([])),
   http.get("/api/portfolio/benchmark", () => HttpResponse.json([])),
+
+  // ── Phase 5B: Hyperliquid ──────────────────────────────────────────────────
+  http.get("/api/portfolio/hyperliquid", () =>
+    HttpResponse.json({
+      points: [],
+      metrics: { total_return: 0, annualized: null, max_drawdown: 0, volatility: 0 },
+      current_value_usd: "0",
+      insufficient_data: true,
+    }),
+  ),
 ];
 
-export const server = setupServer(...handlers);
+// ── CS Admin handlers ───────────────────────────────────────────────────────
+const csHandlers = [
+  http.get("/api/cs/admin/products", () =>
+    HttpResponse.json([
+      { id: 1, name: "Paket A", description: null, price: 150000, currency: "IDR", availability: "ready", active: 1, updated_at: "2026-06-16T00:00:00Z" },
+    ]),
+  ),
+  http.get("/api/cs/admin/escalations", () =>
+    HttpResponse.json([
+      { id: 7, conversation_id: 3, reason: "cannot_answer", summary: "needs quote", status: "open", created_at: "2026-06-16T00:00:00Z", handled_at: null },
+    ]),
+  ),
+  http.get("/api/cs/admin/docs", () => HttpResponse.json([])),
+  http.get("/api/cs/admin/orders", () => HttpResponse.json([])),
+  http.get("/api/cs/admin/conversations", () => HttpResponse.json([])),
+  http.post("/api/cs/admin/conversations/:id/reply", () => HttpResponse.json(null)),
+  http.get("/api/cs/whatsapp/status", () =>
+    HttpResponse.json({ status: "disconnected", qr: null, number: null }),
+  ),
+  http.post("/api/cs/whatsapp/connect", () => HttpResponse.json(null)),
+  http.post("/api/cs/whatsapp/disconnect", () => HttpResponse.json(null)),
+];
+
+export const server = setupServer(...handlers, ...csHandlers);

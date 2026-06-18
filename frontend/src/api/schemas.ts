@@ -333,6 +333,21 @@ export type BenchmarkRow = z.infer<typeof BenchmarkRowSchema>;
 export const LoginResponseSchema = z.object({ token: z.string() });
 export type LoginResponse = z.infer<typeof LoginResponseSchema>;
 
+// ── Hyperliquid equity view ────────────────────────────────────────────────
+
+export const HyperliquidViewSchema = z.object({
+  points: z.array(z.object({ date: z.string(), cum_return: z.number(), nav: z.number() })),
+  metrics: z.object({
+    total_return: z.number(),
+    annualized: z.number().nullable(),
+    max_drawdown: z.number(),
+    volatility: z.number(),
+  }),
+  current_value_usd: z.string(),
+  insufficient_data: z.boolean(),
+});
+export type HyperliquidView = z.infer<typeof HyperliquidViewSchema>;
+
 // ── Performance analytics (TWR + risk) ────────────────────────────────────
 
 export const PerformanceSchema = z.object({
@@ -464,4 +479,71 @@ export const NewsTodaySchema = z.object({
 
 export type NewsToday = z.infer<typeof NewsTodaySchema>;
 export type NewsArticle = z.infer<typeof NewsArticleSchema>;
+
+// ── CS Admin schemas ───────────────────────────────────────────────────────
+
+export const KbDocSchema = z.object({
+  id: z.number(),
+  title: z.string(),
+  source: z.string().nullable(),
+  body: z.string(),
+  updated_at: z.string(),
+});
+export type KbDoc = z.infer<typeof KbDocSchema>;
+
+export const CsProductSchema = z.object({
+  id: z.number(),
+  name: z.string(),
+  description: z.string().nullable(),
+  price: z.number().nullable(),
+  currency: z.string().nullable(),
+  availability: z.string().nullable(),
+  active: z.number(), // SQLite 0/1
+  updated_at: z.string(),
+});
+export type CsProduct = z.infer<typeof CsProductSchema>;
+
+export const CsOrderSchema = z.object({
+  id: z.number(),
+  external_ref: z.string(),
+  customer_name: z.string().nullable(),
+  customer_contact: z.string().nullable(),
+  status: z.string(),
+  details_json: z.string().nullable(),
+  updated_at: z.string(),
+});
+export type CsOrder = z.infer<typeof CsOrderSchema>;
+
+export const CsConversationSchema = z.object({
+  id: z.number(),
+  channel: z.string(),
+  visitor_name: z.string().nullable(),
+  visitor_email: z.string().nullable(),
+  visitor_phone: z.string().nullable(),
+  session_token: z.string(),
+  status: z.string(),
+  created_at: z.string(),
+  last_msg_at: z.string(),
+});
+export type CsConversation = z.infer<typeof CsConversationSchema>;
+
+export const CsMessageSchema = z.object({
+  id: z.number(),
+  conversation_id: z.number(),
+  role: z.string(),
+  content: z.string(),
+  created_at: z.string(),
+});
+export type CsMessage = z.infer<typeof CsMessageSchema>;
+
+export const CsEscalationSchema = z.object({
+  id: z.number(),
+  conversation_id: z.number(),
+  reason: z.string(),
+  summary: z.string(),
+  status: z.string(),
+  created_at: z.string(),
+  handled_at: z.string().nullable(),
+});
+export type CsEscalation = z.infer<typeof CsEscalationSchema>;
 export type NewsQuiz = z.infer<typeof NewsQuizSchema>;

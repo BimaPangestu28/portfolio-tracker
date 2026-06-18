@@ -66,6 +66,12 @@ spec:
                 secretKeyRef:
                   name: portfolio-secrets
                   key: GATEWAY_TOKEN
+            - name: CS_GATEWAY_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: portfolio-secrets
+                  key: CS_GATEWAY_TOKEN
+                  optional: true   # CS WhatsApp is opt-in; backend must start without it
             - name: AUTH_PASSWORD
               valueFrom:
                 secretKeyRef:

@@ -15,6 +15,11 @@ import SettingsPage from "./pages/SettingsPage";
 import AgendaPage from "./pages/AgendaPage";
 import TugasPage from "./pages/TugasPage";
 import NewsPage from "./pages/NewsPage";
+import CsDocsPage from "./pages/CsDocsPage";
+import CsPricingPage from "./pages/CsPricingPage";
+import CsOrdersPage from "./pages/CsOrdersPage";
+import CsInboxPage from "./pages/CsInboxPage";
+import CsWhatsAppPage from "./pages/CsWhatsAppPage";
 
 export default function App() {
   const { isUnlocked } = useAuth();
@@ -41,6 +46,13 @@ export default function App() {
         <Route path="chat" element={<ChatPage />} />
         <Route path="news" element={<NewsPage />} />
         <Route path="settings" element={<SettingsPage />} />
+
+        {/* ── CS Admin ── */}
+        <Route path="cs/admin/docs" element={<CsDocsPage />} />
+        <Route path="cs/admin/pricing" element={<CsPricingPage />} />
+        <Route path="cs/admin/orders" element={<CsOrdersPage />} />
+        <Route path="cs/admin/inbox" element={<CsInboxPage />} />
+        <Route path="cs/admin/whatsapp" element={<CsWhatsAppPage />} />
 
         {/* ── Legacy route redirects ── */}
         <Route path="holdings" element={<Navigate to="/portfolio" replace />} />

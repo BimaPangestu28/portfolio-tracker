@@ -13,6 +13,12 @@ pub enum AppError {
     Conflict(String),
     #[error("unauthorized: {0}")]
     Unauthorized(String),
+    #[error("rate limit exceeded: {0}")]
+    RateLimited(String),
+    /// Use on public (unauthenticated) endpoints: logs the real detail server-side
+    /// but returns only a generic body to the anonymous caller.
+    #[error("internal error: {0}")]
+    PublicInternal(String),
     #[error(transparent)]
     Other(#[from] anyhow::Error),
 }
@@ -24,6 +30,11 @@ impl IntoResponse for AppError {
             AppError::BadRequest(_) => (StatusCode::BAD_REQUEST, self.to_string()),
             AppError::Conflict(_) => (StatusCode::CONFLICT, self.to_string()),
             AppError::Unauthorized(_) => (StatusCode::UNAUTHORIZED, self.to_string()),
+            AppError::RateLimited(_) => (StatusCode::TOO_MANY_REQUESTS, self.to_string()),
+            AppError::PublicInternal(detail) => {
+                tracing::error!("public cs internal error: {detail}");
+                (StatusCode::INTERNAL_SERVER_ERROR, "service temporarily unavailable".to_string())
+            }
             AppError::Other(e) => {
                 tracing::error!("internal error: {e:#}");
                 // Single-user app behind auth: return the full error chain so the
@@ -74,5 +85,17 @@ mod tests {
         let (status, body) = body_json(AppError::BadRequest("quantity is not a number".into())).await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
         assert_eq!(body["error"], "invalid input: quantity is not a number");
+    }
+
+    #[test]
+    fn rate_limited_maps_to_429() {
+        let resp = AppError::RateLimited("slow down".into()).into_response();
+        assert_eq!(resp.status(), axum::http::StatusCode::TOO_MANY_REQUESTS);
+    }
+
+    #[test]
+    fn public_internal_returns_500_without_leaking_detail() {
+        let resp = AppError::PublicInternal("secret table foo".into()).into_response();
+        assert_eq!(resp.status(), axum::http::StatusCode::INTERNAL_SERVER_ERROR);
     }
 }
