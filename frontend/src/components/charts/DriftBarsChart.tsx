@@ -7,6 +7,7 @@
  *   - drift-target (vertical marker for target %)
  */
 import type { CategoryAllocation } from "../../api/schemas";
+import { UNCATEGORIZED_CATEGORY_ID } from "../../api/schemas";
 
 function categoryColor(name: string): string {
   const key = (name ?? "").toLowerCase();
@@ -62,6 +63,9 @@ export function DriftBarsChart({ allocation }: Props) {
         const color = categoryColor(c.name);
         const bandLo = Math.max(0, target - tol);
         const bandHi = target + tol;
+        // The synthetic "Lainnya" bucket has no target, so the tolerance band and
+        // target marker are meaningless — show just the actual fill.
+        const isUncategorized = c.category_id === UNCATEGORIZED_CATEGORY_ID;
 
         return (
           <div key={c.category_id} className="flex col gap-1">
@@ -75,18 +79,22 @@ export function DriftBarsChart({ allocation }: Props) {
                 {c.name}
               </span>
               <span className="t-xs num t-muted">
-                {actual.toFixed(1).replace(".", ",")}% / {target}%
+                {isUncategorized
+                  ? `${actual.toFixed(1).replace(".", ",")}% · tanpa target`
+                  : `${actual.toFixed(1).replace(".", ",")}% / ${target}%`}
               </span>
             </div>
             {/* Drift track */}
             <div className="drift-track">
-              <div
-                className="drift-band"
-                style={{
-                  left: pct(bandLo),
-                  width: `${((bandHi - bandLo) / scaleMax) * 100}%`,
-                }}
-              />
+              {!isUncategorized && (
+                <div
+                  className="drift-band"
+                  style={{
+                    left: pct(bandLo),
+                    width: `${((bandHi - bandLo) / scaleMax) * 100}%`,
+                  }}
+                />
+              )}
               <div
                 className="drift-fill"
                 style={{
@@ -96,15 +104,17 @@ export function DriftBarsChart({ allocation }: Props) {
                   boxShadow: oob ? "inset 0 0 0 1.5px hsl(var(--warn))" : "none",
                 }}
               />
-              <div
-                className="drift-target"
-                style={{
-                  left: pct(target),
-                  background: oob
-                    ? "hsl(var(--warn))"
-                    : "hsl(var(--foreground))",
-                }}
-              />
+              {!isUncategorized && (
+                <div
+                  className="drift-target"
+                  style={{
+                    left: pct(target),
+                    background: oob
+                      ? "hsl(var(--warn))"
+                      : "hsl(var(--foreground))",
+                  }}
+                />
+              )}
             </div>
           </div>
         );

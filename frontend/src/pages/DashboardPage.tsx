@@ -50,6 +50,7 @@ import { StackedAreaChart } from "../components/charts/StackedAreaChart";
 import type {
   CategoryAllocation, Goal, Mover, BenchmarkRow, Position, Instrument, Transaction,
 } from "../api/schemas";
+import { UNCATEGORIZED_CATEGORY_ID } from "../api/schemas";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -1118,7 +1119,9 @@ export default function DashboardPage() {
 
   const outOfBandCount = summary.data?.allocation.filter((c) => c.out_of_band).length ?? 0;
   const activeCategories =
-    summary.data?.allocation.filter((c) => Number(c.actual_value_idr) > 0).length ?? 0;
+    summary.data?.allocation.filter(
+      (c) => Number(c.actual_value_idr) > 0 && c.category_id !== UNCATEGORIZED_CATEGORY_ID,
+    ).length ?? 0;
   const staleCount =
     summary.data?.positions.filter((p) => p.price_stale && parseNum(p.quantity) !== 0).length ?? 0;
 

@@ -74,6 +74,9 @@ export const PositionSchema = z.object({
 });
 export type Position = z.infer<typeof PositionSchema>;
 
+/** Synthetic `category_id` for the "Lainnya" bucket (assets with no target category). */
+export const UNCATEGORIZED_CATEGORY_ID = -1;
+
 export const CategoryAllocationSchema = z.object({
   category_id: z.number(),
   name: z.string(),
