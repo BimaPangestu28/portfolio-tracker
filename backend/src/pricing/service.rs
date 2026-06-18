@@ -110,6 +110,18 @@ pub async fn refresh_all(db: &Db) -> anyhow::Result<()> {
                 (_, None) => tracing::warn!("gold price refresh for {} skipped: no USD/IDR rate", ins.symbol),
             }
         }
+        // Hyperliquid account equity: price of the synthetic 1-unit instrument
+        // equals the account's USD equity, pulled read-only from the bot API.
+        if ins.price_source.starts_with("hyperliquid:") {
+            if let Some(client) = crate::pricing::hyperliquid::BotClient::from_env() {
+                match client.account_equity().await {
+                    Ok(q) => {
+                        let _ = prices::upsert_latest(db, ins.id, q.price, &q.currency, "hyperliquid", &today).await;
+                    }
+                    Err(e) => tracing::warn!("hyperliquid equity refresh failed for {}: {e}", ins.symbol),
+                }
+            }
+        }
     }
     Ok(())
 }
