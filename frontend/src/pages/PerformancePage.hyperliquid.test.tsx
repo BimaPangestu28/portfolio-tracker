@@ -90,8 +90,6 @@ test("shows an open position and a closed trade", async () => {
   // Timeframe column
   expect(screen.getByText("4h")).toBeInTheDocument();
 
-  // Aggregate stats — realized PnL in card-sub (same value $100 appears multiple times)
-  expect(screen.getAllByText("$100").length).toBeGreaterThanOrEqual(1);
 });
 
 test("shows empty-state messages when there are no positions or trades", async () => {

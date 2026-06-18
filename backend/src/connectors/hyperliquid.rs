@@ -31,11 +31,22 @@ impl Connector for HyperliquidConnector {
     }
 }
 
-/// Map `/flows` rows to deposit/withdrawal ExternalTxns (USDC).
+/// Map `/flows` rows to deposit/withdrawal [`ExternalTxn`]s (USDC).
 ///
 /// The bot API returns `usdc` as a signed number: negative for withdrawals,
 /// positive for deposits. `ExternalTxn.quantity` must be the absolute value
 /// (magnitude). Direction comes from the `kind` field, not the sign.
+///
+/// # TWR external-flow accounting only — no market value
+///
+/// The [`ExternalTxn`]s produced here are **for TWR (time-weighted return)
+/// external-flow accounting only**. They record cash entering or leaving the
+/// account so that the TWR calculation can strip out the effect of deposits and
+/// withdrawals. They must land on a cash/unpriced path and must **not** be
+/// given a market value or turned into a valued holding. The `HL-EQUITY`
+/// synthetic instrument already prices the total account equity, which
+/// includes all idle USDC collateral. Assigning independent market value to
+/// these USDC flows would double-count that collateral in net worth.
 ///
 /// # Errors
 /// Returns `ConnectorError::Parse` if the body is not a JSON array.

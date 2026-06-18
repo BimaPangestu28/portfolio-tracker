@@ -18,6 +18,17 @@ pub const HL_ACCOUNT_NAME: &str = "Hyperliquid";
 /// Create the Hyperliquid account, the synthetic `HL-EQUITY` instrument, and a
 /// single quantity-1 opening-balance holding. Idempotent: gated on the
 /// instrument's existence, so re-running on every startup is safe.
+///
+/// # Double-counting invariant
+///
+/// The `HL-EQUITY` instrument price equals the **total account equity** reported
+/// by the Hyperliquid bot, which already includes idle USDC collateral. Because
+/// of this, a separately-priced `USDC` instrument must **never** be created on
+/// the `Hyperliquid` account. USDC deposit and withdrawal flows from the
+/// connector are recorded solely as external cash flows for TWR (time-weighted
+/// return) accounting — they carry no market value of their own and must never
+/// be turned into a valued holding. Creating a priced `USDC` balance alongside
+/// `HL-EQUITY` would double-count the same dollars in net worth.
 pub async fn ensure_hyperliquid_account(db: &Db) -> anyhow::Result<()> {
     if instruments::find_by_symbol(db, HL_SYMBOL).await?.is_some() {
         return Ok(());
