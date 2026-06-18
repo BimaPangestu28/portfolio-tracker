@@ -26,12 +26,12 @@ pub struct BriefingData {
     pub clickup_due: Option<Vec<(String, Vec<String>)>>,
     /// Important unread emails. `None` when Gmail isn't reachable (section omitted).
     pub gmail_important: Option<Vec<crate::google::gmail::EmailSummary>>,
+    /// Hyperliquid equity summary. `None` when the instrument is absent or the
+    /// price history is empty (section omitted).
+    pub hyperliquid: Option<crate::service::hyperliquid::HlEquitySummary>,
     /// Top news articles for today's digest; empty when news is disabled or
     /// generation failed (section omitted, briefing unaffected).
     pub news: Vec<crate::assistant::proactive::news::digest::DigestArticle>,
-    /// Hyperliquid equity snapshot as of yesterday's baseline. `None` when
-    /// the instrument is not configured or no price data is available.
-    pub hyperliquid: Option<crate::service::hyperliquid::HlEquitySummary>,
 }
 
 /// One briefing line for a task that is overdue or due today; None otherwise
@@ -130,12 +130,12 @@ pub async fn gather(db: &Db) -> anyhow::Result<BriefingData> {
         .map(|items| items.len())
         .unwrap_or(0);
 
+    // ~24h baseline: see snapshot_before's doc for why yesterday.
+    let yesterday = (now_wib - chrono::Duration::days(1)).format("%Y-%m-%d").to_string();
+
     let (net_worth_idr, delta_vs_yesterday_idr) =
         match crate::service::portfolio::build_summary(db).await {
             Ok(summary) => {
-                // ~24h baseline: see snapshot_before's doc for why yesterday.
-                let yesterday =
-                    (now_wib - chrono::Duration::days(1)).format("%Y-%m-%d").to_string();
                 let delta = match crate::repo::snapshots::history(db).await {
                     Ok(rows) => super::snapshot_before(&rows, &yesterday)
                         .map(|prev| summary.net_worth_idr - prev),
@@ -148,6 +148,10 @@ pub async fn gather(db: &Db) -> anyhow::Result<BriefingData> {
                 (Decimal::ZERO, None)
             }
         };
+
+    let hyperliquid = crate::service::hyperliquid::equity_and_change(db, &yesterday)
+        .await
+        .unwrap_or(None);
 
     let movers = crate::service::movers::daily_movers(db, 3).await.unwrap_or_else(|e| {
         tracing::warn!("briefing: movers unavailable: {e:#}");
@@ -195,11 +199,6 @@ pub async fn gather(db: &Db) -> anyhow::Result<BriefingData> {
         tracing::warn!("briefing: news digest unavailable: {e:#}");
         Vec::new()
     });
-
-    let yesterday = (now_wib - chrono::Duration::days(1)).format("%Y-%m-%d").to_string();
-    let hyperliquid = crate::service::hyperliquid::equity_and_change(db, &yesterday)
-        .await
-        .unwrap_or(None);
 
     Ok(BriefingData {
         date_wib: today,
@@ -287,6 +286,10 @@ pub fn render_data_block(d: &BriefingData) -> String {
             group_id(&delta.abs().round_dp(0))
         ));
     }
+    if let Some(hl) = &d.hyperliquid {
+        out.push_str(&crate::service::hyperliquid::format_hyperliquid_line(hl));
+        out.push('\n');
+    }
     if !d.movers.is_empty() {
         out.push_str("Movers:\n");
         for m in &d.movers {
@@ -298,10 +301,6 @@ pub fn render_data_block(d: &BriefingData) -> String {
                 group_id(&m.delta_idr.abs().round_dp(0)),
             ));
         }
-    }
-    if let Some(hl) = &d.hyperliquid {
-        out.push_str(&crate::service::hyperliquid::format_hyperliquid_line(hl));
-        out.push('\n');
     }
     out.push_str(&format!("Review pending: {}\n", d.pending_reviews));
 

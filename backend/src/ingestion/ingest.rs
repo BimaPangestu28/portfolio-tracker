@@ -12,7 +12,7 @@ Return ONLY a JSON object, no prose, no markdown fences, no explanations of your
 {"doc_type": "<one of the four>", "entries": [ { "entry_type": "buy|sell|dividend|interest|fee|deposit|withdrawal|opening_balance", "symbol": "...", "instrument_name": "...", "quantity": "...", "price_native": "...", "fee_native": "...", "amount_native": "...", "currency": "...", "executed_at": "YYYY-MM-DDTHH:MM:SSZ", "account_hint": "...", "note": "...", "confidence": 0.0 } ] }
 Rules: holdings_snapshot rows -> entry_type "opening_balance" with quantity and average cost as price_native. txn_history/trade_confirmation -> buy/sell/dividend/fee. bank_statement -> deposit/withdrawal/dividend/interest. Numbers as strings, no thousands separators, and ALWAYS '.' as the decimal point — write 5661.94, never "5,661.94" or "5661,94". Omit unknown fields. Set confidence in [0,1]. If a value is uncertain, still include the entry with a lower confidence.
 IMPORTANT for Indonesian (IDX) brokers such as Stockbit, Ajaib, IPOT, BIONS: a column labeled "AMOUNT" (or "Total"/"Nilai") is the TOTAL transaction value in IDR INCLUDING fees, i.e. amount = quantity*price + fee. It is NOT the share quantity. Put that total in "amount_native" verbatim and do NOT use it as "quantity". IDX shares trade in lots of 100, so quantity is always a positive multiple of 100 (100, 200, 700, ...). Derive quantity by taking amount/price and rounding DOWN to the nearest multiple of 100, then set fee_native = amount - quantity*price. Example: BUY TLKM with AMOUNT 2.012.014 and PRICE 2.870 -> amount/price = 701.05, round down to lot -> quantity "700", fee_native = 2012014 - 700*2870 = "3014", amount_native "2012014", price_native "2870". Never emit quantity 701 here. These IDX lot/fee rules apply only to IDR-denominated stock rows; do NOT apply lot rounding to crypto, US stocks, or fractional shares.
-IMPORTANT for Indonesian mutual fund apps such as Bibit: the goal/portfolio name (e.g. "Dana Darurat", "Pendidikan Noah", "Mobil") is NOT the instrument — put it in "account_hint" only. Put the clean fund name (e.g. "Sucorinvest Bond Fund", "Majoris Pasar Uang Indonesia") in "instrument_name". Mutual fund purchases are usually shown as an IDR amount with no units and no NAV: put that amount in "amount_native" and omit "quantity" and "price_native" entirely — NEVER invent units or NAV. Skip failed or cancelled orders. Put the order status (e.g. "Pembelian Berhasil") in "note"."#;
+IMPORTANT for Indonesian mutual fund apps such as Bibit: the goal/portfolio name (e.g. "Dana Darurat", "Pendidikan Noah", "Mobil") is NOT the instrument — put it in "account_hint" only. Put the clean fund name (e.g. "Sucorinvest Bond Fund", "Majoris Pasar Uang Indonesia") in "instrument_name". A pending purchase shows only an IDR amount with no units and no NAV — put that amount in "amount_native" and omit "quantity" and "price_native". BUT a settled order or a transaction-detail view DOES show "NAV" and "Jumlah Unit": when both are visible, set "price_native" to the NAV and "quantity" to the unit count (and still put the IDR total in "amount_native"). Never invent units or NAV — only copy them when the document shows them. Skip failed or cancelled orders. Put the order status (e.g. "Pembelian Berhasil") in "note"."#;
 
 /// Decide if an entry needs human attention (low confidence or missing core fields).
 pub fn needs_attention(e: &ExtractedEntry) -> bool {
@@ -239,6 +239,12 @@ mod tests {
         let mut e = fund_entry();
         e.amount_native = None;
         assert!(needs_attention(&e));
+    }
+
+    #[test]
+    fn system_prompt_tells_model_to_capture_nav_and_units_when_shown() {
+        assert!(super::SYSTEM_PROMPT.contains("Jumlah Unit") || super::SYSTEM_PROMPT.contains("unit count"));
+        assert!(super::SYSTEM_PROMPT.contains("NAV") && super::SYSTEM_PROMPT.contains("price_native"));
     }
 
     #[test]

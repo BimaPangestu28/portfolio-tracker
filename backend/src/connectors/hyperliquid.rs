@@ -99,6 +99,8 @@ pub fn parse_flows(body: &serde_json::Value) -> Result<Vec<ExternalTxn>, Connect
             quantity,
             fee: None,
             currency: "USD".into(),
+            // USDC is a stablecoin; price it at 1 so TWR external flows are valued.
+            price_native: Some("1".into()),
         });
     }
     Ok(out)

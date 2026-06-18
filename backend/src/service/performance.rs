@@ -243,4 +243,33 @@ mod tests {
         assert!(view.insufficient_data);
         assert!(view.points.is_empty());
     }
+
+    #[tokio::test]
+    async fn hl_usdc_deposit_does_not_create_return() {
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        // Two snapshots where rise is purely from deposit
+        crate::repo::snapshots::upsert(&db, "2026-01-01", "1000000", "65", "{}", None, None).await.unwrap();
+        crate::repo::snapshots::upsert(&db, "2026-01-02", "2000000", "130", "{}", None, None).await.unwrap();
+        let acc = crate::repo::accounts::create(&db, &NewAccount{
+            name:"HL".into(), account_type:"exchange".into(), institution:None,
+            native_currency:"USD".into(), note:None
+        }).await.unwrap();
+        let inst = crate::repo::instruments::create(&db, &NewInstrument{
+            symbol:"HL-USDC".into(), name:"HL USDC flow".into(), instrument_type:"cash".into(),
+            native_currency:"USD".into(), category_id:None,
+            price_source:"hyperliquid-flow".into(), decimals:Some(2), note:None
+        }).await.unwrap();
+        // Deposit txn with price_native="1" (the fix), amount=1,000,000 IDR equivalent
+        crate::repo::transactions::create(&db, &NewTransaction{
+            account_id:acc.id, instrument_id:inst.id, txn_type:"deposit".into(),
+            executed_at: chrono::DateTime::parse_from_rfc3339("2026-01-02T00:00:00Z").unwrap().with_timezone(&chrono::Utc),
+            quantity:"1000000".into(), price_native:"1".into(), fee_native:None,
+            currency:"IDR".into(), fx_to_idr:"1".into(), fx_to_usd:"0.000065".into(),
+            note:None, source:None, external_id:None
+        }).await.unwrap();
+
+        let view = build_performance(&db, "idr", "all").await.unwrap();
+        assert!(!view.insufficient_data);
+        assert!(view.metrics.total_return.abs() < 1e-9, "expected ~0 return, got {}", view.metrics.total_return);
+    }
 }

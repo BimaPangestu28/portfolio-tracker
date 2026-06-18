@@ -1259,7 +1259,11 @@ export default function DashboardPage() {
       {/* ── 5. Pergerakan + Tujuan side by side ───────────────────────────── */}
       <div className="grid gap-5" style={{ gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)" }}>
         <MoversCard movers={movers.data ?? []} loading={movers.isLoading} />
+        <HyperliquidCard />
+      </div>
 
+      {/* ── 5b. Tujuan Keuangan full row ──────────────────────────────────── */}
+      <div className="grid gap-5" style={{ gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)" }}>
         {goals.isLoading ? (
           <CardSkeleton rows={2} height={60} />
         ) : (

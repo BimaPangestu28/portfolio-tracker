@@ -154,6 +154,10 @@ pub fn render_data_block(d: &RecapData) -> String {
             group_id(&delta.abs().round_dp(0))
         ));
     }
+    if let Some(hl) = &d.hyperliquid {
+        out.push_str(&crate::service::hyperliquid::format_hyperliquid_line(hl));
+        out.push('\n');
+    }
     out.push_str(&format!(
         "Pengeluaran minggu ini: Rp {}\n",
         group_id(&d.spending_idr.round_dp(0))

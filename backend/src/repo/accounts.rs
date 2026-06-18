@@ -48,6 +48,8 @@ pub async fn delete(db: &Db, id: i64) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Find an account by exact name match, returning `None` if no account with
+/// that name exists.
 pub async fn find_by_name(db: &Db, name: &str) -> anyhow::Result<Option<AccountRow>> {
     Ok(sqlx::query_as::<_, AccountRow>(
         "SELECT id, name, account_type, institution, native_currency, note, created_at
@@ -80,10 +82,14 @@ mod tests {
         let db = crate::db::connect("sqlite::memory:").await.unwrap();
         assert!(find_by_name(&db, "Hyperliquid").await.unwrap().is_none());
         create(&db, &NewAccount {
-            name: "Hyperliquid".into(), account_type: "exchange".into(),
-            institution: None, native_currency: "USD".into(), note: None,
+            name: "Hyperliquid".into(),
+            account_type: "exchange".into(),
+            institution: None,
+            native_currency: "USD".into(),
+            note: None,
         }).await.unwrap();
         let found = find_by_name(&db, "Hyperliquid").await.unwrap().expect("found");
         assert_eq!(found.name, "Hyperliquid");
+        assert_eq!(found.native_currency, "USD");
     }
 }

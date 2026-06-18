@@ -94,6 +94,21 @@ pub fn build_tools_body(
     })
 }
 
+/// Build a tool body that forbids tool calls (`tool_choice: none`) so the model
+/// must answer in text. The tool definitions are kept because the Messages API
+/// rejects a transcript containing tool_use/tool_result blocks when `tools` is
+/// absent — only the choice is constrained, not the schema.
+pub fn build_text_only_body(
+    model: &str,
+    system: &str,
+    messages: &[serde_json::Value],
+    tools: &serde_json::Value,
+) -> serde_json::Value {
+    let mut body = build_tools_body(model, system, messages, tools);
+    body["tool_choice"] = serde_json::json!({ "type": "none" });
+    body
+}
+
 /// One content block of an API response, as the agent loop consumes it.
 #[derive(Debug, PartialEq)]
 pub enum ResponseBlock {
@@ -219,6 +234,19 @@ impl ClaudeClient {
         self.post_json(body).await
     }
 
+    /// Like `complete_tools` but with `tool_choice: none`, forcing a text-only
+    /// turn. Used to coax a final explanation out of the model after the agent
+    /// loop exhausts its iteration budget.
+    pub async fn complete_tools_text_only(
+        &self,
+        system: &str,
+        messages: &[serde_json::Value],
+        tools: &serde_json::Value,
+    ) -> Result<serde_json::Value, LlmError> {
+        let body = build_text_only_body(&self.model, system, messages, tools);
+        self.post_json(body).await
+    }
+
     async fn post(&self, body: serde_json::Value) -> Result<String, LlmError> {
         let json = self.post_json(body).await?;
         extract_text(&json)
@@ -316,6 +344,18 @@ mod tests {
         assert_eq!(body["model"], "claude-sonnet-4-6");
         assert_eq!(body["system"], "sys");
         assert_eq!(body["messages"][0]["content"], "hi");
+        assert_eq!(body["tools"][0]["name"], "create_todo");
+    }
+
+    #[test]
+    fn build_text_only_body_forbids_tools_but_keeps_them_defined() {
+        let messages = vec![serde_json::json!({ "role": "user", "content": "hi" })];
+        let tools = serde_json::json!([{ "name": "create_todo" }]);
+        let body = build_text_only_body("claude-sonnet-4-6", "sys", &messages, &tools);
+        // tool_choice none stops the model calling tools...
+        assert_eq!(body["tool_choice"]["type"], "none");
+        // ...but the definitions stay, because the API rejects a transcript with
+        // tool_use/tool_result blocks when `tools` is absent.
         assert_eq!(body["tools"][0]["name"], "create_todo");
     }
 

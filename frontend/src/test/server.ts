@@ -173,4 +173,27 @@ export const handlers = [
   ),
 ];
 
-export const server = setupServer(...handlers);
+// ── CS Admin handlers ───────────────────────────────────────────────────────
+const csHandlers = [
+  http.get("/api/cs/admin/products", () =>
+    HttpResponse.json([
+      { id: 1, name: "Paket A", description: null, price: 150000, currency: "IDR", availability: "ready", active: 1, updated_at: "2026-06-16T00:00:00Z" },
+    ]),
+  ),
+  http.get("/api/cs/admin/escalations", () =>
+    HttpResponse.json([
+      { id: 7, conversation_id: 3, reason: "cannot_answer", summary: "needs quote", status: "open", created_at: "2026-06-16T00:00:00Z", handled_at: null },
+    ]),
+  ),
+  http.get("/api/cs/admin/docs", () => HttpResponse.json([])),
+  http.get("/api/cs/admin/orders", () => HttpResponse.json([])),
+  http.get("/api/cs/admin/conversations", () => HttpResponse.json([])),
+  http.post("/api/cs/admin/conversations/:id/reply", () => HttpResponse.json(null)),
+  http.get("/api/cs/whatsapp/status", () =>
+    HttpResponse.json({ status: "disconnected", qr: null, number: null }),
+  ),
+  http.post("/api/cs/whatsapp/connect", () => HttpResponse.json(null)),
+  http.post("/api/cs/whatsapp/disconnect", () => HttpResponse.json(null)),
+];
+
+export const server = setupServer(...handlers, ...csHandlers);

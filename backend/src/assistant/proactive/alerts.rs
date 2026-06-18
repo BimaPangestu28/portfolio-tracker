@@ -40,6 +40,34 @@ pub fn mover_alerts(movers: &[Mover], threshold_pct: f64, today_wib: &str) -> Ve
         .collect()
 }
 
+/// Drawdown of current equity from its peak. One alert per day when the decline
+/// meets `threshold_pct`. `current`/`peak` are USD equity.
+pub fn hyperliquid_drawdown_alert(
+    current: rust_decimal::Decimal,
+    peak: rust_decimal::Decimal,
+    threshold_pct: f64,
+    today_wib: &str,
+) -> Option<Alert> {
+    use rust_decimal::prelude::ToPrimitive;
+    if peak <= rust_decimal::Decimal::ZERO || current >= peak {
+        return None;
+    }
+    let dd_pct = ((peak - current) / peak * rust_decimal::Decimal::from(100))
+        .to_f64()
+        .unwrap_or(0.0);
+    if dd_pct < threshold_pct {
+        return None;
+    }
+    Some(Alert {
+        dedup_key: format!("hl-drawdown:{today_wib}"),
+        message: format!(
+            "📉 Hyperliquid drawdown {:.1}% dari puncak (equity ${})",
+            dd_pct,
+            current.round_dp(2)
+        ),
+    })
+}
+
 /// Milestone values crossed moving upward from prev to curr (inclusive curr).
 pub fn milestones_crossed(prev_idr: i64, curr_idr: i64, step: i64) -> Vec<i64> {
     if step <= 0 || curr_idr <= prev_idr {
@@ -102,41 +130,6 @@ pub fn stale_price_alerts(
             ),
         })
         .collect()
-}
-
-/// Drawdown of current equity from its all-time peak within the stored series.
-///
-/// Emits one alert per day when the decline from peak meets `threshold_pct`.
-/// `current` and `peak` are denominated in USD equity.
-///
-/// @param current - Current equity value in USD
-/// @param peak - Peak equity value in USD observed in the stored series
-/// @param threshold_pct - Minimum drawdown percentage to trigger the alert
-/// @param today_wib - ISO date string (YYYY-MM-DD) used in the dedup key
-/// @returns `Some(Alert)` when drawdown >= threshold, `None` otherwise
-pub fn hyperliquid_drawdown_alert(
-    current: rust_decimal::Decimal,
-    peak: rust_decimal::Decimal,
-    threshold_pct: f64,
-    today_wib: &str,
-) -> Option<Alert> {
-    use rust_decimal::prelude::ToPrimitive;
-    if peak <= rust_decimal::Decimal::ZERO || current >= peak {
-        return None;
-    }
-    let drawdown_pct = ((peak - current) / peak * rust_decimal::Decimal::from(100))
-        .to_f64()
-        .unwrap_or(0.0);
-    if drawdown_pct < threshold_pct {
-        return None;
-    }
-    Some(Alert {
-        dedup_key: format!("hl-drawdown:{today_wib}"),
-        message: format!(
-            "📉 Hyperliquid drawdown {:.1}% dari puncak (equity ${:.2})",
-            drawdown_pct, current
-        ),
-    })
 }
 
 /// Evaluate all active price alerts against the latest stored prices.

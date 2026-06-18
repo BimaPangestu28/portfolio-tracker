@@ -17,6 +17,8 @@ import {
   TodoSchema, ReminderSchema, InboxItemSchema,
   InvoiceSchema, ClientSchema,
   NewsTodaySchema,
+  KbDocSchema, CsProductSchema, CsOrderSchema,
+  CsConversationSchema, CsMessageSchema, CsEscalationSchema,
   HyperliquidViewSchema,
   type Account, type Category, type Instrument, type Transaction, type ReviewItem,
   type CashflowCategory, type Cashflow, type Connector, type Goal,
@@ -345,7 +347,100 @@ export const useNewsToday = () =>
     staleTime: 60 * 60 * 1000,
   });
 
-// ── Hyperliquid equity hook ────────────────────────────────────────────────────
+// ── CS Admin hooks ─────────────────────────────────────────────────────────
+
+// Knowledge base
+export const useKbDocs = () =>
+  useQuery({ queryKey: ["cs-docs"], queryFn: () => api.get("/cs/admin/docs", z.array(KbDocSchema)) });
+
+export const useCreateDoc = () =>
+  useInvalidatingMutation(
+    (b: { title: string; source?: string | null; body: string }) => api.post("/cs/admin/docs", KbDocSchema, b),
+    ["cs-docs"],
+  );
+export const useUpdateDoc = () =>
+  useInvalidatingMutation(
+    (a: { id: number; body: { title: string; source?: string | null; body: string } }) =>
+      api.patch(`/cs/admin/docs/${a.id}`, z.unknown(), a.body),
+    ["cs-docs"],
+  );
+export const useDeleteDoc = () =>
+  useInvalidatingMutation((id: number) => api.del(`/cs/admin/docs/${id}`), ["cs-docs"]);
+export const useReindexKb = () =>
+  useInvalidatingMutation(() => api.post("/cs/admin/kb/reindex", z.object({ embedded: z.number() }), {}), ["cs-docs"]);
+
+// Pricing
+export const useCsProducts = () =>
+  useQuery({ queryKey: ["cs-products"], queryFn: () => api.get("/cs/admin/products", z.array(CsProductSchema)) });
+
+type ProductBody = { name: string; description?: string | null; price?: number | null; currency?: string | null; availability?: string | null };
+export const useCreateProduct = () =>
+  useInvalidatingMutation((b: ProductBody) => api.post("/cs/admin/products", z.object({ id: z.number() }), b), ["cs-products"]);
+export const useUpdateProduct = () =>
+  useInvalidatingMutation((a: { id: number; body: ProductBody }) => api.patch(`/cs/admin/products/${a.id}`, z.unknown(), a.body), ["cs-products"]);
+export const useSetProductActive = () =>
+  useInvalidatingMutation((a: { id: number; active: boolean }) => api.post(`/cs/admin/products/${a.id}/active`, z.unknown(), { active: a.active }), ["cs-products"]);
+export const useDeleteProduct = () =>
+  useInvalidatingMutation((id: number) => api.del(`/cs/admin/products/${id}`), ["cs-products"]);
+
+// Orders
+export const useCsOrders = () =>
+  useQuery({ queryKey: ["cs-orders"], queryFn: () => api.get("/cs/admin/orders", z.array(CsOrderSchema)) });
+type OrderBody = { external_ref: string; customer_name?: string | null; customer_contact?: string | null; status: string; details_json?: string | null };
+export const useUpsertOrder = () =>
+  useInvalidatingMutation((b: OrderBody) => api.post("/cs/admin/orders", z.unknown(), b), ["cs-orders"]);
+export const useDeleteOrder = () =>
+  useInvalidatingMutation((id: number) => api.del(`/cs/admin/orders/${id}`), ["cs-orders"]);
+
+// Inbox / escalations
+export const useCsConversations = () =>
+  useQuery({ queryKey: ["cs-conversations"], queryFn: () => api.get("/cs/admin/conversations", z.array(CsConversationSchema)) });
+export const useCsTranscript = (id: number | null) =>
+  useQuery({
+    queryKey: ["cs-transcript", id],
+    queryFn: () => api.get(`/cs/admin/conversations/${id}/messages`, z.array(CsMessageSchema)),
+    enabled: id != null,
+  });
+export const useResolveConversation = () =>
+  useInvalidatingMutation((id: number) => api.post(`/cs/admin/conversations/${id}/resolve`, z.unknown(), {}), ["cs-conversations"]);
+export const useCsEscalations = () =>
+  useQuery({ queryKey: ["cs-escalations"], queryFn: () => api.get("/cs/admin/escalations", z.array(CsEscalationSchema)) });
+export const useHandleEscalation = () =>
+  useInvalidatingMutation((id: number) => api.post(`/cs/admin/escalations/${id}/handle`, z.unknown(), {}), ["cs-escalations", "cs-conversations"]);
+
+export const useReplyConversation = () =>
+  useInvalidatingMutation(
+    (args: { id: number; text: string }) =>
+      api.post(`/cs/admin/conversations/${args.id}/reply`, z.unknown(), { text: args.text }),
+    ["cs-transcript"],
+  );
+
+// ── CS WhatsApp connection hooks ───────────────────────────────────────────
+
+export const useCsWhatsappStatus = () =>
+  useQuery({
+    queryKey: ["cs-whatsapp-status"],
+    queryFn: () => api.get("/cs/whatsapp/status", WhatsappStatusSchema),
+    refetchInterval: 2000,
+  });
+
+export const useConnectCsWhatsapp = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.post("/cs/whatsapp/connect", z.unknown(), {}),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["cs-whatsapp-status"] }); },
+  });
+};
+
+export const useDisconnectCsWhatsapp = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.post("/cs/whatsapp/disconnect", z.unknown(), {}),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["cs-whatsapp-status"] }); },
+  });
+};
+
+// ── Hyperliquid equity view hook ───────────────────────────────────────────
 
 export const useHyperliquid = () =>
   useQuery({

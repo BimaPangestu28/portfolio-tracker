@@ -97,6 +97,114 @@ pub async fn list_for_instrument(db: &Db, instrument_id: i64) -> anyhow::Result<
     raws.into_iter().map(|r| r.into_domain()).collect()
 }
 
+/// Recent transactions, newest first, optionally filtered by instrument/account.
+pub async fn list_recent(
+    db: &Db,
+    limit: i64,
+    instrument_id: Option<i64>,
+    account_id: Option<i64>,
+) -> anyhow::Result<Vec<Transaction>> {
+    let raws = sqlx::query_as::<_, TxnRowRaw>(
+        "SELECT id, account_id, instrument_id, txn_type, executed_at, quantity, price_native, fee_native, currency, fx_to_idr, fx_to_usd, note \
+         FROM txn \
+         WHERE (?1 IS NULL OR instrument_id = ?1) AND (?2 IS NULL OR account_id = ?2) \
+         ORDER BY executed_at DESC, id DESC LIMIT ?3")
+        .bind(instrument_id).bind(account_id).bind(limit)
+        .fetch_all(db).await?;
+    raws.into_iter().map(|r| r.into_domain()).collect()
+}
+
+/// Patch struct for `update`. All fields are optional; omitted fields retain
+/// their current value. Currency changes trigger IDR fx renormalization.
+#[derive(Debug, Default)]
+pub struct TxnPatch {
+    pub account_id: Option<i64>,
+    pub instrument_id: Option<i64>,
+    pub txn_type: Option<String>,
+    pub executed_at: Option<DateTime<Utc>>,
+    pub quantity: Option<String>,
+    pub price_native: Option<String>,
+    pub fee_native: Option<String>,
+    pub currency: Option<String>,
+    pub note: Option<String>,
+}
+
+/// Update selected fields of a transaction. Re-applies IDR fx normalization
+/// (fx_to_idr = 1 for IDR) so an edit can never persist a bogus rate.
+///
+/// Reads the current row, overlays the patch's Some fields, re-validates
+/// all decimal fields, re-applies the same IDR fx normalization as `create`,
+/// and persists via UPDATE.
+pub async fn update(db: &Db, id: i64, patch: &TxnPatch) -> anyhow::Result<Transaction> {
+    let current = get(db, id).await?;
+
+    let account_id = patch.account_id.unwrap_or(current.account_id);
+    let instrument_id = patch.instrument_id.unwrap_or(current.instrument_id);
+    let txn_type = patch
+        .txn_type
+        .clone()
+        .unwrap_or_else(|| current.txn_type.as_str().to_string());
+    TxnType::from_str(&txn_type).map_err(|e| anyhow::anyhow!(e))?;
+
+    let executed_at = patch.executed_at.unwrap_or(current.executed_at);
+    let quantity = patch
+        .quantity
+        .clone()
+        .unwrap_or_else(|| current.quantity.to_string());
+    let price_native = patch
+        .price_native
+        .clone()
+        .unwrap_or_else(|| current.price_native.to_string());
+    let fee_native = patch
+        .fee_native
+        .clone()
+        .unwrap_or_else(|| current.fee_native.to_string());
+    let currency = patch.currency.clone().unwrap_or(current.currency);
+    let note = patch.note.clone().or(current.note);
+
+    crate::repo::dec(&quantity)?;
+    crate::repo::dec(&price_native)?;
+    crate::repo::dec(&fee_native)?;
+
+    // Mirror the IDR fx normalization from `create` exactly: for IDR transactions
+    // fx_to_idr is always 1 by identity, and fx_to_usd is derived from the latest
+    // known USD/IDR rate. For non-IDR transactions, keep existing rates.
+    let (fx_to_idr, fx_to_usd) = if currency == "IDR" {
+        let usd_idr = crate::repo::prices::latest_fx(db, "USD", "IDR").await?;
+        let to_usd = match usd_idr {
+            Some(rate) if !rate.is_zero() => {
+                (rust_decimal::Decimal::ONE / rate).to_string()
+            }
+            _ => current.fx_to_usd.to_string(),
+        };
+        ("1".to_string(), to_usd)
+    } else {
+        (current.fx_to_idr.to_string(), current.fx_to_usd.to_string())
+    };
+
+    sqlx::query(
+        "UPDATE txn SET account_id=?, instrument_id=?, txn_type=?, executed_at=?, \
+         quantity=?, price_native=?, fee_native=?, currency=?, fx_to_idr=?, fx_to_usd=?, \
+         note=? WHERE id=?",
+    )
+    .bind(account_id)
+    .bind(instrument_id)
+    .bind(&txn_type)
+    .bind(executed_at.to_rfc3339())
+    .bind(&quantity)
+    .bind(&price_native)
+    .bind(&fee_native)
+    .bind(&currency)
+    .bind(&fx_to_idr)
+    .bind(&fx_to_usd)
+    .bind(&note)
+    .bind(id)
+    .execute(db)
+    .await?;
+
+    get(db, id).await
+}
+
 pub async fn delete(db: &Db, id: i64) -> anyhow::Result<()> {
     // Txns confirmed from ingest are referenced by review_item.created_txn_id;
     // clear the reference first or the FK constraint rejects the delete.
@@ -319,6 +427,130 @@ mod tests {
         // empty for an instrument with no history
         let ins2 = instruments::create(&db, &instruments::NewInstrument { symbol:"VOO".into(), name:"VOO".into(), instrument_type:"etf".into(), native_currency:"USD".into(), category_id:None, price_source:"manual".into(), decimals:Some(8), note:None }).await.unwrap();
         assert!(accounts_for_instrument(&db, ins2.id).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn list_recent_orders_newest_first_and_filters() {
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        let acc = accounts::create(&db, &accounts::NewAccount { name:"A".into(), account_type:"manual".into(), institution:None, native_currency:"IDR".into(), note:None }).await.unwrap();
+        let ins = instruments::create(&db, &instruments::NewInstrument { symbol:"BBCA".into(), name:"BCA".into(), instrument_type:"stock_id".into(), native_currency:"IDR".into(), category_id:None, price_source:"manual".into(), decimals:Some(0), note:None }).await.unwrap();
+        for (d, q) in [("2026-06-01", "1"), ("2026-06-03", "2"), ("2026-06-02", "3")] {
+            create(&db, &NewTransaction {
+                account_id: acc.id, instrument_id: ins.id, txn_type: "buy".into(),
+                executed_at: chrono::DateTime::parse_from_rfc3339(&format!("{d}T00:00:00Z")).unwrap().with_timezone(&chrono::Utc),
+                quantity: q.into(), price_native: "1000".into(), fee_native: None,
+                currency: "IDR".into(), fx_to_idr: "1".into(), fx_to_usd: "1".into(),
+                note: None, source: None, external_id: None,
+            }).await.unwrap();
+        }
+        let recent = list_recent(&db, 2, None, None).await.unwrap();
+        assert_eq!(recent.len(), 2);
+        assert_eq!(recent[0].executed_at.format("%Y-%m-%d").to_string(), "2026-06-03");
+        let by_ins = list_recent(&db, 10, Some(ins.id), None).await.unwrap();
+        assert_eq!(by_ins.len(), 3);
+        let by_acc = list_recent(&db, 10, None, Some(acc.id)).await.unwrap();
+        assert_eq!(by_acc.len(), 3);
+        // A non-existent account filters everything out.
+        let none = list_recent(&db, 10, None, Some(acc.id + 999)).await.unwrap();
+        assert!(none.is_empty());
+    }
+
+    #[tokio::test]
+    async fn update_changes_quantity_and_price_and_renormalizes_idr() {
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        let acc = accounts::create(&db, &accounts::NewAccount {
+            name: "Bibit".into(), account_type: "manual".into(), institution: None,
+            native_currency: "IDR".into(), note: None,
+        }).await.unwrap();
+        let ins = instruments::create(&db, &instruments::NewInstrument {
+            symbol: "RD9999".into(), name: "Sucorinvest Money Market".into(),
+            instrument_type: "mutual_fund".into(), native_currency: "IDR".into(),
+            category_id: None, price_source: "bibit:RD9999".into(),
+            decimals: Some(4), note: None,
+        }).await.unwrap();
+        // seed a USD/IDR rate so IDR normalization can derive fx_to_usd
+        crate::repo::prices::upsert_fx(&db, "USD", "IDR", d!(16500), "2026-06-18").await.unwrap();
+
+        // create a value-based (price=1) row — the typical reksadana mis-entry scenario
+        let original = create(&db, &NewTransaction {
+            account_id: acc.id, instrument_id: ins.id, txn_type: "buy".into(),
+            executed_at: chrono::Utc::now(), quantity: "2000000".into(), price_native: "1".into(),
+            fee_native: None, currency: "IDR".into(), fx_to_idr: "1".into(), fx_to_usd: "1".into(),
+            note: None, source: None, external_id: None,
+        }).await.unwrap();
+
+        let patched = update(&db, original.id, &TxnPatch {
+            quantity: Some("1236.7898".into()),
+            price_native: Some("1617.0896".into()),
+            ..Default::default()
+        }).await.unwrap();
+
+        assert_eq!(patched.quantity.to_string(), "1236.7898");
+        assert_eq!(patched.price_native.to_string(), "1617.0896");
+        assert_eq!(patched.fx_to_idr.to_string(), "1"); // IDR identity preserved
+    }
+
+    #[tokio::test]
+    async fn update_preserves_existing_fx_for_non_idr_currency() {
+        // A non-IDR transaction must keep its historical fx rates on edit — the
+        // IDR normalization branch must not touch USD (or any non-IDR) rows.
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        let acc = accounts::create(&db, &accounts::NewAccount {
+            name: "IBKR".into(), account_type: "manual".into(), institution: None,
+            native_currency: "USD".into(), note: None,
+        }).await.unwrap();
+        let ins = instruments::create(&db, &instruments::NewInstrument {
+            symbol: "VOO".into(), name: "Vanguard S&P 500".into(),
+            instrument_type: "etf".into(), native_currency: "USD".into(),
+            category_id: None, price_source: "manual".into(), decimals: Some(8), note: None,
+        }).await.unwrap();
+        let original = create(&db, &NewTransaction {
+            account_id: acc.id, instrument_id: ins.id, txn_type: "buy".into(),
+            executed_at: chrono::Utc::now(), quantity: "1".into(), price_native: "500".into(),
+            fee_native: None, currency: "USD".into(), fx_to_idr: "16500".into(), fx_to_usd: "1".into(),
+            note: None, source: None, external_id: None,
+        }).await.unwrap();
+
+        let patched = update(&db, original.id, &TxnPatch {
+            quantity: Some("3".into()),
+            ..Default::default()
+        }).await.unwrap();
+
+        assert_eq!(patched.quantity.to_string(), "3");
+        assert_eq!(patched.fx_to_idr.to_string(), "16500"); // historical rate preserved
+        assert_eq!(patched.fx_to_usd.to_string(), "1"); // unchanged
+    }
+
+    #[tokio::test]
+    async fn update_preserves_unpatched_fields() {
+        // Fields omitted from the patch must retain their current values, including
+        // fee_native (NOT NULL column) and an existing note.
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        let acc = accounts::create(&db, &accounts::NewAccount {
+            name: "A".into(), account_type: "manual".into(), institution: None,
+            native_currency: "IDR".into(), note: None,
+        }).await.unwrap();
+        let ins = instruments::create(&db, &instruments::NewInstrument {
+            symbol: "BBCA".into(), name: "BCA".into(), instrument_type: "stock_id".into(),
+            native_currency: "IDR".into(), category_id: None, price_source: "manual".into(),
+            decimals: Some(0), note: None,
+        }).await.unwrap();
+        let original = create(&db, &NewTransaction {
+            account_id: acc.id, instrument_id: ins.id, txn_type: "buy".into(),
+            executed_at: chrono::Utc::now(), quantity: "100".into(), price_native: "9000".into(),
+            fee_native: Some("500".into()), currency: "IDR".into(), fx_to_idr: "1".into(),
+            fx_to_usd: "1".into(), note: Some("original note".into()), source: None, external_id: None,
+        }).await.unwrap();
+
+        let patched = update(&db, original.id, &TxnPatch {
+            quantity: Some("150".into()),
+            ..Default::default()
+        }).await.unwrap();
+
+        assert_eq!(patched.quantity.to_string(), "150"); // patched
+        assert_eq!(patched.price_native.to_string(), "9000"); // preserved
+        assert_eq!(patched.fee_native.to_string(), "500"); // preserved (NOT NULL)
+        assert_eq!(patched.note, Some("original note".into())); // preserved, not cleared
     }
 
     #[tokio::test]
