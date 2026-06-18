@@ -20,7 +20,7 @@ export function HyperliquidCard() {
           <div className="skeleton" style={{ width: "100%", height: 120 }} />
         ) : !view || view.insufficient_data ? (
           <div className="empty">
-            <div className="t-h3">Belum cukup data</div>
+            <div className="t-h3">Belum ada data equity</div>
             <div className="t-sm t-muted">Kurva muncul setelah ada dua hari data equity.</div>
           </div>
         ) : (
