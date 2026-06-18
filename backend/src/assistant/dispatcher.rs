@@ -29,6 +29,7 @@ pub async fn dispatch(db: &Db, name: &str, input: &serde_json::Value) -> Result<
         "confirm_review" => confirm_review(db, input).await,
         "create_transaction" => create_transaction(db, input).await,
         "list_transactions" => list_transactions(db, input).await,
+        "edit_transaction" => edit_transaction(db, input).await,
         "list_instruments" => list_instruments(db).await,
         "list_projects" => match crate::clickup::ClickUpClient::from_env() {
             Ok(api) => clickup_list_projects(&api).await,
@@ -1016,6 +1017,46 @@ async fn list_transactions(db: &Db, input: &serde_json::Value) -> Result<String,
         ));
     }
     Ok(out)
+}
+
+async fn edit_transaction(db: &Db, input: &serde_json::Value) -> Result<String, String> {
+    let id = id_arg(input, "id")?;
+    crate::repo::transactions::get(db, id).await.map_err(|_| format!("transaksi #{id} nggak ada"))?;
+
+    let instrument_id = match str_arg(input, "instrument") {
+        Some(name) => crate::ingestion::matching::suggest_instrument_for_entry(db, Some(name), Some(name))
+            .await.map_err(|e| format!("db error: {e}"))?
+            .or_else(|| None),
+        None => None,
+    };
+    let account_id = match str_arg(input, "account") {
+        Some(name) => {
+            let accounts = crate::repo::accounts::list(db).await.map_err(|e| format!("db error: {e}"))?;
+            accounts.iter().find(|a| a.name.eq_ignore_ascii_case(name)).map(|a| a.id)
+        }
+        None => None,
+    };
+    let executed_at = match str_arg(input, "executed_at") {
+        Some(raw) => Some(
+            chrono::DateTime::parse_from_rfc3339(
+                &crate::ingestion::review::to_rfc3339(raw).ok_or_else(|| format!("tanggal nggak terbaca: {raw}"))?,
+            ).map_err(|e| format!("tanggal: {e}"))?.with_timezone(&chrono::Utc),
+        ),
+        None => None,
+    };
+
+    let patch = crate::repo::transactions::TxnPatch {
+        account_id, instrument_id,
+        txn_type: str_arg(input, "entry_type").map(str::to_string),
+        executed_at,
+        quantity: str_arg(input, "quantity").map(str::to_string),
+        price_native: str_arg(input, "price_native").map(str::to_string),
+        fee_native: str_arg(input, "fee_native").map(str::to_string),
+        currency: None,
+        note: str_arg(input, "note").map(str::to_string),
+    };
+    let t = crate::repo::transactions::update(db, id, &patch).await.map_err(|e| format!("{e}"))?;
+    Ok(format!("transaksi #{} diperbarui: {} @ {}", t.id, t.quantity.normalize(), t.price_native.normalize()))
 }
 
 async fn capture_to_inbox(db: &Db, input: &serde_json::Value) -> Result<String, String> {
@@ -2853,5 +2894,30 @@ mod tests {
         let out = list_transactions(&db, &serde_json::json!({})).await.unwrap();
         assert!(out.contains("#"));
         assert!(out.contains("MJR") || out.contains("Majoris"));
+    }
+
+    #[tokio::test]
+    async fn edit_transaction_fixes_price_one_fund_row() {
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        let acc = crate::repo::accounts::create(&db, &crate::repo::accounts::NewAccount {
+            name: "Bibit #4".into(), account_type: "fund".into(), institution: None, native_currency: "IDR".into(), note: None,
+        }).await.unwrap();
+        let ins = crate::repo::instruments::create(&db, &crate::repo::instruments::NewInstrument {
+            symbol: "MJR".into(), name: "Majoris".into(), instrument_type: "fund".into(),
+            native_currency: "IDR".into(), category_id: None, price_source: "bibit:MJR02".into(), decimals: Some(4), note: None,
+        }).await.unwrap();
+        let t = crate::repo::transactions::create(&db, &crate::repo::transactions::NewTransaction {
+            account_id: acc.id, instrument_id: ins.id, txn_type: "buy".into(),
+            executed_at: chrono::Utc::now(), quantity: "2000000".into(), price_native: "1".into(),
+            fee_native: None, currency: "IDR".into(), fx_to_idr: "1".into(), fx_to_usd: "1".into(),
+            note: None, source: None, external_id: None,
+        }).await.unwrap();
+        let out = edit_transaction(&db, &serde_json::json!({
+            "id": t.id, "quantity": "1236.7898", "price_native": "1617.0896",
+        })).await.unwrap();
+        assert!(out.contains(&format!("#{}", t.id)));
+        let updated = crate::repo::transactions::get(&db, t.id).await.unwrap();
+        assert_eq!(updated.quantity.to_string(), "1236.7898");
+        assert_eq!(updated.price_native.to_string(), "1617.0896");
     }
 }

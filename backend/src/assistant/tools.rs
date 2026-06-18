@@ -219,6 +219,25 @@ pub fn definitions() -> serde_json::Value {
             }
         },
         {
+            "name": "edit_transaction",
+            "description": "Edit fields of an existing recorded transaction (e.g. fix a reksadana row that was saved as quantity=rupiah, price=1 to real units + NAV). Get the id from list_transactions. Pass only the fields to change. Always echo the change to the owner and get confirmation before calling — this rewrites data.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "id": { "type": "integer", "description": "Transaction id from list_transactions." },
+                    "entry_type": { "type": "string", "description": "buy|sell|dividend|interest|fee|deposit|withdrawal|opening_balance" },
+                    "executed_at": { "type": "string", "description": "Date/time, RFC3339 or YYYY-MM-DD." },
+                    "quantity": { "type": "string", "description": "New units (for a fund: jumlah unit)." },
+                    "price_native": { "type": "string", "description": "New price per unit (for a fund: NAV)." },
+                    "fee_native": { "type": "string", "description": "New fee." },
+                    "account": { "type": "string", "description": "New account name." },
+                    "instrument": { "type": "string", "description": "New instrument name/symbol." },
+                    "note": { "type": "string", "description": "New note." }
+                },
+                "required": ["id"]
+            }
+        },
+        {
             "name": "list_instruments",
             "description": "List the owner's known instruments (id, symbol, name, type). Use to find an instrument_id for confirm_review when a review item's instrument shows 'belum dikenali' but the instrument may already exist under a slightly different name. If it genuinely doesn't exist, tell the user to add it in the web UI → Data (instruments can't be created from chat).",
             "input_schema": { "type": "object", "properties": {} }
@@ -458,7 +477,7 @@ mod tests {
                 "get_portfolio_summary", "search_memory", "remember",
                 "create_event", "list_events", "cancel_event",
                 "reject_review", "list_accounts", "create_account",
-                "list_pending_reviews", "confirm_review", "create_transaction", "list_transactions", "list_instruments",
+                "list_pending_reviews", "confirm_review", "create_transaction", "list_transactions", "edit_transaction", "list_instruments",
                 "list_projects",
                 "create_project",
                 "create_task",
