@@ -1,5 +1,6 @@
 pub mod evm;
 pub mod factory;
+pub mod hyperliquid;
 pub mod mock;
 
 use async_trait::async_trait;
