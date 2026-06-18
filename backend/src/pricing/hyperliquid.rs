@@ -70,4 +70,12 @@ mod tests {
         let body = serde_json::json!({ "as_of_ms": 1 });
         assert!(matches!(parse_balance(&body).unwrap_err(), PriceError::Parse(_)));
     }
+
+    #[test]
+    fn parses_equity_from_string_value() {
+        let body = serde_json::json!({ "equity_usd": "1234.56" });
+        let q = parse_balance(&body).unwrap();
+        assert_eq!(q.price, dec!(1234.56));
+        assert_eq!(q.currency, "USD");
+    }
 }
