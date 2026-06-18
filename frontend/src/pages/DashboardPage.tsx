@@ -42,6 +42,7 @@ import { DashboardAgendaCard } from "../components/DashboardAgendaCard";
 import { DashboardTodoCard } from "../components/DashboardTodoCard";
 import { DashboardReminderCard } from "../components/DashboardReminderCard";
 import { DashboardInboxCard } from "../components/DashboardInboxCard";
+import { HyperliquidCard } from "../components/HyperliquidCard";
 import { HeroSparkline } from "../components/charts/HeroSparkline";
 import { DonutChart } from "../components/charts/DonutChart";
 import { DriftBarsChart } from "../components/charts/DriftBarsChart";
@@ -1258,7 +1259,11 @@ export default function DashboardPage() {
       {/* ── 5. Pergerakan + Tujuan side by side ───────────────────────────── */}
       <div className="grid gap-5" style={{ gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)" }}>
         <MoversCard movers={movers.data ?? []} loading={movers.isLoading} />
+        <HyperliquidCard />
+      </div>
 
+      {/* ── 5b. Tujuan Keuangan full row ──────────────────────────────────── */}
+      <div className="grid gap-5" style={{ gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)" }}>
         {goals.isLoading ? (
           <CardSkeleton rows={2} height={60} />
         ) : (
