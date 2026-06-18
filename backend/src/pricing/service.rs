@@ -110,6 +110,21 @@ pub async fn refresh_all(db: &Db) -> anyhow::Result<()> {
                 (_, None) => tracing::warn!("gold price refresh for {} skipped: no USD/IDR rate", ins.symbol),
             }
         }
+        // Hyperliquid account equity: price of the synthetic 1-unit instrument
+        // equals the account's USD equity, pulled read-only by wallet address.
+        if let Some(wallet) = ins.price_source.strip_prefix("hyperliquid:") {
+            let network =
+                std::env::var("HYPERLIQUID_NETWORK").unwrap_or_else(|_| "mainnet".into());
+            match crate::pricing::hyperliquid::Hyperliquid::new(&network)
+                .account_equity(wallet)
+                .await
+            {
+                Ok(q) => {
+                    let _ = prices::upsert_latest(db, ins.id, q.price, &q.currency, "hyperliquid", &today).await;
+                }
+                Err(e) => tracing::warn!("hyperliquid equity refresh failed for {}: {e}", ins.symbol),
+            }
+        }
     }
     Ok(())
 }

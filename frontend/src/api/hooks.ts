@@ -17,6 +17,7 @@ import {
   TodoSchema, ReminderSchema, InboxItemSchema,
   InvoiceSchema, ClientSchema,
   NewsTodaySchema,
+  HyperliquidViewSchema,
   type Account, type Category, type Instrument, type Transaction, type ReviewItem,
   type CashflowCategory, type Cashflow, type Connector, type Goal,
 } from "./schemas";
@@ -342,4 +343,12 @@ export const useNewsToday = () =>
     queryKey: ["news", "today"],
     queryFn: () => api.get("/news/today", NewsTodaySchema),
     staleTime: 60 * 60 * 1000,
+  });
+
+// ── Hyperliquid equity view hook ───────────────────────────────────────────
+
+export const useHyperliquid = () =>
+  useQuery({
+    queryKey: ["hyperliquid"],
+    queryFn: () => api.get("/portfolio/hyperliquid", HyperliquidViewSchema),
   });

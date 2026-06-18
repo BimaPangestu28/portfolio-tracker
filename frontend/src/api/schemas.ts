@@ -333,6 +333,21 @@ export type BenchmarkRow = z.infer<typeof BenchmarkRowSchema>;
 export const LoginResponseSchema = z.object({ token: z.string() });
 export type LoginResponse = z.infer<typeof LoginResponseSchema>;
 
+// ── Hyperliquid equity view ────────────────────────────────────────────────
+
+export const HyperliquidViewSchema = z.object({
+  points: z.array(z.object({ date: z.string(), cum_return: z.number(), nav: z.number() })),
+  metrics: z.object({
+    total_return: z.number(),
+    annualized: z.number().nullable(),
+    max_drawdown: z.number(),
+    volatility: z.number(),
+  }),
+  current_value_usd: z.string(),
+  insufficient_data: z.boolean(),
+});
+export type HyperliquidView = z.infer<typeof HyperliquidViewSchema>;
+
 // ── Performance analytics (TWR + risk) ────────────────────────────────────
 
 export const PerformanceSchema = z.object({
