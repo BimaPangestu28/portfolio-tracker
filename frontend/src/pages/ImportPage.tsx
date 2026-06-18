@@ -188,7 +188,7 @@ function ReviewCard({
       </div>
 
       {/* Editable fields grid */}
-      <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 12 }}>
+      <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12 }}>
         <label className="field">
           <span className="field-label">Tipe</span>
           <select className="select" value={form.entry_type} onChange={set("entry_type")} aria-label="Entry type">
@@ -346,7 +346,7 @@ export default function ImportPage() {
       </div>
 
       {/* Upload + CSV panel */}
-      <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 22 }}>
+      <div className="lay-2" style={{ gap: 16, marginBottom: 22 }}>
         {/* Dropzone */}
         <div
           className="card"

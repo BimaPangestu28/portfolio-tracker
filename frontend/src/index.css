@@ -971,3 +971,61 @@ table.tbl { width: 100%; border-collapse: collapse; }
 .text-center { text-align: center; }
 .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .relative { position: relative; }
+
+/* ============================================================
+   Responsive layout helpers
+   Replace inline `style={{ gridTemplateColumns }}` on page-level
+   layout grids with these classes so they can collapse on mobile.
+   Inline styles win over media queries, so the columns MUST live in
+   a class for the breakpoints below to take effect.
+   Collapse breakpoint (880px) matches the AppShell sidebar→bottom-nav
+   transition so page content reflows in step with the chrome.
+   ============================================================ */
+.lay-2,
+.lay-2-15,
+.lay-2-125,
+.lay-2-13,
+.lay-2-15col { display: grid; }
+.lay-2        { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.lay-2-15     { grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); }
+.lay-2-125    { grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); }
+.lay-2-13     { grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); }
+.lay-2-15col  { grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); }
+.lay-3        { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+/* Master/detail: fixed-width list + fluid panel; stacks on mobile. */
+.lay-side     { display: grid; grid-template-columns: 320px minmax(0, 1fr); }
+/* Compact 2-col (e.g. KPI tiles) that stays 2-up on phones until very narrow. */
+.lay-2-sm     { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+
+@media (max-width: 880px) {
+  .lay-2,
+  .lay-2-15,
+  .lay-2-125,
+  .lay-2-13,
+  .lay-2-15col,
+  .lay-side { grid-template-columns: minmax(0, 1fr); }
+  .lay-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 560px) {
+  .lay-3 { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 400px) {
+  .lay-2-sm { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* Form rows that should stack vertically on small screens. Pair with a
+   2-col inline/util grid on desktop; this forces a single column on mobile. */
+@media (max-width: 560px) {
+  .form-stack { grid-template-columns: minmax(0, 1fr) !important; }
+}
+
+/* Mobile typography + spacing tightening */
+@media (max-width: 640px) {
+  .t-display { font-size: 28px; }
+  .card-pad { padding: 16px; }
+  .stat-card { padding: 16px; }
+  .stat-value { font-size: 20px; }
+}
+@media (max-width: 480px) {
+  .auth-tag { font-size: 22px; }
+}

@@ -206,7 +206,7 @@ export default function PlannerPage() {
             </div>
           </div>
         ) : (
-          <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 16 }}>
+          <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(min(280px, 100%), 1fr))", gap: 16 }}>
             {categories.map((c, idx) => {
               const allocation = summary.data?.allocation.find((x) => x.category_id === c.id);
               const actual = allocation ? parseNum(allocation.actual_pct) : 0;
@@ -311,7 +311,7 @@ export default function PlannerPage() {
               required
             />
           </label>
-          <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <div className="grid form-stack" style={{ gridTemplateColumns: "1fr 1fr", gap: 12 }}>
             <label className="field">
               <span className="field-label">Target %</span>
               <input

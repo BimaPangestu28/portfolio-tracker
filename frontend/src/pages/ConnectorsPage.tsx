@@ -170,7 +170,7 @@ export default function ConnectorsPage() {
             </div>
           </div>
         ) : (
-          <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: 16 }}>
+          <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(min(300px, 100%), 1fr))", gap: 16 }}>
             {conns.map((c) => {
               const st = STATUS_CFG[c.last_synced_at ? "ok" : "stale"] ?? STATUS_CFG["stale"];
               const isSyncing = syncing === c.id;

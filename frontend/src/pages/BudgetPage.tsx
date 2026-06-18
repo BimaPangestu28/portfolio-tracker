@@ -193,7 +193,7 @@ export default function BudgetPage() {
 
       {/* KPI stat cards */}
       <QueryState isLoading={summary.isLoading} error={summary.error}>
-        <div className="grid" style={{ gridTemplateColumns: "repeat(3,1fr)", gap: 16, marginBottom: 18 }}>
+        <div className="lay-3" style={{ gap: 16, marginBottom: 18 }}>
           {/* Income */}
           <div className="card stat-card">
             <div className="stat-label">
@@ -223,7 +223,7 @@ export default function BudgetPage() {
         </div>
 
         {/* Two-column layout: category budgets + cashflow list */}
-        <div className="grid" style={{ gridTemplateColumns: "minmax(0,1.5fr) minmax(0,1fr)", gap: 16 }}>
+        <div className="lay-2-15col" style={{ gap: 16 }}>
           {/* Per-category progress */}
           <div className="card">
             <div className="card-head">
@@ -390,7 +390,7 @@ export default function BudgetPage() {
               aria-label="Keterangan"
             />
           </label>
-          <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <div className="grid form-stack" style={{ gridTemplateColumns: "1fr 1fr", gap: 12 }}>
             <label className="field">
               <span className="field-label">Nominal</span>
               <input
@@ -469,7 +469,7 @@ export default function BudgetPage() {
               required
             />
           </label>
-          <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <div className="grid form-stack" style={{ gridTemplateColumns: "1fr 1fr", gap: 12 }}>
             <label className="field">
               <span className="field-label">Jenis</span>
               <select

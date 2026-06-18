@@ -86,7 +86,7 @@ export function AddTransactionDialog({ open, onClose }: AddTransactionDialogProp
       }
     >
       <form id="tx-form" onSubmit={submit}>
-        <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+        <div className="grid form-stack" style={{ gridTemplateColumns: "1fr 1fr", gap: 12 }}>
           <label className="field">
             <span className="field-label">Tipe</span>
             <select
@@ -164,7 +164,7 @@ export function AddTransactionDialog({ open, onClose }: AddTransactionDialogProp
             />
           </label>
         </div>
-        <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+        <div className="grid form-stack" style={{ gridTemplateColumns: "1fr 1fr", gap: 12 }}>
           <label className="field">
             <span className="field-label">Mata Uang</span>
             <input

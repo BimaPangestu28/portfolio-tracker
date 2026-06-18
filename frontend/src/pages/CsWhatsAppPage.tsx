@@ -52,7 +52,7 @@ export default function CsWhatsAppPage() {
 
         {state === "qr" && qr && (
           <div style={{ textAlign: "center" }}>
-            <QRCodeSVG value={qr} size={240} />
+            <QRCodeSVG value={qr} size={240} style={{ width: "100%", height: "auto", maxWidth: 240 }} />
             <p className="t-sm t-muted" style={{ marginTop: 12 }}>
               Buka WhatsApp → Perangkat Tertaut → Tautkan Perangkat, lalu scan kode ini.
             </p>

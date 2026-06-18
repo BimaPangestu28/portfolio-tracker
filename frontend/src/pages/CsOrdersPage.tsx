@@ -113,7 +113,7 @@ export default function CsOrdersPage() {
             <span className="field-label">Status</span>
             <input className="input" value={form.status} onChange={set("status")} placeholder="mis. diproses / dikirim / selesai" required />
           </label>
-          <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <div className="grid form-stack" style={{ gridTemplateColumns: "1fr 1fr", gap: 12 }}>
             <label className="field">
               <span className="field-label">Nama pelanggan</span>
               <input className="input" value={form.customer_name} onChange={set("customer_name")} />

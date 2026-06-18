@@ -23,7 +23,7 @@ export default function NewsPage() {
                   src={a.image_url}
                   alt=""
                   loading="lazy"
-                  className="w-full h-40 object-cover rounded-md mb-3"
+                  className="w-full h-28 sm:h-40 object-cover rounded-md mb-3"
                   onError={(e) => { e.currentTarget.style.display = "none"; }}
                 />
               )}

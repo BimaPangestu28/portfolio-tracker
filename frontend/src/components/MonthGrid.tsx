@@ -57,7 +57,7 @@ export function MonthGrid({
   }, [events]);
 
   return (
-    <div className="rounded-lg border p-3">
+    <div className="rounded-lg border p-2 sm:p-3">
       {/* Month navigation header */}
       <div className="flex items-center justify-between mb-2">
         <button

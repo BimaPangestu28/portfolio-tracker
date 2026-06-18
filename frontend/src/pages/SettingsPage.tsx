@@ -54,8 +54,8 @@ function InstrumentRow({ instrument, categories }: { instrument: Instrument; cat
   };
 
   return (
-    <li className="flex items-center gap-2 border-b py-1.5">
-      <span className="flex-1">
+    <li className="flex flex-wrap items-center gap-2 border-b py-1.5">
+      <span className="flex-1 min-w-0">
         {instrument.symbol} · {instrument.instrument_type}
       </span>
       <select
@@ -70,7 +70,7 @@ function InstrumentRow({ instrument, categories }: { instrument: Instrument; cat
         ))}
       </select>
       <input
-        className="h-7 w-56 rounded-md border border-input bg-transparent px-2 text-xs"
+        className="h-7 w-full sm:w-56 rounded-md border border-input bg-transparent px-2 text-xs"
         aria-label={`Price source ${instrument.symbol}`}
         value={priceSource}
         onChange={(e) => setPriceSource(e.target.value)}
@@ -184,9 +184,9 @@ function GeneralSettings() {
             }}
             className="flex flex-wrap items-end gap-2"
           >
-            <Input aria-label="Account name" className="w-40" placeholder="Name" value={acc.name} onChange={(e) => setAcc({ ...acc, name: e.target.value })} required />
+            <Input aria-label="Account name" className="w-full sm:w-40" placeholder="Name" value={acc.name} onChange={(e) => setAcc({ ...acc, name: e.target.value })} required />
             <Select value={acc.account_type} onValueChange={(v) => setAcc({ ...acc, account_type: v })}>
-              <SelectTrigger aria-label="Account type" className="w-36">
+              <SelectTrigger aria-label="Account type" className="w-full sm:w-36">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -197,7 +197,7 @@ function GeneralSettings() {
                 ))}
               </SelectContent>
             </Select>
-            <Input aria-label="Account currency" className="w-28" placeholder="Currency" value={acc.native_currency} onChange={(e) => setAcc({ ...acc, native_currency: e.target.value })} />
+            <Input aria-label="Account currency" className="w-full sm:w-28" placeholder="Currency" value={acc.native_currency} onChange={(e) => setAcc({ ...acc, native_currency: e.target.value })} />
             <Button type="submit">Add</Button>
           </form>
           <ul className="text-sm">
@@ -239,10 +239,10 @@ function GeneralSettings() {
             }}
             className="flex flex-wrap items-end gap-2"
           >
-            <Input aria-label="Instrument symbol" className="w-32" placeholder="Symbol" value={ins.symbol} onChange={(e) => setIns({ ...ins, symbol: e.target.value })} required />
-            <Input aria-label="Instrument name" className="w-40" placeholder="Name" value={ins.name} onChange={(e) => setIns({ ...ins, name: e.target.value })} required />
+            <Input aria-label="Instrument symbol" className="w-full sm:w-32" placeholder="Symbol" value={ins.symbol} onChange={(e) => setIns({ ...ins, symbol: e.target.value })} required />
+            <Input aria-label="Instrument name" className="w-full sm:w-40" placeholder="Name" value={ins.name} onChange={(e) => setIns({ ...ins, name: e.target.value })} required />
             <Select value={ins.instrument_type} onValueChange={(v) => setIns({ ...ins, instrument_type: v })}>
-              <SelectTrigger aria-label="Instrument type" className="w-36">
+              <SelectTrigger aria-label="Instrument type" className="w-full sm:w-36">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -253,9 +253,9 @@ function GeneralSettings() {
                 ))}
               </SelectContent>
             </Select>
-            <Input aria-label="Instrument currency" className="w-28" placeholder="Currency" value={ins.native_currency} onChange={(e) => setIns({ ...ins, native_currency: e.target.value })} />
-            <Input aria-label="Category id" className="w-40" placeholder="category_id (optional)" value={ins.category_id} onChange={(e) => setIns({ ...ins, category_id: e.target.value })} />
-            <Input aria-label="Price source" className="w-72" placeholder="price_source (e.g. coingecko:bitcoin, yahoo:BBCA.JK, manual)" value={ins.price_source} onChange={(e) => setIns({ ...ins, price_source: e.target.value })} />
+            <Input aria-label="Instrument currency" className="w-full sm:w-28" placeholder="Currency" value={ins.native_currency} onChange={(e) => setIns({ ...ins, native_currency: e.target.value })} />
+            <Input aria-label="Category id" className="w-full sm:w-40" placeholder="category_id (optional)" value={ins.category_id} onChange={(e) => setIns({ ...ins, category_id: e.target.value })} />
+            <Input aria-label="Price source" className="w-full sm:w-72" placeholder="price_source (e.g. coingecko:bitcoin, yahoo:BBCA.JK, manual)" value={ins.price_source} onChange={(e) => setIns({ ...ins, price_source: e.target.value })} />
             <Button type="submit">Add</Button>
           </form>
           <ul className="text-sm">
