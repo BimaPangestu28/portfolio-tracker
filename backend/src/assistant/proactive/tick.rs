@@ -176,14 +176,8 @@ pub async fn run_once(
         }
     }
 
-    for alert in super::alerts::evaluate(
-        db,
-        config.mover_alert_pct,
-        config.milestone_step_idr,
-        config.hl_drawdown_pct,
-        &today,
-    )
-    .await
+    for alert in
+        super::alerts::evaluate(db, config.mover_alert_pct, config.milestone_step_idr, config.hl_drawdown_pct, &today).await
     {
         if crate::repo::proactive_log::try_claim(db, "alert", &alert.dedup_key).await? {
             if let Err(e) = client.send_message(link.chat_id, &alert.message).await {

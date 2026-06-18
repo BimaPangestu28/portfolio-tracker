@@ -63,6 +63,18 @@ pub async fn benchmark(State(s): State<AppState>) -> Result<Json<Vec<BenchmarkRo
     Ok(Json(rows))
 }
 
+/// Return the Hyperliquid equity TWR curve, current open positions, recent
+/// closed trades, and aggregate realized stats.
+pub async fn hyperliquid(
+    State(s): State<AppState>,
+) -> Result<Json<crate::service::hyperliquid::HyperliquidView>, AppError> {
+    Ok(Json(
+        crate::service::hyperliquid::build_hyperliquid_view(&s.db)
+            .await
+            .map_err(AppError::Other)?,
+    ))
+}
+
 #[derive(Deserialize)]
 pub struct PerfQuery {
     pub base: Option<String>,
@@ -83,16 +95,6 @@ pub async fn performance(
     }
     Ok(Json(
         build_performance(&s.db, base, period)
-            .await
-            .map_err(AppError::Other)?,
-    ))
-}
-
-pub async fn hyperliquid(
-    State(s): State<AppState>,
-) -> Result<Json<crate::service::hyperliquid::HyperliquidView>, AppError> {
-    Ok(Json(
-        crate::service::hyperliquid::build_hyperliquid_view(&s.db)
             .await
             .map_err(AppError::Other)?,
     ))

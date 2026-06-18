@@ -156,13 +156,19 @@ export const handlers = [
   http.get("/api/portfolio/movers", () => HttpResponse.json([])),
   http.get("/api/portfolio/benchmark", () => HttpResponse.json([])),
 
-  // ── Phase 5B: Hyperliquid ──────────────────────────────────────────────────
+  // ── Hyperliquid ────────────────────────────────────────────────────────────
+  // insufficient_data: false keeps HyperliquidCard out of the "Belum cukup data"
+  // branch so existing tests using getByText(/belum cukup data/i) stay unambiguous.
   http.get("/api/portfolio/hyperliquid", () =>
     HttpResponse.json({
       points: [],
       metrics: { total_return: 0, annualized: null, max_drawdown: 0, volatility: 0 },
       current_value_usd: "0",
-      insufficient_data: true,
+      positions: [],
+      trades: [],
+      realized_pnl_total: "0",
+      win_rate: null,
+      insufficient_data: false,
     }),
   ),
 ];

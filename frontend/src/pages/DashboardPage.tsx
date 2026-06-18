@@ -1271,6 +1271,9 @@ export default function DashboardPage() {
         )}
       </div>
 
+      {/* ── 5b. Hyperliquid equity card ───────────────────────────────────── */}
+      <HyperliquidCard />
+
       {/* ── 6. Posisi Terbesar + Aktivitas side by side ───────────────────── */}
       <div className="grid gap-5" style={{ gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)" }}>
         <TopHoldingsCard

@@ -392,16 +392,6 @@ mod tests {
     }
 
     #[test]
-    fn render_includes_hyperliquid_line_when_present() {
-        use crate::service::hyperliquid::{format_hyperliquid_line, HlEquitySummary};
-        let line = format_hyperliquid_line(&HlEquitySummary {
-            equity_usd: rust_decimal_macros::dec!(2500),
-            change_pct: Some(-3.2),
-        });
-        assert_eq!(line, "Hyperliquid: $2500.00 (-3.2%)");
-    }
-
-    #[test]
     fn clickup_due_line_tags_overdue_and_today_only() {
         use crate::clickup::client::Task;
         let now = 100_000i64;
@@ -565,5 +555,22 @@ mod tests {
         let block = render_data_block(&d);
         assert!(block.contains("Bacaan pagi"), "{block}");
         assert!(block.contains("Rust 2.0 — rilis besar https://ex.com/r"), "{block}");
+    }
+
+    #[test]
+    fn render_includes_hyperliquid_line_when_present() {
+        use crate::service::hyperliquid::{format_hyperliquid_line, HlEquitySummary};
+        let line = format_hyperliquid_line(&HlEquitySummary {
+            equity_usd: rust_decimal_macros::dec!(2500),
+            change_pct: Some(-3.2),
+        });
+        assert_eq!(line, "Hyperliquid: $2500.00 (-3.2%)");
+        let mut d = data();
+        d.hyperliquid = Some(HlEquitySummary {
+            equity_usd: rust_decimal_macros::dec!(2500),
+            change_pct: Some(-3.2),
+        });
+        let block = render_data_block(&d);
+        assert!(block.contains("Hyperliquid: $2500.00 (-3.2%)"), "{block}");
     }
 }

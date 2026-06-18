@@ -18,6 +18,8 @@ pub struct RecapData {
     pub todos_next_week: Vec<crate::repo::todos::TodoRow>,
     pub reminders_next_week: Vec<crate::repo::reminders::ReminderRow>,
     pub events_next_week: Vec<crate::repo::events::EventRow>,
+    /// Hyperliquid equity snapshot vs. one week ago. `None` when the instrument
+    /// is not configured or no price data is available.
     pub hyperliquid: Option<crate::service::hyperliquid::HlEquitySummary>,
 }
 
@@ -177,6 +179,10 @@ pub fn render_data_block(d: &RecapData) -> String {
                 group_id(&m.delta_idr.abs().round_dp(0)),
             ));
         }
+    }
+    if let Some(hl) = &d.hyperliquid {
+        out.push_str(&crate::service::hyperliquid::format_hyperliquid_line(hl));
+        out.push('\n');
     }
     out.push_str("Minggu depan:\n");
     if d.todos_next_week.is_empty()

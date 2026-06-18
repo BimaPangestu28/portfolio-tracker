@@ -59,8 +59,8 @@ async fn main() -> anyhow::Result<()> {
     google::engine::spawn(db.clone());
     upwork::jobs::spawn(db.clone());
     upwork::contracts::spawn(db.clone());
-    if let Ok(wallet) = std::env::var("HYPERLIQUID_WALLET") {
-        if let Err(e) = setup::ensure_hyperliquid_account(&db, &wallet).await {
+    if std::env::var("HYPERLIQUID_API_URL").is_ok() {
+        if let Err(e) = setup::ensure_hyperliquid_account(&db).await {
             tracing::warn!("hyperliquid setup failed: {e:#}");
         }
     }

@@ -161,6 +161,16 @@ mod tests {
             let mut r = self.responses.lock().unwrap();
             Ok(if r.is_empty() { text_response("(no more)") } else { r.remove(0) })
         }
+
+        async fn complete_tools_text_only(
+            &self,
+            _system: &str,
+            _messages: &[serde_json::Value],
+            _tools: &serde_json::Value,
+        ) -> Result<serde_json::Value, crate::llm::claude::LlmError> {
+            let mut r = self.responses.lock().unwrap();
+            Ok(if r.is_empty() { text_response("(no more)") } else { r.remove(0) })
+        }
     }
 
     fn text_response(t: &str) -> serde_json::Value {
@@ -204,6 +214,15 @@ mod tests {
             Ok(serde_json::json!({
                 "content": [ { "type": "tool_use", "id": "tu_x", "name": "get_pricing", "input": {} } ]
             }))
+        }
+
+        async fn complete_tools_text_only(
+            &self,
+            _system: &str,
+            _messages: &[serde_json::Value],
+            _tools: &serde_json::Value,
+        ) -> Result<serde_json::Value, crate::llm::claude::LlmError> {
+            Ok(text_response("(text-only)"))
         }
     }
 

@@ -21,7 +21,8 @@ pub struct MonthlyRecapData {
     pub freelance_invoiced_idr: Decimal,
     /// Net-worth change over the prior month (end-of-month minus start-of-month snapshot).
     pub net_worth_change_idr: Option<Decimal>,
-    /// Hyperliquid portfolio equity and change for the prior month.
+    /// Hyperliquid equity snapshot vs. the start of the prior month. `None`
+    /// when the instrument is not configured or no price data is available.
     pub hyperliquid: Option<crate::service::hyperliquid::HlEquitySummary>,
 }
 
@@ -126,13 +127,10 @@ pub async fn gather(db: &Db, now_utc: DateTime<Utc>) -> anyhow::Result<MonthlyRe
         }
     };
 
-    // --- Hyperliquid equity change for the prior month ---
-    let hyperliquid = crate::service::hyperliquid::equity_and_change(
-        db,
-        &format!("{month_label}-01"),
-    )
-    .await
-    .unwrap_or(None);
+    let month_start = format!("{month_label}-01");
+    let hyperliquid = crate::service::hyperliquid::equity_and_change(db, &month_start)
+        .await
+        .unwrap_or(None);
 
     Ok(MonthlyRecapData {
         month_label,
@@ -181,7 +179,6 @@ pub fn render_data_block(d: &MonthlyRecapData) -> String {
         ));
     }
 
-    // Hyperliquid equity line (optional).
     if let Some(hl) = &d.hyperliquid {
         out.push_str(&crate::service::hyperliquid::format_hyperliquid_line(hl));
         out.push('\n');

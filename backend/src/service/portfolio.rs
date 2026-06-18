@@ -76,12 +76,6 @@ pub async fn build_summary(db: &Db) -> anyhow::Result<PortfolioSummary> {
         let fx_incomplete = resolve_fx_gaps(db, &mut txns).await?;
         let cb = compute_cost_basis(&txns);
         let ins = instruments::get(db, instrument_id).await?;
-        // Flow-only instruments (e.g. HL-USDC) feed TWR external flows but are NOT
-        // positions — their value is already captured by the HL-EQUITY instrument.
-        // Skip them from net worth, PnL, and allocation entirely.
-        if ins.price_source == crate::setup::HL_FLOW_PRICE_SOURCE {
-            continue;
-        }
         let latest = prices::latest(db, instrument_id).await?;
         let (price, stale) = match latest {
             Some(lp) => (lp.price, crate::pricing::service::is_stale(&lp.as_of, chrono::Utc::now(), crate::pricing::service::stale_window_hours(&lp.source))),
@@ -248,48 +242,6 @@ mod tests {
         assert_eq!(s.net_worth_usd, dec("150").unwrap());
         assert_eq!(s.net_worth_idr, dec("2400000").unwrap());
         assert_eq!(s.allocation[0].actual_pct, dec("100").unwrap());
-    }
-
-    #[tokio::test]
-    async fn build_summary_excludes_flow_only_instrument() {
-        let db = crate::db::connect("sqlite::memory:").await.unwrap();
-        let acct = crate::repo::accounts::create(&db, &crate::repo::accounts::NewAccount{
-            name:"HL".into(), account_type:"exchange".into(), institution:None,
-            native_currency:"USD".into(), note:None
-        }).await.unwrap();
-        // HL-EQUITY: priced at 1000
-        let equity_ins = instruments::create(&db, &instruments::NewInstrument{
-            symbol:"HL-EQUITY".into(), name:"HL Equity".into(), instrument_type:"other".into(),
-            native_currency:"USD".into(), category_id:None,
-            price_source:"hyperliquid:0xwallet".into(), decimals:Some(2), note:None
-        }).await.unwrap();
-        transactions::create(&db, &transactions::NewTransaction{
-            account_id:acct.id, instrument_id:equity_ins.id, txn_type:"opening_balance".into(),
-            executed_at:Utc::now(), quantity:"1".into(), price_native:"0".into(),
-            fee_native:None, currency:"USD".into(), fx_to_idr:"16000".into(), fx_to_usd:"1".into(),
-            note:None, source:None, external_id:None
-        }).await.unwrap();
-        prices::upsert_latest(&db, equity_ins.id, dec("1000").unwrap(), "USD", "test", "2099-01-01").await.unwrap();
-        prices::upsert_fx(&db, "USD", "IDR", dec("16000").unwrap(), "2099-01-01").await.unwrap();
-
-        // HL-USDC flow instrument: a deposit of 500
-        let flow_ins = instruments::create(&db, &instruments::NewInstrument{
-            symbol:"HL-USDC".into(), name:"HL USDC (flow)".into(), instrument_type:"cash".into(),
-            native_currency:"USD".into(), category_id:None,
-            price_source:"hyperliquid-flow".into(), decimals:Some(2), note:None
-        }).await.unwrap();
-        transactions::create(&db, &transactions::NewTransaction{
-            account_id:acct.id, instrument_id:flow_ins.id, txn_type:"deposit".into(),
-            executed_at:Utc::now(), quantity:"500".into(), price_native:"1".into(),
-            fee_native:None, currency:"USD".into(), fx_to_idr:"16000".into(), fx_to_usd:"1".into(),
-            note:None, source:None, external_id:None
-        }).await.unwrap();
-
-        let s = build_summary(&db).await.unwrap();
-        // net worth should be 1000 (equity only), NOT 1500
-        assert_eq!(s.net_worth_usd, dec("1000").unwrap());
-        // HL-USDC should NOT appear in positions
-        assert!(!s.positions.iter().any(|p| p.instrument_id == flow_ins.id));
     }
 
     #[tokio::test]

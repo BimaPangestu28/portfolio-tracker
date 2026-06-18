@@ -34,21 +34,6 @@ pub async fn last_two(db: &Db, instrument_id: i64) -> anyhow::Result<Vec<LatestP
         .collect()
 }
 
-pub async fn series(db: &Db, instrument_id: i64) -> anyhow::Result<Vec<(String, Decimal)>> {
-    use std::str::FromStr;
-    let rows = sqlx::query_as::<_, (String, String)>(
-        "SELECT as_of, price_native FROM price_quote
-         WHERE instrument_id = ? AND kind = 'latest' ORDER BY as_of ASC",
-    )
-    .bind(instrument_id)
-    .fetch_all(db)
-    .await?;
-    Ok(rows
-        .into_iter()
-        .filter_map(|(as_of, p)| Decimal::from_str(&p).ok().map(|d| (as_of, d)))
-        .collect())
-}
-
 pub async fn upsert_fx(db: &Db, base: &str, quote: &str, rate: Decimal, as_of: &str) -> anyhow::Result<()> {
     sqlx::query(
         "INSERT INTO fx_rate (as_of, base, quote, rate) VALUES (?,?,?,?)
@@ -70,6 +55,23 @@ pub async fn fx_on(db: &Db, base: &str, quote: &str, as_of: &str) -> anyhow::Res
         "SELECT rate FROM fx_rate WHERE base=? AND quote=? AND as_of<=? ORDER BY as_of DESC LIMIT 1")
         .bind(base).bind(quote).bind(as_of).fetch_optional(db).await?;
     match row { Some((r,)) => Ok(Some(dec(&r)?)), None => Ok(None) }
+}
+
+/// Returns all `kind = 'latest'` price-quote rows for an instrument, ordered by `as_of` ascending.
+/// Each element is `(as_of_date_string, price)`.
+pub async fn series(db: &Db, instrument_id: i64) -> anyhow::Result<Vec<(String, Decimal)>> {
+    use std::str::FromStr;
+    let rows = sqlx::query_as::<_, (String, String)>(
+        "SELECT as_of, price_native FROM price_quote
+         WHERE instrument_id = ? AND kind = 'latest' ORDER BY as_of ASC",
+    )
+    .bind(instrument_id)
+    .fetch_all(db)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .filter_map(|(as_of, p)| Decimal::from_str(&p).ok().map(|d| (as_of, d)))
+        .collect())
 }
 
 #[cfg(test)]
@@ -136,7 +138,7 @@ mod tests {
         let ins = instruments::create(&db, &instruments::NewInstrument {
             symbol: "HL-EQUITY".into(), name: "HL".into(), instrument_type: "other".into(),
             native_currency: "USD".into(), category_id: None,
-            price_source: "hyperliquid:0x".into(), decimals: Some(2), note: None,
+            price_source: "hyperliquid:bot".into(), decimals: Some(2), note: None,
         }).await.unwrap();
         upsert_latest(&db, ins.id, d!(100), "USD", "hyperliquid", "2026-06-01").await.unwrap();
         upsert_latest(&db, ins.id, d!(120), "USD", "hyperliquid", "2026-06-03").await.unwrap();

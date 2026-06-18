@@ -20,7 +20,7 @@ export function HyperliquidCard() {
           <div className="skeleton" style={{ width: "100%", height: 120 }} />
         ) : !view || view.insufficient_data ? (
           <div className="empty">
-            <div className="t-h3">Belum ada data equity</div>
+            <div className="t-h3">Belum cukup data</div>
             <div className="t-sm t-muted">Kurva muncul setelah ada dua hari data equity.</div>
           </div>
         ) : (
@@ -34,15 +34,41 @@ export function HyperliquidCard() {
             <div style={{ width: "100%", height: 140 }}>
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart data={chartData} margin={{ top: 10, right: 8, left: 0, bottom: 0 }}>
-                  <XAxis dataKey="date" fontSize={10} tickLine={false} axisLine={false}
-                    stroke="hsl(var(--muted-foreground))" minTickGap={28} />
-                  <YAxis tickFormatter={(v: number) => `${v.toFixed(0)}%`} width={40} fontSize={10}
-                    tickLine={false} axisLine={false} stroke="hsl(var(--muted-foreground))" />
-                  <Tooltip formatter={(v: number) => `${v.toFixed(2)}%`}
-                    contentStyle={{ background: "hsl(var(--popover))", border: "1px solid hsl(var(--border))",
-                      borderRadius: "var(--radius)", color: "hsl(var(--popover-foreground))", fontSize: 12 }} />
-                  <Area type="monotone" dataKey="returnPct" stroke="hsl(var(--chart-1))" strokeWidth={1.5}
-                    fill="hsl(var(--chart-1))" fillOpacity={0.15} dot={false} />
+                  <XAxis
+                    dataKey="date"
+                    fontSize={10}
+                    tickLine={false}
+                    axisLine={false}
+                    stroke="hsl(var(--muted-foreground))"
+                    minTickGap={28}
+                  />
+                  <YAxis
+                    tickFormatter={(v: number) => `${v.toFixed(0)}%`}
+                    width={40}
+                    fontSize={10}
+                    tickLine={false}
+                    axisLine={false}
+                    stroke="hsl(var(--muted-foreground))"
+                  />
+                  <Tooltip
+                    formatter={(v: number) => `${v.toFixed(2)}%`}
+                    contentStyle={{
+                      background: "hsl(var(--popover))",
+                      border: "1px solid hsl(var(--border))",
+                      borderRadius: "var(--radius)",
+                      color: "hsl(var(--popover-foreground))",
+                      fontSize: 12,
+                    }}
+                  />
+                  <Area
+                    type="monotone"
+                    dataKey="returnPct"
+                    stroke="hsl(var(--chart-1))"
+                    strokeWidth={1.5}
+                    fill="hsl(var(--chart-1))"
+                    fillOpacity={0.15}
+                    dot={false}
+                  />
                 </AreaChart>
               </ResponsiveContainer>
             </div>

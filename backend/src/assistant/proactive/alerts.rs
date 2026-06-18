@@ -235,19 +235,19 @@ pub async fn evaluate(
     }
 
     match crate::repo::instruments::find_by_symbol(db, crate::setup::HL_SYMBOL).await {
-        Ok(Some(ins)) => match crate::repo::prices::series(db, ins.id).await {
+        Ok(Some(instrument)) => match crate::repo::prices::series(db, instrument.id).await {
             Ok(series) if !series.is_empty() => {
-                let current = series.last().map(|(_, p)| *p).unwrap_or_default();
-                let peak = series.iter().map(|(_, p)| *p).max().unwrap_or(current);
-                if let Some(a) = hyperliquid_drawdown_alert(current, peak, hl_drawdown_pct, today_wib) {
-                    alerts.push(a);
+                let current = series.last().map(|(_, price)| *price).unwrap_or_default();
+                let peak = series.iter().map(|(_, price)| *price).max().unwrap_or(current);
+                if let Some(alert) = hyperliquid_drawdown_alert(current, peak, hl_drawdown_pct, today_wib) {
+                    alerts.push(alert);
                 }
             }
             Ok(_) => {}
-            Err(e) => tracing::warn!("alerts: hl prices unavailable: {e:#}"),
+            Err(error) => tracing::warn!("alerts: hl prices unavailable: {error:#}"),
         },
         Ok(None) => {}
-        Err(e) => tracing::warn!("alerts: hl instrument lookup failed: {e:#}"),
+        Err(error) => tracing::warn!("alerts: hl instrument lookup failed: {error:#}"),
     }
 
     alerts.extend(price_alert_triggers(db).await);
@@ -422,15 +422,11 @@ mod tests {
 
     #[test]
     fn drawdown_alerts_only_at_or_beyond_threshold() {
-        // Peak 1000, current 800 → 20% drawdown.
-        let a = hyperliquid_drawdown_alert(dec!(800), dec!(1000), 15.0, "2026-06-18");
-        let a = a.expect("alert");
-        assert_eq!(a.dedup_key, "hl-drawdown:2026-06-18");
-        assert!(a.message.contains("Hyperliquid"), "{}", a.message);
-        assert!(a.message.contains("20"), "{}", a.message);
-        // 5% drawdown under a 15% threshold → silent.
+        let alert = hyperliquid_drawdown_alert(dec!(800), dec!(1000), 15.0, "2026-06-18").expect("alert");
+        assert_eq!(alert.dedup_key, "hl-drawdown:2026-06-18");
+        assert!(alert.message.contains("Hyperliquid"));
+        assert!(alert.message.contains("20"));
         assert!(hyperliquid_drawdown_alert(dec!(950), dec!(1000), 15.0, "2026-06-18").is_none());
-        // No peak → silent.
         assert!(hyperliquid_drawdown_alert(dec!(0), dec!(0), 15.0, "2026-06-18").is_none());
     }
 
