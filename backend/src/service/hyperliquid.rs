@@ -1,0 +1,86 @@
+//! Read-side helpers over the synthetic Hyperliquid equity instrument.
+
+use crate::db::Db;
+use crate::setup::HL_SYMBOL;
+use rust_decimal::prelude::ToPrimitive;
+use rust_decimal::Decimal;
+
+#[derive(Debug, Clone)]
+pub struct HlEquitySummary {
+    pub equity_usd: Decimal,
+    pub change_pct: Option<f64>,
+}
+
+/// Current equity and its percent change since the latest quote on or before
+/// `since_date` (falls back to the earliest quote). `None` when the Hyperliquid
+/// instrument or any price quote is absent.
+pub async fn equity_and_change(db: &Db, since_date: &str) -> anyhow::Result<Option<HlEquitySummary>> {
+    let instrument = match crate::repo::instruments::find_by_symbol(db, HL_SYMBOL).await? {
+        Some(i) => i,
+        None => return Ok(None),
+    };
+    let series = crate::repo::prices::series(db, instrument.id).await?;
+    let current = match series.last() {
+        Some((_, price)) => *price,
+        None => return Ok(None),
+    };
+    let baseline = series
+        .iter()
+        .rev()
+        .find(|(date, _)| date.as_str() <= since_date)
+        .or_else(|| series.first())
+        .map(|(_, price)| *price);
+    let change_pct = baseline.and_then(|b| {
+        if b.is_zero() {
+            None
+        } else {
+            ((current - b) / b * Decimal::from(100)).to_f64()
+        }
+    });
+    Ok(Some(HlEquitySummary { equity_usd: current, change_pct }))
+}
+
+/// "Hyperliquid: $1234.50 (+2.3%)" — pct omitted when unknown.
+pub fn format_hyperliquid_line(s: &HlEquitySummary) -> String {
+    use rust_decimal::prelude::ToPrimitive;
+    let pct = s
+        .change_pct
+        .map(|p| format!(" ({p:+.1}%)"))
+        .unwrap_or_default();
+    let equity_f64 = s.equity_usd.to_f64().unwrap_or(0.0);
+    format!("Hyperliquid: ${:.2}{}", equity_f64, pct)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rust_decimal_macros::dec;
+
+    #[test]
+    fn formats_line_with_and_without_pct() {
+        let with = HlEquitySummary { equity_usd: dec!(1234.5), change_pct: Some(2.34) };
+        assert_eq!(format_hyperliquid_line(&with), "Hyperliquid: $1234.50 (+2.3%)");
+        let without = HlEquitySummary { equity_usd: dec!(1000), change_pct: None };
+        assert_eq!(format_hyperliquid_line(&without), "Hyperliquid: $1000.00");
+    }
+
+    #[tokio::test]
+    async fn equity_and_change_computes_pct_since_baseline() {
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        crate::setup::ensure_hyperliquid_account(&db, "0x").await.unwrap();
+        let ins = crate::repo::instruments::find_by_symbol(&db, crate::setup::HL_SYMBOL)
+            .await.unwrap().unwrap();
+        crate::repo::prices::upsert_latest(&db, ins.id, dec!(100), "USD", "hyperliquid", "2026-06-01").await.unwrap();
+        crate::repo::prices::upsert_latest(&db, ins.id, dec!(110), "USD", "hyperliquid", "2026-06-05").await.unwrap();
+        // Baseline = latest quote on/before 2026-06-01 → 100; current → 110 → +10%.
+        let s = equity_and_change(&db, "2026-06-01").await.unwrap().expect("summary");
+        assert_eq!(s.equity_usd, dec!(110));
+        assert!((s.change_pct.unwrap() - 10.0).abs() < 1e-9);
+    }
+
+    #[tokio::test]
+    async fn equity_and_change_none_when_no_instrument() {
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        assert!(equity_and_change(&db, "2026-06-01").await.unwrap().is_none());
+    }
+}
