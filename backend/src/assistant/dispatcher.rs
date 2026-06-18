@@ -28,6 +28,7 @@ pub async fn dispatch(db: &Db, name: &str, input: &serde_json::Value) -> Result<
         "list_pending_reviews" => list_pending_reviews(db).await,
         "confirm_review" => confirm_review(db, input).await,
         "create_transaction" => create_transaction(db, input).await,
+        "list_transactions" => list_transactions(db, input).await,
         "list_instruments" => list_instruments(db).await,
         "list_projects" => match crate::clickup::ClickUpClient::from_env() {
             Ok(api) => clickup_list_projects(&api).await,
@@ -982,6 +983,39 @@ async fn create_transaction(db: &Db, input: &serde_json::Value) -> Result<String
     };
     let txn = crate::repo::transactions::create(db, &nt).await.map_err(|e| format!("{e}"))?;
     Ok(format!("transaksi #{} dicatat: {} {} @ {} di {}", txn.id, txn.txn_type.as_str(), txn.quantity.normalize(), txn.price_native.normalize(), account_id))
+}
+
+async fn list_transactions(db: &Db, input: &serde_json::Value) -> Result<String, String> {
+    let limit = input.get("limit").and_then(|v| v.as_i64()).unwrap_or(10).clamp(1, 25);
+    let instrument_id = match str_arg(input, "instrument") {
+        Some(name) => crate::ingestion::matching::suggest_instrument_for_entry(db, Some(name), Some(name))
+            .await.map_err(|e| format!("db error: {e}"))?,
+        None => None,
+    };
+    let account_id = match str_arg(input, "account") {
+        Some(name) => {
+            let accounts = crate::repo::accounts::list(db).await.map_err(|e| format!("db error: {e}"))?;
+            accounts.iter().find(|a| a.name.eq_ignore_ascii_case(name)).map(|a| a.id)
+        }
+        None => None,
+    };
+    let txns = crate::repo::transactions::list_recent(db, limit, instrument_id, account_id)
+        .await.map_err(|e| format!("db error: {e}"))?;
+    if txns.is_empty() {
+        return Ok("belum ada transaksi".into());
+    }
+    let mut out = String::new();
+    for t in txns {
+        let ins = crate::repo::instruments::get(db, t.instrument_id).await.ok();
+        let label = ins.map(|i| format!("{} ({})", i.symbol, i.name)).unwrap_or_else(|| format!("#{}", t.instrument_id));
+        let total = (t.quantity * t.price_native + t.fee_native).normalize();
+        out.push_str(&format!(
+            "#{} {} {} — {} @ {} = {} — {}\n",
+            t.id, t.executed_at.format("%Y-%m-%d"), t.txn_type.as_str(), label,
+            t.price_native.normalize(), t.quantity.normalize(), total,
+        ));
+    }
+    Ok(out)
 }
 
 async fn capture_to_inbox(db: &Db, input: &serde_json::Value) -> Result<String, String> {
@@ -2798,5 +2832,26 @@ mod tests {
         });
         let err = create_transaction(&db, &input).await.unwrap_err();
         assert!(err.to_lowercase().contains("nav") || err.to_lowercase().contains("unit"));
+    }
+
+    #[tokio::test]
+    async fn list_transactions_shows_recent_with_ids() {
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        let acc = crate::repo::accounts::create(&db, &crate::repo::accounts::NewAccount {
+            name: "Bibit #4".into(), account_type: "fund".into(), institution: None, native_currency: "IDR".into(), note: None,
+        }).await.unwrap();
+        let ins = crate::repo::instruments::create(&db, &crate::repo::instruments::NewInstrument {
+            symbol: "MJR".into(), name: "Majoris".into(), instrument_type: "fund".into(),
+            native_currency: "IDR".into(), category_id: None, price_source: "bibit:MJR02".into(), decimals: Some(4), note: None,
+        }).await.unwrap();
+        crate::repo::transactions::create(&db, &crate::repo::transactions::NewTransaction {
+            account_id: acc.id, instrument_id: ins.id, txn_type: "buy".into(),
+            executed_at: chrono::Utc::now(), quantity: "1236.7898".into(), price_native: "1617.0896".into(),
+            fee_native: None, currency: "IDR".into(), fx_to_idr: "1".into(), fx_to_usd: "1".into(),
+            note: None, source: None, external_id: None,
+        }).await.unwrap();
+        let out = list_transactions(&db, &serde_json::json!({})).await.unwrap();
+        assert!(out.contains("#"));
+        assert!(out.contains("MJR") || out.contains("Majoris"));
     }
 }

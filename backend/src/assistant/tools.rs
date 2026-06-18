@@ -207,6 +207,18 @@ pub fn definitions() -> serde_json::Value {
             }
         },
         {
+            "name": "list_transactions",
+            "description": "List recent recorded transactions (newest first) so the owner can find one to edit or delete. Optionally filter by instrument or account name. Each line shows the txn id, date, type, instrument, qty @ price, and total.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "instrument": { "type": "string", "description": "Optional instrument name/symbol filter." },
+                    "account": { "type": "string", "description": "Optional account name filter." },
+                    "limit": { "type": "integer", "description": "Max rows, default 10, max 25." }
+                }
+            }
+        },
+        {
             "name": "list_instruments",
             "description": "List the owner's known instruments (id, symbol, name, type). Use to find an instrument_id for confirm_review when a review item's instrument shows 'belum dikenali' but the instrument may already exist under a slightly different name. If it genuinely doesn't exist, tell the user to add it in the web UI → Data (instruments can't be created from chat).",
             "input_schema": { "type": "object", "properties": {} }
@@ -446,7 +458,7 @@ mod tests {
                 "get_portfolio_summary", "search_memory", "remember",
                 "create_event", "list_events", "cancel_event",
                 "reject_review", "list_accounts", "create_account",
-                "list_pending_reviews", "confirm_review", "create_transaction", "list_instruments",
+                "list_pending_reviews", "confirm_review", "create_transaction", "list_transactions", "list_instruments",
                 "list_projects",
                 "create_project",
                 "create_task",
