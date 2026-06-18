@@ -1,6 +1,7 @@
 pub mod bibit;
 pub mod coingecko;
 pub mod fx;
+pub mod hyperliquid;
 pub mod service;
 pub mod yahoo;
 
