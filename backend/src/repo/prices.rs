@@ -34,6 +34,21 @@ pub async fn last_two(db: &Db, instrument_id: i64) -> anyhow::Result<Vec<LatestP
         .collect()
 }
 
+pub async fn series(db: &Db, instrument_id: i64) -> anyhow::Result<Vec<(String, Decimal)>> {
+    use std::str::FromStr;
+    let rows = sqlx::query_as::<_, (String, String)>(
+        "SELECT as_of, price_native FROM price_quote
+         WHERE instrument_id = ? AND kind = 'latest' ORDER BY as_of ASC",
+    )
+    .bind(instrument_id)
+    .fetch_all(db)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .filter_map(|(as_of, p)| Decimal::from_str(&p).ok().map(|d| (as_of, d)))
+        .collect())
+}
+
 pub async fn upsert_fx(db: &Db, base: &str, quote: &str, rate: Decimal, as_of: &str) -> anyhow::Result<()> {
     sqlx::query(
         "INSERT INTO fx_rate (as_of, base, quote, rate) VALUES (?,?,?,?)
@@ -113,5 +128,22 @@ mod tests {
         assert_eq!(fx_on(&db, "USD", "IDR", "2026-02-15").await.unwrap(), Some(d!(15000)));
         // Before any row -> None
         assert_eq!(fx_on(&db, "USD", "IDR", "2025-12-31").await.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn series_returns_quotes_ascending_by_date() {
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        let ins = instruments::create(&db, &instruments::NewInstrument {
+            symbol: "HL-EQUITY".into(), name: "HL".into(), instrument_type: "other".into(),
+            native_currency: "USD".into(), category_id: None,
+            price_source: "hyperliquid:0x".into(), decimals: Some(2), note: None,
+        }).await.unwrap();
+        upsert_latest(&db, ins.id, d!(100), "USD", "hyperliquid", "2026-06-01").await.unwrap();
+        upsert_latest(&db, ins.id, d!(120), "USD", "hyperliquid", "2026-06-03").await.unwrap();
+        upsert_latest(&db, ins.id, d!(90), "USD", "hyperliquid", "2026-06-02").await.unwrap();
+        let s = series(&db, ins.id).await.unwrap();
+        assert_eq!(s.len(), 3);
+        assert_eq!(s[0], ("2026-06-01".to_string(), d!(100)));
+        assert_eq!(s[2], ("2026-06-03".to_string(), d!(120)));
     }
 }
