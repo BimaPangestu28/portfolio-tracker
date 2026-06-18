@@ -48,6 +48,16 @@ pub async fn delete(db: &Db, id: i64) -> anyhow::Result<()> {
     Ok(())
 }
 
+pub async fn find_by_name(db: &Db, name: &str) -> anyhow::Result<Option<AccountRow>> {
+    Ok(sqlx::query_as::<_, AccountRow>(
+        "SELECT id, name, account_type, institution, native_currency, note, created_at
+         FROM account WHERE name = ? LIMIT 1",
+    )
+    .bind(name)
+    .fetch_optional(db)
+    .await?)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -63,5 +73,17 @@ mod tests {
         assert_eq!(created.name, "Binance");
         let all = list(&db).await.unwrap();
         assert_eq!(all.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn find_by_name_returns_created_account() {
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        assert!(find_by_name(&db, "Hyperliquid").await.unwrap().is_none());
+        create(&db, &NewAccount {
+            name: "Hyperliquid".into(), account_type: "exchange".into(),
+            institution: None, native_currency: "USD".into(), note: None,
+        }).await.unwrap();
+        let found = find_by_name(&db, "Hyperliquid").await.unwrap().expect("found");
+        assert_eq!(found.name, "Hyperliquid");
     }
 }
