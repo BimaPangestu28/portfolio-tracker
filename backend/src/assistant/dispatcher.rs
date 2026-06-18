@@ -1014,7 +1014,7 @@ async fn list_transactions(db: &Db, input: &serde_json::Value) -> Result<String,
         out.push_str(&format!(
             "#{} {} {} — {} @ {} = {} — {}\n",
             t.id, t.executed_at.format("%Y-%m-%d"), t.txn_type.as_str(), label,
-            t.price_native.normalize(), t.quantity.normalize(), total,
+            t.quantity.normalize(), t.price_native.normalize(), total,
         ));
     }
     Ok(out)
@@ -1026,8 +1026,7 @@ async fn edit_transaction(db: &Db, input: &serde_json::Value) -> Result<String, 
 
     let instrument_id = match str_arg(input, "instrument") {
         Some(name) => crate::ingestion::matching::suggest_instrument_for_entry(db, Some(name), Some(name))
-            .await.map_err(|e| format!("db error: {e}"))?
-            .or_else(|| None),
+            .await.map_err(|e| format!("db error: {e}"))?,
         None => None,
     };
     let account_id = match str_arg(input, "account") {
