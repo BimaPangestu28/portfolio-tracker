@@ -88,7 +88,11 @@ pub async fn ensure_hyperliquid_account(db: &Db, wallet: &str) -> anyhow::Result
             account_id: account.id,
             kind: "hyperliquid".into(),
             label: "Hyperliquid".into(),
-            config_json: format!(r#"{{"wallet":"{wallet}","network":"mainnet"}}"#),
+            config_json: {
+                let network = std::env::var("HYPERLIQUID_NETWORK")
+                    .unwrap_or_else(|_| "mainnet".into());
+                format!(r#"{{"wallet":"{wallet}","network":"{network}"}}"#)
+            },
         })
         .await?;
     }

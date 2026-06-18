@@ -149,6 +149,64 @@ mod tests {
         assert!((view.metrics.total_return - 0.10).abs() < 1e-9);
     }
 
+    /// A pure deposit on the Hyperliquid account (HL-USDC txn) must not register
+    /// as a return in the per-account TWR. Mirrors the global-path test
+    /// `service::performance::tests::hl_usdc_deposit_does_not_create_return`
+    /// but scoped to `build_hyperliquid_view`.
+    ///
+    /// Setup: NAV doubles 1000 → 2000 in one step, but a 1000 USD deposit lands
+    /// on the same day as the second quote. TWR formula:
+    ///   r = (2000 - 1000) / 1000 - 1 = 0 → total_return must be ≈ 0.
+    #[tokio::test]
+    async fn hl_usdc_deposit_does_not_inflate_per_account_twr() {
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        crate::setup::ensure_hyperliquid_account(&db, "0x").await.unwrap();
+
+        // Look up the real instrument ids provisioned by setup.
+        let hl_equity_ins = crate::repo::instruments::find_by_symbol(&db, crate::setup::HL_SYMBOL)
+            .await.unwrap().expect("HL-EQUITY instrument must exist after setup");
+        let hl_usdc_ins = crate::repo::instruments::find_by_symbol(&db, crate::setup::HL_FLOW_SYMBOL)
+            .await.unwrap().expect("HL-USDC flow instrument must exist after setup");
+        let hl_account = crate::repo::accounts::find_by_name(&db, crate::setup::HL_ACCOUNT_NAME)
+            .await.unwrap().expect("Hyperliquid account must exist after setup");
+
+        // Two price quotes for HL-EQUITY: equity doubles from 1000 to 2000 USD.
+        crate::repo::prices::upsert_latest(
+            &db, hl_equity_ins.id, dec!(1000), "USD", "hyperliquid", "2026-06-01",
+        ).await.unwrap();
+        crate::repo::prices::upsert_latest(
+            &db, hl_equity_ins.id, dec!(2000), "USD", "hyperliquid", "2026-06-02",
+        ).await.unwrap();
+
+        // Deposit of 1000 USD into the Hyperliquid account on the date of the second
+        // quote. The full NAV rise must be attributed to this flow, not to trading gains.
+        crate::repo::transactions::create(&db, &crate::repo::transactions::NewTransaction {
+            account_id: hl_account.id,
+            instrument_id: hl_usdc_ins.id,
+            txn_type: "deposit".into(),
+            executed_at: chrono::DateTime::parse_from_rfc3339("2026-06-02T00:00:00Z")
+                .unwrap()
+                .with_timezone(&chrono::Utc),
+            quantity: "1000".into(),
+            price_native: "1".into(),
+            fee_native: None,
+            currency: "USD".into(),
+            fx_to_idr: "16000".into(),
+            fx_to_usd: "1".into(),
+            note: None,
+            source: None,
+            external_id: None,
+        }).await.unwrap();
+
+        let view = build_hyperliquid_view(&db).await.unwrap();
+        assert!(!view.insufficient_data, "two price quotes must mark data as sufficient");
+        assert!(
+            view.metrics.total_return.abs() < 1e-9,
+            "pure deposit must net per-account TWR to ≈0, got {}",
+            view.metrics.total_return,
+        );
+    }
+
     #[test]
     fn formats_line_with_and_without_pct() {
         let with = HlEquitySummary { equity_usd: dec!(1234.5), change_pct: Some(2.34) };
