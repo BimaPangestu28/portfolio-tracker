@@ -1,5 +1,9 @@
 use rust_decimal::Decimal;
 
+/// Synthetic `category_id` for the "Lainnya" bucket — assets that don't map to
+/// any target category. Negative so it can never collide with a real DB id.
+pub const UNCATEGORIZED_CATEGORY_ID: i64 = -1;
+
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct CategoryAllocation {
     pub category_id: i64,

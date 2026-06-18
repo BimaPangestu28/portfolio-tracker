@@ -1,5 +1,7 @@
 use crate::db::Db;
-use crate::domain::allocation::{compute_allocation, CategoryAllocation, CategoryInput};
+use crate::domain::allocation::{
+    compute_allocation, CategoryAllocation, CategoryInput, UNCATEGORIZED_CATEGORY_ID,
+};
 use crate::domain::cost_basis::compute_cost_basis;
 use crate::domain::models::TxnType;
 use crate::domain::valuation::{build_position, group_by_instrument, PriceContext, Position};
@@ -123,6 +125,22 @@ pub async fn build_summary(db: &Db) -> anyhow::Result<PortfolioSummary> {
             }
         }
     }
+    // Surface assets that don't map to any target category (no category, or a
+    // category that no longer exists) as a synthetic "Lainnya" bucket. This makes
+    // the allocation total reconcile with net worth and rebases every percentage
+    // against the whole portfolio instead of just the categorized slice. The
+    // bucket carries no target, so it never flags out-of-band.
+    let categorized_total: Decimal = cat_inputs.iter().map(|c| c.value_idr).sum();
+    let uncategorized_idr = net_idr - categorized_total;
+    if uncategorized_idr > Decimal::ZERO {
+        cat_inputs.push(CategoryInput {
+            category_id: UNCATEGORIZED_CATEGORY_ID,
+            name: "Lainnya".to_string(),
+            target_pct: Decimal::ZERO,
+            tolerance_band_pct: None,
+            value_idr: uncategorized_idr,
+        });
+    }
     let allocation = compute_allocation(&cat_inputs);
 
     let fx_incomplete = positions.iter().any(|p| p.fx_incomplete);
@@ -242,6 +260,40 @@ mod tests {
         assert_eq!(s.net_worth_usd, dec("150").unwrap());
         assert_eq!(s.net_worth_idr, dec("2400000").unwrap());
         assert_eq!(s.allocation[0].actual_pct, dec("100").unwrap());
+    }
+
+    #[tokio::test]
+    async fn summary_groups_uncategorized_into_lainnya_bucket() {
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        let acct = crate::repo::accounts::create(&db, &crate::repo::accounts::NewAccount{ name:"X".into(), account_type:"manual".into(), institution:None, native_currency:"IDR".into(), note:None }).await.unwrap();
+        let cat = categories::create(&db, &categories::NewCategory { name:"Saham IDX".into(), target_pct:"100".into(), tolerance_band_pct:Some("5".into()), sort_order:None, color:None }).await.unwrap();
+
+        // Categorized position worth 100 IDR.
+        let ins_a = instruments::create(&db, &instruments::NewInstrument{ symbol:"AAA".into(), name:"AAA".into(), instrument_type:"stock".into(), native_currency:"IDR".into(), category_id:Some(cat.id), price_source:"manual".into(), decimals:Some(0), note:None }).await.unwrap();
+        transactions::create(&db, &transactions::NewTransaction{ account_id:acct.id, instrument_id:ins_a.id, txn_type:"buy".into(), executed_at:Utc::now(), quantity:"1".into(), price_native:"100".into(), fee_native:None, currency:"IDR".into(), fx_to_idr:"1".into(), fx_to_usd:"1".into(), note:None, source:None, external_id:None }).await.unwrap();
+        prices::upsert_latest(&db, ins_a.id, dec("100").unwrap(), "IDR", "test", "2099-01-01").await.unwrap();
+
+        // Uncategorized position (category_id = None) also worth 100 IDR.
+        let ins_b = instruments::create(&db, &instruments::NewInstrument{ symbol:"BBB".into(), name:"BBB".into(), instrument_type:"stock".into(), native_currency:"IDR".into(), category_id:None, price_source:"manual".into(), decimals:Some(0), note:None }).await.unwrap();
+        transactions::create(&db, &transactions::NewTransaction{ account_id:acct.id, instrument_id:ins_b.id, txn_type:"buy".into(), executed_at:Utc::now(), quantity:"1".into(), price_native:"100".into(), fee_native:None, currency:"IDR".into(), fx_to_idr:"1".into(), fx_to_usd:"1".into(), note:None, source:None, external_id:None }).await.unwrap();
+        prices::upsert_latest(&db, ins_b.id, dec("100").unwrap(), "IDR", "test", "2099-01-01").await.unwrap();
+
+        let s = build_summary(&db).await.unwrap();
+        assert_eq!(s.net_worth_idr, dec("200").unwrap());
+
+        let lainnya = s.allocation.iter().find(|c| c.category_id == UNCATEGORIZED_CATEGORY_ID).expect("Lainnya bucket present");
+        assert_eq!(lainnya.name, "Lainnya");
+        assert_eq!(lainnya.actual_value_idr, dec("100").unwrap());
+        assert_eq!(lainnya.actual_pct, dec("50").unwrap());
+        assert_eq!(lainnya.target_pct, dec("0").unwrap());
+        assert!(!lainnya.out_of_band, "Lainnya must never flag out-of-band");
+
+        // Percentages rebase against net worth: the categorized slice is now 50%,
+        // and the whole allocation reconciles to net worth.
+        let saham = s.allocation.iter().find(|c| c.category_id == cat.id).unwrap();
+        assert_eq!(saham.actual_pct, dec("50").unwrap());
+        let total: Decimal = s.allocation.iter().map(|c| c.actual_value_idr).sum();
+        assert_eq!(total, s.net_worth_idr);
     }
 
     #[tokio::test]
