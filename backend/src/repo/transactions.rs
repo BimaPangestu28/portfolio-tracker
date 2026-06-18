@@ -491,6 +491,69 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn update_preserves_existing_fx_for_non_idr_currency() {
+        // A non-IDR transaction must keep its historical fx rates on edit — the
+        // IDR normalization branch must not touch USD (or any non-IDR) rows.
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        let acc = accounts::create(&db, &accounts::NewAccount {
+            name: "IBKR".into(), account_type: "manual".into(), institution: None,
+            native_currency: "USD".into(), note: None,
+        }).await.unwrap();
+        let ins = instruments::create(&db, &instruments::NewInstrument {
+            symbol: "VOO".into(), name: "Vanguard S&P 500".into(),
+            instrument_type: "etf".into(), native_currency: "USD".into(),
+            category_id: None, price_source: "manual".into(), decimals: Some(8), note: None,
+        }).await.unwrap();
+        let original = create(&db, &NewTransaction {
+            account_id: acc.id, instrument_id: ins.id, txn_type: "buy".into(),
+            executed_at: chrono::Utc::now(), quantity: "1".into(), price_native: "500".into(),
+            fee_native: None, currency: "USD".into(), fx_to_idr: "16500".into(), fx_to_usd: "1".into(),
+            note: None, source: None, external_id: None,
+        }).await.unwrap();
+
+        let patched = update(&db, original.id, &TxnPatch {
+            quantity: Some("3".into()),
+            ..Default::default()
+        }).await.unwrap();
+
+        assert_eq!(patched.quantity.to_string(), "3");
+        assert_eq!(patched.fx_to_idr.to_string(), "16500"); // historical rate preserved
+        assert_eq!(patched.fx_to_usd.to_string(), "1"); // unchanged
+    }
+
+    #[tokio::test]
+    async fn update_preserves_unpatched_fields() {
+        // Fields omitted from the patch must retain their current values, including
+        // fee_native (NOT NULL column) and an existing note.
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        let acc = accounts::create(&db, &accounts::NewAccount {
+            name: "A".into(), account_type: "manual".into(), institution: None,
+            native_currency: "IDR".into(), note: None,
+        }).await.unwrap();
+        let ins = instruments::create(&db, &instruments::NewInstrument {
+            symbol: "BBCA".into(), name: "BCA".into(), instrument_type: "stock_id".into(),
+            native_currency: "IDR".into(), category_id: None, price_source: "manual".into(),
+            decimals: Some(0), note: None,
+        }).await.unwrap();
+        let original = create(&db, &NewTransaction {
+            account_id: acc.id, instrument_id: ins.id, txn_type: "buy".into(),
+            executed_at: chrono::Utc::now(), quantity: "100".into(), price_native: "9000".into(),
+            fee_native: Some("500".into()), currency: "IDR".into(), fx_to_idr: "1".into(),
+            fx_to_usd: "1".into(), note: Some("original note".into()), source: None, external_id: None,
+        }).await.unwrap();
+
+        let patched = update(&db, original.id, &TxnPatch {
+            quantity: Some("150".into()),
+            ..Default::default()
+        }).await.unwrap();
+
+        assert_eq!(patched.quantity.to_string(), "150"); // patched
+        assert_eq!(patched.price_native.to_string(), "9000"); // preserved
+        assert_eq!(patched.fee_native.to_string(), "500"); // preserved (NOT NULL)
+        assert_eq!(patched.note, Some("original note".into())); // preserved, not cleared
+    }
+
+    #[tokio::test]
     async fn external_id_dedup_via_unique_index() {
         let db = crate::db::connect("sqlite::memory:").await.unwrap();
         let acc = accounts::create(&db, &accounts::NewAccount{ name:"A".into(), account_type:"manual".into(), institution:None, native_currency:"USD".into(), note:None }).await.unwrap();
