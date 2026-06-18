@@ -1,7 +1,7 @@
 use crate::db::Db;
 use serde::{Deserialize, Serialize};
 
-const VALID_KINDS: &[&str] = &["evm_wallet", "binance", "mock"];
+const VALID_KINDS: &[&str] = &["evm_wallet", "binance", "mock", "hyperliquid"];
 
 #[derive(Debug, Clone, Serialize, sqlx::FromRow)]
 pub struct ConnectorRow {
@@ -122,5 +122,22 @@ mod tests {
             config_json: "{}".into(),
         }).await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn hyperliquid_is_a_valid_connector_kind() {
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        let acc = accounts::create(&db, &accounts::NewAccount {
+            name: "HL Account".into(), account_type: "wallet".into(),
+            institution: None, native_currency: "USD".into(), note: None,
+        }).await.unwrap();
+        let connector = create(&db, &NewConnector {
+            account_id: acc.id,
+            kind: "hyperliquid".into(),
+            label: "My Hyperliquid".into(),
+            config_json: r#"{"token":"test_token"}"#.into(),
+        }).await;
+        assert!(connector.is_ok(), "hyperliquid must be accepted as a valid connector kind");
+        assert_eq!(connector.unwrap().kind, "hyperliquid");
     }
 }

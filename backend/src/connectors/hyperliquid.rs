@@ -59,11 +59,13 @@ pub fn parse_flows(body: &serde_json::Value) -> Result<Vec<ExternalTxn>, Connect
             }
             Some(serde_json::Value::String(s)) => {
                 // Handle string-encoded values, also apply abs().
-                s.parse::<f64>()
-                    .map(|f| f.abs())
-                    .and_then(|f| rust_decimal::Decimal::try_from(f).map_err(|_| "".parse::<f64>().unwrap_err()))
+                let magnitude = s
+                    .parse::<f64>()
+                    .map_err(|e| ConnectorError::Parse(format!("usdc string parse failed: {e}")))?
+                    .abs();
+                rust_decimal::Decimal::try_from(magnitude)
                     .map(|d| d.normalize().to_string())
-                    .unwrap_or_else(|_| s.clone())
+                    .unwrap_or_else(|_| magnitude.to_string())
             }
             _ => continue,
         };
@@ -151,6 +153,40 @@ mod tests {
         let out = parse_flows(&body).unwrap();
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].kind, "deposit");
+    }
+
+    #[test]
+    fn string_encoded_usdc_deposit_parses_correctly() {
+        // Some API responses encode usdc as a JSON string rather than a number.
+        let body = serde_json::json!([
+            { "external_id": "0xh:deposit", "kind": "deposit", "usdc": "500.0", "time_ms": 1700000000000_i64 }
+        ]);
+        let out = parse_flows(&body).unwrap();
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].kind, "deposit");
+        assert_eq!(out[0].symbol, "USDC");
+        // Decimal normalize strips trailing zero: "500.0" -> "500"
+        assert_eq!(out[0].quantity, "500");
+    }
+
+    #[test]
+    fn string_encoded_negative_usdc_withdrawal_applies_abs() {
+        let body = serde_json::json!([
+            { "external_id": "0xi:withdrawal", "kind": "withdrawal", "usdc": "-200.5", "time_ms": 1700000000000_i64 }
+        ]);
+        let out = parse_flows(&body).unwrap();
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].kind, "withdrawal");
+        assert_eq!(out[0].quantity, "200.5");
+    }
+
+    #[test]
+    fn string_encoded_invalid_usdc_returns_parse_error() {
+        let body = serde_json::json!([
+            { "external_id": "0xj:deposit", "kind": "deposit", "usdc": "not_a_number", "time_ms": 1700000000000_i64 }
+        ]);
+        let result = parse_flows(&body);
+        assert!(result.is_err(), "invalid string usdc must return a parse error");
     }
 
     #[test]
