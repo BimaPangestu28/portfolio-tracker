@@ -1,6 +1,9 @@
 pub mod auth;
 pub mod cashflow;
 pub mod chat;
+pub mod cs_admin;
+pub mod cs_public;
+pub mod cs_whatsapp;
 pub mod connectors;
 pub mod crud;
 pub mod events;
@@ -19,11 +22,25 @@ pub mod whatsapp;
 
 use crate::AppState;
 use axum::{
+    http::{HeaderName, Method},
     middleware,
     routing::{delete, get, post},
     Router,
 };
-use tower_http::cors::CorsLayer;
+use tower_http::cors::{AllowOrigin, CorsLayer};
+
+/// CORS for the public CS endpoints: only the configured origins, GET/POST,
+/// content-type header. Empty/unset allowlist => no origins allowed (fail closed).
+fn cs_cors_layer() -> CorsLayer {
+    let origins: Vec<_> = crate::cs::gate::allowed_origins()
+        .into_iter()
+        .filter_map(|o| o.parse().ok())
+        .collect();
+    CorsLayer::new()
+        .allow_origin(AllowOrigin::list(origins))
+        .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
+        .allow_headers([HeaderName::from_static("content-type")])
+}
 
 pub fn router(state: AppState) -> Router {
     // Open to anyone — no token required.
@@ -35,9 +52,14 @@ pub fn router(state: AppState) -> Router {
 
     // Authenticated by the shared x-gateway-token (checked inside the handlers).
     let gateway = Router::new()
-        .route("/chat/whatsapp/inbound", post(whatsapp::inbound))
-        .route("/whatsapp/state", post(whatsapp::push_state))
-        .route("/whatsapp/commands", get(whatsapp::poll_commands));
+        .route("/chat/whatsapp/inbound",        post(whatsapp::inbound))
+        .route("/whatsapp/state",               post(whatsapp::push_state))
+        .route("/whatsapp/commands",            get(whatsapp::poll_commands))
+        // CS WhatsApp gateway (second connection, CS_GATEWAY_TOKEN)
+        .route("/cs/chat/whatsapp/inbound",     post(cs_whatsapp::inbound))
+        .route("/cs/whatsapp/state",            post(cs_whatsapp::push_state))
+        .route("/cs/whatsapp/commands",         get(cs_whatsapp::poll_commands))
+        .route("/cs/whatsapp/outbound",         get(cs_whatsapp::poll_outbound));
 
     // Require a valid JWT (when auth is configured).
     let protected = Router::new()
@@ -142,13 +164,54 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/ingest/review/:id/confirm", post(ingest::confirm_review))
         .route("/ingest/review/:id/reject", post(ingest::reject_review))
+        .route("/cs/whatsapp/status",             get(cs_whatsapp::status))
+        .route("/cs/whatsapp/connect",            post(cs_whatsapp::connect))
+        .route("/cs/whatsapp/disconnect",         post(cs_whatsapp::disconnect))
+        .route("/cs/admin/conversations/:id/reply", post(cs_admin::reply_conversation))
+        .route("/cs/admin/docs", get(cs_admin::list_docs).post(cs_admin::create_doc))
+        .route(
+            "/cs/admin/docs/:id",
+            axum::routing::patch(cs_admin::update_doc).delete(cs_admin::delete_doc),
+        )
+        .route("/cs/admin/kb/reindex", post(cs_admin::reindex_kb))
+        .route("/cs/admin/products", get(cs_admin::list_products).post(cs_admin::create_product))
+        .route(
+            "/cs/admin/products/:id",
+            axum::routing::patch(cs_admin::update_product).delete(cs_admin::delete_product),
+        )
+        .route("/cs/admin/products/:id/active", post(cs_admin::set_product_active))
+        .route("/cs/admin/orders", get(cs_admin::list_orders).post(cs_admin::upsert_order))
+        .route("/cs/admin/orders/:id", axum::routing::delete(cs_admin::delete_order))
+        .route("/cs/admin/conversations", get(cs_admin::list_conversations))
+        .route(
+            "/cs/admin/conversations/:id/messages",
+            get(cs_admin::conversation_messages),
+        )
+        .route(
+            "/cs/admin/conversations/:id/resolve",
+            post(cs_admin::resolve_conversation),
+        )
+        .route("/cs/admin/escalations", get(cs_admin::list_escalations))
+        .route(
+            "/cs/admin/escalations/:id/handle",
+            post(cs_admin::handle_escalation),
+        )
         .route_layer(middleware::from_fn(auth::require_auth));
 
-    public
+    // Public CS widget endpoints: their OWN strict CORS (origin allowlist), so the
+    // global permissive layer below does NOT relax them.
+    let cs = Router::new()
+        .route("/public/cs/session", post(cs_public::session))
+        .route("/public/cs/message", post(cs_public::message))
+        .route("/public/cs/history", post(cs_public::history))
+        .layer(cs_cors_layer());
+
+    let core = public
         .merge(gateway)
         .merge(protected)
-        .layer(CorsLayer::permissive())
-        .with_state(state)
+        .layer(CorsLayer::permissive());
+
+    core.merge(cs).with_state(state)
 }
 
 #[cfg(test)]
@@ -164,8 +227,10 @@ mod router_tests {
         let db = crate::db::connect("sqlite::memory:").await.unwrap();
         AppState {
             db,
-            wa: Default::default(),
-            tg: Default::default(),
+            wa:          Default::default(),
+            tg:          Default::default(),
+            cs_wa:       Default::default(),
+            cs_outbound: crate::cs::wa_outbound::new_queue(),
         }
     }
 
@@ -289,6 +354,65 @@ mod router_tests {
 
     #[serial]
     #[tokio::test]
+    async fn cs_cors_rejects_unlisted_origin_and_allows_listed_origin() {
+        std::env::set_var("CS_WIDGET_KEY", "test-key");
+        std::env::set_var("CS_ALLOWED_ORIGINS", "https://allowed.example.com");
+
+        let app = router(test_state().await);
+
+        // Negative case: evil.com must NOT receive an Allow-Origin echo.
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("OPTIONS")
+                    .uri("/public/cs/session")
+                    .header("origin", "https://evil.com")
+                    .header("access-control-request-method", "POST")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let acao = res
+            .headers()
+            .get("access-control-allow-origin")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("");
+        assert!(
+            acao != "*" && acao != "https://evil.com",
+            "evil.com must not be echoed in ACAO, got: {acao:?}",
+        );
+
+        // Positive case: allowed.example.com SHOULD be echoed.
+        let res2 = app
+            .oneshot(
+                Request::builder()
+                    .method("OPTIONS")
+                    .uri("/public/cs/session")
+                    .header("origin", "https://allowed.example.com")
+                    .header("access-control-request-method", "POST")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let acao2 = res2
+            .headers()
+            .get("access-control-allow-origin")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("");
+        assert_eq!(
+            acao2, "https://allowed.example.com",
+            "allowed.example.com must be echoed in ACAO",
+        );
+
+        std::env::remove_var("CS_WIDGET_KEY");
+        std::env::remove_var("CS_ALLOWED_ORIGINS");
+    }
+
+    #[serial]
+    #[tokio::test]
     async fn reminder_create_inbox_unresolve_protected() {
         std::env::set_var("AUTH_PASSWORD", "pw");
         std::env::set_var("JWT_SECRET", "router-test-rem-create");
@@ -333,6 +457,30 @@ mod router_tests {
                 Request::builder().method("GET").uri(uri).body(Body::empty()).unwrap()
             ).await.unwrap();
             assert_eq!(res.status(), StatusCode::UNAUTHORIZED, "GET {uri} should be protected");
+        }
+        std::env::remove_var("AUTH_PASSWORD");
+        std::env::remove_var("JWT_SECRET");
+    }
+
+    #[serial]
+    #[tokio::test]
+    async fn cs_admin_routes_are_protected() {
+        std::env::set_var("AUTH_PASSWORD", "pw");
+        std::env::set_var("JWT_SECRET", "router-test-cs-admin");
+        let app = router(test_state().await);
+        let cases = [
+            ("/cs/admin/docs",            "GET"),
+            ("/cs/admin/docs",            "POST"),
+            ("/cs/admin/products",        "GET"),
+            ("/cs/admin/orders",          "GET"),
+            ("/cs/admin/conversations",   "GET"),
+            ("/cs/admin/escalations",     "GET"),
+        ];
+        for (uri, method) in cases {
+            let res = app.clone().oneshot(
+                Request::builder().method(method).uri(uri).body(Body::empty()).unwrap()
+            ).await.unwrap();
+            assert_eq!(res.status(), StatusCode::UNAUTHORIZED, "{method} {uri} should be JWT-protected");
         }
         std::env::remove_var("AUTH_PASSWORD");
         std::env::remove_var("JWT_SECRET");

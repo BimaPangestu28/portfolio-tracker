@@ -20,6 +20,8 @@ services:
       INGEST_MODEL: ${INGEST_MODEL:-gpt-4o}
       INGEST_BASE_URL: ${INGEST_BASE_URL:-https://api.openai.com}
       GATEWAY_TOKEN: ${GATEWAY_TOKEN:?GATEWAY_TOKEN is required}
+      # Optional: only needed if you run the cs-gateway (CS WhatsApp). Unset = CS WhatsApp disabled.
+      CS_GATEWAY_TOKEN: ${CS_GATEWAY_TOKEN:-}
       # Optional: enables the Telegram chatbot channel when set.
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       RUST_LOG: ${RUST_LOG:-info}
@@ -70,8 +72,26 @@ services:
     volumes:
       - gateway_auth:/app/auth_state
 
+  cs-gateway:
+    image: ghcr.io/bimapangestu28/portfolio-gateway:latest
+    restart: unless-stopped
+    # Opt-in: start with `docker compose --profile cs-whatsapp up` after setting CS_GATEWAY_TOKEN.
+    profiles: ["cs-whatsapp"]
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      BACKEND_URL: http://backend:8080
+      PATH_PREFIX: /cs
+      OUTBOUND_ENABLED: "1"
+      AUTH_DIR: /app/auth_state
+      GATEWAY_TOKEN: ${CS_GATEWAY_TOKEN:-}
+    volumes:
+      - cs_gateway_auth:/app/auth_state
+
 volumes:
   backend_data:
   caddy_data:
   caddy_config:
   gateway_auth:
+  cs_gateway_auth:

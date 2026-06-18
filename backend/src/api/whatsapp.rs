@@ -34,7 +34,7 @@ pub fn check_gateway_token(headers: &HeaderMap) -> Result<(), AppError> {
     if token_matches(expected, got) {
         Ok(())
     } else {
-        Err(AppError::BadRequest("bad gateway token".into()))
+        Err(AppError::Unauthorized("bad gateway token".into()))
     }
 }
 
