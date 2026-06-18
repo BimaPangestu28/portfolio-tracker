@@ -1,5 +1,6 @@
 pub mod cashflow;
 pub mod chat;
+pub mod hyperliquid_sync;
 pub mod insights;
 pub mod movers;
 pub mod performance;

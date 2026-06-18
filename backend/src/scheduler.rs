@@ -34,6 +34,9 @@ pub fn spawn(db: Db, interval: Duration) {
                 },
                 Err(e) => tracing::warn!("list connectors failed: {e}"),
             }
+            if let Err(e) = crate::service::hyperliquid_sync::run(&db).await {
+                tracing::warn!("hyperliquid perp sync failed: {e:#}");
+            }
             tokio::time::sleep(interval).await;
         }
     });
