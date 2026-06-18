@@ -155,6 +155,16 @@ export const handlers = [
   // ── Dashboard: movers + benchmark ──────────────────────────────────────────
   http.get("/api/portfolio/movers", () => HttpResponse.json([])),
   http.get("/api/portfolio/benchmark", () => HttpResponse.json([])),
+
+  // ── Phase 5B: Hyperliquid ──────────────────────────────────────────────────
+  http.get("/api/portfolio/hyperliquid", () =>
+    HttpResponse.json({
+      points: [],
+      metrics: { total_return: 0, annualized: null, max_drawdown: 0, volatility: 0 },
+      current_value_usd: "0",
+      insufficient_data: true,
+    }),
+  ),
 ];
 
 export const server = setupServer(...handlers);
