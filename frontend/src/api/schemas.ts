@@ -465,3 +465,54 @@ export const NewsTodaySchema = z.object({
 export type NewsToday = z.infer<typeof NewsTodaySchema>;
 export type NewsArticle = z.infer<typeof NewsArticleSchema>;
 export type NewsQuiz = z.infer<typeof NewsQuizSchema>;
+
+// ── Hyperliquid equity view ────────────────────────────────────────────────────
+
+const HlPositionSchema = z.object({
+  coin: z.string(),
+  direction: z.string(),
+  size: z.string(),
+  entry_px: z.string(),
+  mark_px: z.string(),
+  unrealized_pnl: z.string(),
+  leverage: z.string(),
+  notional: z.string(),
+  updated_at: z.string(),
+});
+
+const HlTradeSchema = z.object({
+  external_id: z.string(),
+  coin: z.string(),
+  direction: z.string(),
+  size: z.string(),
+  entry_px: z.string(),
+  exit_px: z.string(),
+  realized_pnl: z.string(),
+  fee: z.string(),
+  opened_at: z.string(),
+  closed_at: z.string(),
+  leverage: z.number().nullable(),
+  confidence: z.number().nullable(),
+  timeframe: z.string().nullable(),
+  profile: z.string().nullable(),
+});
+
+export const HyperliquidViewSchema = z.object({
+  points: z.array(
+    z.object({ date: z.string(), cum_return: z.number(), nav: z.number() }),
+  ),
+  metrics: z.object({
+    total_return: z.number(),
+    annualized: z.number().nullable(),
+    max_drawdown: z.number(),
+    volatility: z.number(),
+  }),
+  current_value_usd: z.string(),
+  positions: z.array(HlPositionSchema),
+  trades: z.array(HlTradeSchema),
+  realized_pnl_total: z.string(),
+  win_rate: z.number().nullable(),
+  insufficient_data: z.boolean(),
+});
+
+export type HyperliquidView = z.infer<typeof HyperliquidViewSchema>;
