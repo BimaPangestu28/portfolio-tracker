@@ -29,6 +29,9 @@ pub struct BriefingData {
     /// Top news articles for today's digest; empty when news is disabled or
     /// generation failed (section omitted, briefing unaffected).
     pub news: Vec<crate::assistant::proactive::news::digest::DigestArticle>,
+    /// Hyperliquid equity snapshot as of yesterday's baseline. `None` when
+    /// the instrument is not configured or no price data is available.
+    pub hyperliquid: Option<crate::service::hyperliquid::HlEquitySummary>,
 }
 
 /// One briefing line for a task that is overdue or due today; None otherwise
@@ -193,6 +196,11 @@ pub async fn gather(db: &Db) -> anyhow::Result<BriefingData> {
         Vec::new()
     });
 
+    let yesterday = (now_wib - chrono::Duration::days(1)).format("%Y-%m-%d").to_string();
+    let hyperliquid = crate::service::hyperliquid::equity_and_change(db, &yesterday)
+        .await
+        .unwrap_or(None);
+
     Ok(BriefingData {
         date_wib: today,
         weekday: crate::assistant::time::weekday_id(now_wib.weekday()).to_string(),
@@ -208,6 +216,7 @@ pub async fn gather(db: &Db) -> anyhow::Result<BriefingData> {
         clickup_due,
         gmail_important,
         news,
+        hyperliquid,
     })
 }
 
@@ -289,6 +298,10 @@ pub fn render_data_block(d: &BriefingData) -> String {
                 group_id(&m.delta_idr.abs().round_dp(0)),
             ));
         }
+    }
+    if let Some(hl) = &d.hyperliquid {
+        out.push_str(&crate::service::hyperliquid::format_hyperliquid_line(hl));
+        out.push('\n');
     }
     out.push_str(&format!("Review pending: {}\n", d.pending_reviews));
 
@@ -375,6 +388,7 @@ mod tests {
             clickup_due: None,
             gmail_important: None,
             news: vec![],
+            hyperliquid: None,
         }
     }
 
@@ -542,5 +556,22 @@ mod tests {
         let block = render_data_block(&d);
         assert!(block.contains("Bacaan pagi"), "{block}");
         assert!(block.contains("Rust 2.0 — rilis besar https://ex.com/r"), "{block}");
+    }
+
+    #[test]
+    fn render_includes_hyperliquid_line_when_present() {
+        use crate::service::hyperliquid::{format_hyperliquid_line, HlEquitySummary};
+        let line = format_hyperliquid_line(&HlEquitySummary {
+            equity_usd: rust_decimal_macros::dec!(2500),
+            change_pct: Some(-3.2),
+        });
+        assert_eq!(line, "Hyperliquid: $2500.00 (-3.2%)");
+        let mut d = data();
+        d.hyperliquid = Some(HlEquitySummary {
+            equity_usd: rust_decimal_macros::dec!(2500),
+            change_pct: Some(-3.2),
+        });
+        let block = render_data_block(&d);
+        assert!(block.contains("Hyperliquid: $2500.00 (-3.2%)"), "{block}");
     }
 }

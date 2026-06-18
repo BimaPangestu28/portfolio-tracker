@@ -21,6 +21,9 @@ pub struct MonthlyRecapData {
     pub freelance_invoiced_idr: Decimal,
     /// Net-worth change over the prior month (end-of-month minus start-of-month snapshot).
     pub net_worth_change_idr: Option<Decimal>,
+    /// Hyperliquid equity snapshot vs. the start of the prior month. `None`
+    /// when the instrument is not configured or no price data is available.
+    pub hyperliquid: Option<crate::service::hyperliquid::HlEquitySummary>,
 }
 
 /// Compute the prior-month label (YYYY-MM) given a UTC instant.
@@ -124,6 +127,11 @@ pub async fn gather(db: &Db, now_utc: DateTime<Utc>) -> anyhow::Result<MonthlyRe
         }
     };
 
+    let month_start = format!("{month_label}-01");
+    let hyperliquid = crate::service::hyperliquid::equity_and_change(db, &month_start)
+        .await
+        .unwrap_or(None);
+
     Ok(MonthlyRecapData {
         month_label,
         todos_done,
@@ -132,6 +140,7 @@ pub async fn gather(db: &Db, now_utc: DateTime<Utc>) -> anyhow::Result<MonthlyRe
         net_idr,
         freelance_invoiced_idr,
         net_worth_change_idr,
+        hyperliquid,
     })
 }
 
@@ -168,6 +177,11 @@ pub fn render_data_block(d: &MonthlyRecapData) -> String {
             "Perubahan net worth: {sign}Rp {}\n",
             group_id(&change.abs().round_dp(0))
         ));
+    }
+
+    if let Some(hl) = &d.hyperliquid {
+        out.push_str(&crate::service::hyperliquid::format_hyperliquid_line(hl));
+        out.push('\n');
     }
 
     // Freelance invoiced (skip when zero).
@@ -256,6 +270,7 @@ mod tests {
             net_idr: dec!(2000000),
             freelance_invoiced_idr: dec!(12000000),
             net_worth_change_idr: Some(dec!(1500000)),
+            hyperliquid: None,
         };
         let block = render_data_block(&d);
         assert!(block.contains("Rekap bulanan 2026-06"), "{block}");
@@ -277,6 +292,7 @@ mod tests {
             net_idr: dec!(0),
             freelance_invoiced_idr: dec!(0),
             net_worth_change_idr: None,
+            hyperliquid: None,
         };
         let block = render_data_block(&d);
         assert!(!block.contains("Freelance"), "{block}");
@@ -293,6 +309,7 @@ mod tests {
             net_idr: dec!(-2000000),
             freelance_invoiced_idr: dec!(0),
             net_worth_change_idr: Some(dec!(-500000)),
+            hyperliquid: None,
         };
         let block = render_data_block(&d);
         assert!(block.contains("-Rp 2.000.000"), "{block}");
