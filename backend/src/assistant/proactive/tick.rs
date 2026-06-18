@@ -20,6 +20,7 @@ pub struct ProactiveConfig {
     pub news_digest_hour: Option<u32>,
     pub mover_alert_pct: f64,
     pub milestone_step_idr: i64,
+    pub hl_drawdown_pct: f64,
 }
 
 /// "off" disables; unparseable or out-of-range values fall back to default.
@@ -53,6 +54,10 @@ impl ProactiveConfig {
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(50_000_000),
+            hl_drawdown_pct: std::env::var("HL_DRAWDOWN_PCT")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(15.0),
         }
     }
 }
@@ -171,8 +176,14 @@ pub async fn run_once(
         }
     }
 
-    for alert in
-        super::alerts::evaluate(db, config.mover_alert_pct, config.milestone_step_idr, &today).await
+    for alert in super::alerts::evaluate(
+        db,
+        config.mover_alert_pct,
+        config.milestone_step_idr,
+        config.hl_drawdown_pct,
+        &today,
+    )
+    .await
     {
         if crate::repo::proactive_log::try_claim(db, "alert", &alert.dedup_key).await? {
             if let Err(e) = client.send_message(link.chat_id, &alert.message).await {
@@ -366,6 +377,7 @@ mod tests {
             news_digest_hour: None,
             mover_alert_pct: 5.0,
             milestone_step_idr: 50_000_000,
+            hl_drawdown_pct: 15.0,
         };
         let client = TelegramClient::new("dummy-token".into());
         run_once(&db, &client, &config).await.unwrap();

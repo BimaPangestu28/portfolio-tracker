@@ -5,7 +5,10 @@ use super::{llm, seen, shortlist};
 use crate::db::Db;
 use crate::repo::news as repo;
 
-const TOP_N: usize = 3;
+const WEB_COUNT_DEFAULT: usize = 6;
+fn web_count() -> usize {
+    std::env::var("NEWS_WEB_COUNT").ok().and_then(|v| v.parse().ok()).unwrap_or(WEB_COUNT_DEFAULT)
+}
 const SEEN_RETENTION_DAYS: i64 = 14;
 
 /// A digest article shaped for the briefing/API (decoded key_points).
@@ -84,18 +87,36 @@ async fn generate(db: &Db, date: &str) -> anyhow::Result<()> {
     }
     let client = super::http_client();
 
-    let chosen: Vec<_> = candidates.iter().take(TOP_N).cloned().collect();
+    let chosen: Vec<_> = candidates.iter().take(web_count()).cloned().collect();
     let mut new_articles = Vec::new();
     let mut summaries_block = String::new();
+    let mut quiz_meta: Vec<(String, Vec<String>)> = Vec::new();
 
     for (i, a) in chosen.iter().enumerate() {
-        let text = super::extract::fetch_main_text(&client, &a.url).await.unwrap_or_default();
-        let snippet = if text.is_empty() { a.title.clone() } else { String::new() };
-        let s = llm::summarize(&a.title, &a.source, &text, &snippet).await;
+        let ex = super::extract::fetch_article(&client, &a.url).await;
+        let text = ex.text.clone().or_else(|| ex.og_description.clone()).unwrap_or_default();
+        let snippet = ex.og_description.clone().unwrap_or_else(|| a.title.clone());
+        let read_minutes = if text.is_empty() {
+            None
+        } else {
+            Some((((text.split_whitespace().count() as i64) + 199) / 200).max(1))
+        };
+        let mut material = text.clone();
+        if a.source == "HN" {
+            if let Some(oid) = &a.hn_object_id {
+                let comments = super::hackernews::fetch_top_comments(&client, oid).await;
+                if !comments.is_empty() {
+                    material.push_str("\n\nDiskusi Hacker News (komentar teratas):\n");
+                    material.push_str(&comments.join("\n---\n"));
+                }
+            }
+        }
+        let s = llm::summarize(&a.title, &a.source, &material, &snippet).await;
         summaries_block.push_str(&format!(
             "Artikel {i} — {}\nRingkasan: {}\nPoin: {}\n\n",
             a.title, s.summary, s.key_points.join("; ")
         ));
+        quiz_meta.push((a.title.clone(), s.key_points.clone()));
         new_articles.push(repo::NewArticle {
             position: i as i64,
             title: a.title.clone(),
@@ -104,10 +125,12 @@ async fn generate(db: &Db, date: &str) -> anyhow::Result<()> {
             score: a.score,
             summary: s.summary,
             key_points_json: serde_json::to_string(&s.key_points).unwrap_or_else(|_| "[]".into()),
+            image_url: ex.image_url.clone(),
+            read_minutes,
         });
     }
 
-    let quiz_items = llm::quiz(&summaries_block).await.unwrap_or_default();
+    let quiz_items = llm::quiz(&summaries_block).await.unwrap_or_else(|| llm::fallback_quiz(&quiz_meta));
     let new_quiz: Vec<_> = quiz_items
         .into_iter()
         .enumerate()
@@ -154,6 +177,7 @@ mod tests {
             &[repo::NewArticle {
                 position: 0, title: "t".into(), url: "u".into(), source: "HN".into(),
                 score: 1, summary: "s".into(), key_points_json: "[\"a\",\"b\"]".into(),
+                image_url: None, read_minutes: None,
             }], &[]).await.unwrap();
         let arts = load(&db, "2026-06-16").await.unwrap();
         assert_eq!(arts[0].key_points, vec!["a", "b"]);

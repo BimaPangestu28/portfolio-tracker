@@ -16,6 +16,7 @@ mod pricing;
 mod repo;
 mod scheduler;
 mod service;
+mod setup;
 mod telegram;
 mod upwork;
 mod wa_state;
@@ -58,6 +59,11 @@ async fn main() -> anyhow::Result<()> {
     google::engine::spawn(db.clone());
     upwork::jobs::spawn(db.clone());
     upwork::contracts::spawn(db.clone());
+    if let Ok(wallet) = std::env::var("HYPERLIQUID_WALLET") {
+        if let Err(e) = setup::ensure_hyperliquid_account(&db, &wallet).await {
+            tracing::warn!("hyperliquid setup failed: {e:#}");
+        }
+    }
     scheduler::spawn(db, std::time::Duration::from_secs(3600));
     let app = api::router(state);
     let bind_addr = std::env::var("BIND_ADDR").unwrap_or_else(|_| "127.0.0.1:8080".into());

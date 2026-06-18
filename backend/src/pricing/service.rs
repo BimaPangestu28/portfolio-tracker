@@ -1,9 +1,27 @@
 use chrono::{DateTime, Duration, Utc};
 
 /// A price is stale if older than `max_age_hours`.
+///
+/// `as_of` is either a full RFC3339 timestamp or a date-only string
+/// ("2026-06-18"). Date-only quotes are daily buckets — the live connectors
+/// stamp every intraday refresh with today's UTC date, and funds publish a
+/// date-only NAV — so a date-only value represents the quote *for that whole
+/// day*. We anchor its freshness to the END of the day (next midnight UTC),
+/// not the start: anchoring to the start backdated an afternoon refresh by up
+/// to 24h, so the quote read as a full day old the instant UTC crossed midnight
+/// (~07:00 WIB), spuriously flagging every auto-sourced position as stale each
+/// morning before that day's first refresh re-stamped it.
 pub fn is_stale(as_of: &str, now: DateTime<Utc>, max_age_hours: i64) -> bool {
-    match DateTime::parse_from_rfc3339(as_of).or_else(|_| DateTime::parse_from_rfc3339(&format!("{as_of}T00:00:00+00:00"))) {
-        Ok(t) => now.signed_duration_since(t.with_timezone(&Utc)) > Duration::hours(max_age_hours),
+    // Full timestamp (carries a time component): compare against it directly.
+    if let Ok(timestamp) = DateTime::parse_from_rfc3339(as_of) {
+        return now.signed_duration_since(timestamp.with_timezone(&Utc)) > Duration::hours(max_age_hours);
+    }
+    // Date-only: anchor to the end of that UTC day (start of day + 24h).
+    match DateTime::parse_from_rfc3339(&format!("{as_of}T00:00:00+00:00")) {
+        Ok(start_of_day) => {
+            let end_of_day = start_of_day.with_timezone(&Utc) + Duration::hours(24);
+            now.signed_duration_since(end_of_day) > Duration::hours(max_age_hours)
+        }
         Err(_) => true,
     }
 }
@@ -92,6 +110,21 @@ pub async fn refresh_all(db: &Db) -> anyhow::Result<()> {
                 (_, None) => tracing::warn!("gold price refresh for {} skipped: no USD/IDR rate", ins.symbol),
             }
         }
+        // Hyperliquid account equity: price of the synthetic 1-unit instrument
+        // equals the account's USD equity, pulled read-only by wallet address.
+        if let Some(wallet) = ins.price_source.strip_prefix("hyperliquid:") {
+            let network =
+                std::env::var("HYPERLIQUID_NETWORK").unwrap_or_else(|_| "mainnet".into());
+            match crate::pricing::hyperliquid::Hyperliquid::new(&network)
+                .account_equity(wallet)
+                .await
+            {
+                Ok(q) => {
+                    let _ = prices::upsert_latest(db, ins.id, q.price, &q.currency, "hyperliquid", &today).await;
+                }
+                Err(e) => tracing::warn!("hyperliquid equity refresh failed for {}: {e}", ins.symbol),
+            }
+        }
     }
     Ok(())
 }
@@ -126,6 +159,22 @@ mod tests {
     }
 
     #[test]
+    fn daily_quote_stamped_today_is_fresh_through_the_next_morning() {
+        // Regression: the live connectors stamp every intraday refresh with the
+        // current UTC *date* (date-only). A quote dated 2026-06-18 (fetched
+        // mid-afternoon UTC) must NOT flag stale at ~07:00 WIB the next day —
+        // 00:30 UTC on 2026-06-19 — before that day's first hourly refresh
+        // re-stamps it. Anchoring a date-only as_of to the start of the day made
+        // it read as a full 24h old at exactly UTC midnight, false-flagging every
+        // auto-sourced position each morning even though the connector was fine.
+        let next_morning_wib = Utc.with_ymd_and_hms(2026, 6, 19, 0, 30, 0).unwrap();
+        assert!(!is_stale("2026-06-18", next_morning_wib, stale_window_hours("yahoo")));
+        // A genuinely dead connector — no successful refresh for 2+ days — still flags.
+        let two_days_later = Utc.with_ymd_and_hms(2026, 6, 20, 1, 0, 0).unwrap();
+        assert!(is_stale("2026-06-18", two_days_later, stale_window_hours("yahoo")));
+    }
+
+    #[test]
     fn bibit_quotes_get_a_six_day_stale_window() {
         assert_eq!(stale_window_hours("bibit"), 144);
         assert_eq!(stale_window_hours("yahoo"), 24);
@@ -141,10 +190,11 @@ mod tests {
         assert!(!is_stale("2026-06-05", tue, stale_window_hours("bibit")));
         // Same quote under the default window — stale.
         assert!(is_stale("2026-06-05", tue, stale_window_hours("yahoo")));
-        // Boundary: exactly 144h is fresh, just past it is stale.
-        let exactly = Utc.with_ymd_and_hms(2026, 6, 11, 0, 0, 0).unwrap();
+        // Boundary: 144h measured from the END of the NAV's day (2026-06-06
+        // 00:00 UTC), so exactly 2026-06-12 00:00 is fresh, just past it is stale.
+        let exactly = Utc.with_ymd_and_hms(2026, 6, 12, 0, 0, 0).unwrap();
         assert!(!is_stale("2026-06-05", exactly, stale_window_hours("bibit")));
-        let past = Utc.with_ymd_and_hms(2026, 6, 11, 0, 0, 1).unwrap();
+        let past = Utc.with_ymd_and_hms(2026, 6, 12, 0, 0, 1).unwrap();
         assert!(is_stale("2026-06-05", past, stale_window_hours("bibit")));
     }
 }

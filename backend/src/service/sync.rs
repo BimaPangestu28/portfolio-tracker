@@ -13,7 +13,7 @@ pub fn external_to_new_txn(t: &ExternalTxn, account_id: i64, instrument_id: i64,
     Ok(NewTransaction {
         account_id, instrument_id, txn_type: t.kind.clone(),
         executed_at: chrono::DateTime::parse_from_rfc3339(&t.occurred_at).map_err(|e| anyhow::anyhow!("bad ts: {e}"))?.with_timezone(&chrono::Utc),
-        quantity: t.quantity.clone(), price_native: "0".into(), fee_native: t.fee.clone(),
+        quantity: t.quantity.clone(), price_native: t.price_native.clone().unwrap_or_else(|| "0".to_string()), fee_native: t.fee.clone(),
         currency: t.currency.clone(), fx_to_idr: "1".into(), fx_to_usd: "1".into(), note: Some("auto-sync".into()),
         source: Some(source.to_string()), external_id: Some(t.external_id.clone()),
     })
@@ -64,7 +64,7 @@ pub async fn run_sync(db: &Db, conn_row: &connectors::ConnectorRow, connector: &
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn ext(id: &str) -> ExternalTxn { ExternalTxn { external_id:id.into(), occurred_at:"2026-01-01T00:00:00Z".into(), kind:"deposit".into(), symbol:"ETH".into(), quantity:"1".into(), fee:None, currency:"ETH".into() } }
+    fn ext(id: &str) -> ExternalTxn { ExternalTxn { external_id:id.into(), occurred_at:"2026-01-01T00:00:00Z".into(), kind:"deposit".into(), symbol:"ETH".into(), quantity:"1".into(), fee:None, currency:"ETH".into(), price_native:None } }
     #[test]
     fn dedup_removes_existing() {
         let mut existing = HashSet::new(); existing.insert("a".to_string());
@@ -77,7 +77,17 @@ mod tests {
         assert_eq!(nt.txn_type, "deposit");
         assert_eq!(nt.source.as_deref(), Some("evm"));
         assert_eq!(nt.external_id.as_deref(), Some("z"));
-        assert_eq!(nt.price_native, "0");
+        assert_eq!(nt.price_native, "0"); // None → "0" default
+    }
+    #[test]
+    fn maps_external_with_price_native_to_ledger_txn() {
+        let t = ExternalTxn {
+            external_id: "hl1".into(), occurred_at: "2026-01-01T00:00:00Z".into(),
+            kind: "deposit".into(), symbol: "HL-USDC".into(), quantity: "500".into(),
+            fee: None, currency: "USD".into(), price_native: Some("1".into()),
+        };
+        let nt = external_to_new_txn(&t, 1, 2, "hyperliquid:1").unwrap();
+        assert_eq!(nt.price_native, "1");
     }
 }
 
@@ -94,8 +104,8 @@ mod db_tests {
         instruments::create(&db, &instruments::NewInstrument{ symbol:"ETH".into(), name:"e".into(), instrument_type:"crypto".into(), native_currency:"USD".into(), category_id:None, price_source:"manual".into(), decimals:Some(18), note:None }).await.unwrap();
         let conn = connectors::create(&db, &connectors::NewConnector{ account_id: acc.id, kind:"mock".into(), label:"m".into(), config_json:"{}".into() }).await.unwrap();
         let mc = MockConnector { txns: vec![
-            ExternalTxn{ external_id:"k1".into(), occurred_at:"2026-01-01T00:00:00Z".into(), kind:"deposit".into(), symbol:"ETH".into(), quantity:"1".into(), fee:None, currency:"ETH".into() },
-            ExternalTxn{ external_id:"u1".into(), occurred_at:"2026-01-01T00:00:00Z".into(), kind:"deposit".into(), symbol:"DOGE".into(), quantity:"5".into(), fee:None, currency:"DOGE".into() },
+            ExternalTxn{ external_id:"k1".into(), occurred_at:"2026-01-01T00:00:00Z".into(), kind:"deposit".into(), symbol:"ETH".into(), quantity:"1".into(), fee:None, currency:"ETH".into(), price_native:None },
+            ExternalTxn{ external_id:"u1".into(), occurred_at:"2026-01-01T00:00:00Z".into(), kind:"deposit".into(), symbol:"DOGE".into(), quantity:"5".into(), fee:None, currency:"DOGE".into(), price_native:None },
         ]};
         let r = run_sync(&db, &conn, &mc).await.unwrap();
         assert_eq!(r.inserted, 1); // ETH known

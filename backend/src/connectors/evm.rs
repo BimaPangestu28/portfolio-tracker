@@ -36,6 +36,7 @@ pub fn parse_txlist(json: &serde_json::Value, address: &str, native_symbol: &str
             occurred_at: chrono::DateTime::from_timestamp(ts, 0).map(|d| d.to_rfc3339()).unwrap_or_default(),
             kind: kind.into(), symbol: native_symbol.to_string(),
             quantity: from_base_units(value, 18)?, fee: None, currency: native_symbol.to_string(),
+            price_native: None,
         });
     }
     Ok(out)
@@ -59,6 +60,7 @@ pub fn parse_tokentx(json: &serde_json::Value, address: &str) -> Result<Vec<Exte
             external_id: format!("{hash}:{symbol}"),
             occurred_at: chrono::DateTime::from_timestamp(ts, 0).map(|d| d.to_rfc3339()).unwrap_or_default(),
             kind: kind.into(), symbol, quantity: from_base_units(value, decimals)?, fee: None, currency: "".into(),
+            price_native: None,
         });
     }
     Ok(out)

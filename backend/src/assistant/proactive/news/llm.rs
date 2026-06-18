@@ -4,10 +4,14 @@
 use crate::llm::claude::{ClaudeClient, Part};
 use serde::Deserialize;
 
-pub const SUMMARY_SYSTEM: &str = "You summarize one IT/dev news article in Indonesian for a \
-senior engineer. Output ONLY minified JSON: {\"summary\": string, \"key_points\": string[]}. \
-summary = 2-3 calm sentences. key_points = 2-4 short bullets. Use ONLY the provided text; never \
-invent facts. No markdown, no code fences.";
+pub const SUMMARY_SYSTEM: &str = "You summarize one IT/dev news item in Indonesian for a senior \
+engineer who wants the substance, not fluff. Output ONLY minified JSON: {\"summary\": string, \
+\"key_points\": string[]}. Write summary as ONE substantial paragraph of about 5-7 sentences that \
+explains concretely WHAT the thing is, WHAT it actually does, WHY it matters, and the key technical \
+or practical detail — extract specifics. Do NOT merely restate or paraphrase the title. If the \
+provided text includes a 'Diskusi Hacker News' section, use those comments to explain what the \
+project really does and the community's reaction. key_points = 3-5 concrete, specific bullets (not \
+vague restatements). Use ONLY the provided text; never invent facts. No markdown, no code fences.";
 
 pub const QUIZ_SYSTEM: &str = "You write a short retention quiz in Indonesian from the day's \
 article summaries. Output ONLY minified JSON: an array of \
@@ -51,6 +55,30 @@ pub fn parse_quiz(raw: &str) -> Option<Vec<QuizItem>> {
         .filter(|q| q.options.len() >= 2 && q.answer_index >= 0 && (q.answer_index as usize) < q.options.len())
         .collect();
     if valid.is_empty() { None } else { Some(valid) }
+}
+
+/// A deterministic retention quiz used when the LLM path yields nothing: one
+/// question per article, "which article covers this key point?", options = the
+/// article titles. Needs >= 2 articles to have distractors; else empty.
+pub fn fallback_quiz(items: &[(String, Vec<String>)]) -> Vec<QuizItem> {
+    let titles: Vec<String> = items.iter().map(|(t, _)| t.clone()).collect();
+    if titles.len() < 2 {
+        return vec![];
+    }
+    items
+        .iter()
+        .enumerate()
+        .filter_map(|(i, (_title, key_points))| {
+            let kp = key_points.first()?;
+            Some(QuizItem {
+                question: format!("Artikel mana yang membahas: \"{kp}\"?"),
+                options: titles.clone(),
+                answer_index: i as i64,
+                explanation: String::new(),
+                article_position: i as i64,
+            })
+        })
+        .collect()
 }
 
 /// Summarize one article; falls back to the snippet/title on any failure.
@@ -113,5 +141,25 @@ mod tests {
         // A summary fenced without a language tag still parses.
         let s = parse_summary("```\n{\"summary\":\"r\",\"key_points\":[]}\n```").unwrap();
         assert_eq!(s.summary, "r");
+    }
+
+    #[test]
+    fn fallback_quiz_builds_one_question_per_article_with_key_point() {
+        let items = vec![
+            ("Rust 2.0".to_string(), vec!["lebih cepat".to_string()]),
+            ("K8s news".to_string(), vec!["operator baru".to_string()]),
+            ("No points".to_string(), vec![]),
+        ];
+        let q = fallback_quiz(&items);
+        assert_eq!(q.len(), 2); // the keypoint-less one is skipped
+        assert_eq!(q[0].answer_index, 0);
+        assert_eq!(q[0].options.len(), 3);
+        assert!(q[0].question.contains("lebih cepat"));
+        assert_eq!(q[1].answer_index, 1);
+    }
+
+    #[test]
+    fn fallback_quiz_needs_two_articles() {
+        assert!(fallback_quiz(&[("solo".into(), vec!["x".into()])]).is_empty());
     }
 }

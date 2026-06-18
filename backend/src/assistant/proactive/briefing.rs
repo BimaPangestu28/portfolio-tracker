@@ -26,6 +26,9 @@ pub struct BriefingData {
     pub clickup_due: Option<Vec<(String, Vec<String>)>>,
     /// Important unread emails. `None` when Gmail isn't reachable (section omitted).
     pub gmail_important: Option<Vec<crate::google::gmail::EmailSummary>>,
+    /// Hyperliquid equity summary. `None` when the instrument is absent or the
+    /// price history is empty (section omitted).
+    pub hyperliquid: Option<crate::service::hyperliquid::HlEquitySummary>,
     /// Top news articles for today's digest; empty when news is disabled or
     /// generation failed (section omitted, briefing unaffected).
     pub news: Vec<crate::assistant::proactive::news::digest::DigestArticle>,
@@ -127,12 +130,12 @@ pub async fn gather(db: &Db) -> anyhow::Result<BriefingData> {
         .map(|items| items.len())
         .unwrap_or(0);
 
+    // ~24h baseline: see snapshot_before's doc for why yesterday.
+    let yesterday = (now_wib - chrono::Duration::days(1)).format("%Y-%m-%d").to_string();
+
     let (net_worth_idr, delta_vs_yesterday_idr) =
         match crate::service::portfolio::build_summary(db).await {
             Ok(summary) => {
-                // ~24h baseline: see snapshot_before's doc for why yesterday.
-                let yesterday =
-                    (now_wib - chrono::Duration::days(1)).format("%Y-%m-%d").to_string();
                 let delta = match crate::repo::snapshots::history(db).await {
                     Ok(rows) => super::snapshot_before(&rows, &yesterday)
                         .map(|prev| summary.net_worth_idr - prev),
@@ -145,6 +148,10 @@ pub async fn gather(db: &Db) -> anyhow::Result<BriefingData> {
                 (Decimal::ZERO, None)
             }
         };
+
+    let hyperliquid = crate::service::hyperliquid::equity_and_change(db, &yesterday)
+        .await
+        .unwrap_or(None);
 
     let movers = crate::service::movers::daily_movers(db, 3).await.unwrap_or_else(|e| {
         tracing::warn!("briefing: movers unavailable: {e:#}");
@@ -208,6 +215,7 @@ pub async fn gather(db: &Db) -> anyhow::Result<BriefingData> {
         clickup_due,
         gmail_important,
         news,
+        hyperliquid,
     })
 }
 
@@ -278,6 +286,10 @@ pub fn render_data_block(d: &BriefingData) -> String {
             group_id(&delta.abs().round_dp(0))
         ));
     }
+    if let Some(hl) = &d.hyperliquid {
+        out.push_str(&crate::service::hyperliquid::format_hyperliquid_line(hl));
+        out.push('\n');
+    }
     if !d.movers.is_empty() {
         out.push_str("Movers:\n");
         for m in &d.movers {
@@ -319,7 +331,7 @@ pub fn render_data_block(d: &BriefingData) -> String {
 
     if !d.news.is_empty() {
         out.push_str("Bacaan pagi (sertakan apa adanya, jangan ubah link):\n");
-        for a in &d.news {
+        for a in d.news.iter().take(3) {
             out.push_str(&format!("- {} — {} {}\n", a.title, a.summary, a.url));
         }
     }
@@ -375,7 +387,18 @@ mod tests {
             clickup_due: None,
             gmail_important: None,
             news: vec![],
+            hyperliquid: None,
         }
+    }
+
+    #[test]
+    fn render_includes_hyperliquid_line_when_present() {
+        use crate::service::hyperliquid::{format_hyperliquid_line, HlEquitySummary};
+        let line = format_hyperliquid_line(&HlEquitySummary {
+            equity_usd: rust_decimal_macros::dec!(2500),
+            change_pct: Some(-3.2),
+        });
+        assert_eq!(line, "Hyperliquid: $2500.00 (-3.2%)");
     }
 
     #[test]

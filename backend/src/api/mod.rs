@@ -127,6 +127,7 @@ pub fn router(state: AppState) -> Router {
         .route("/portfolio/performance", get(portfolio::performance))
         .route("/portfolio/movers", get(portfolio::movers))
         .route("/portfolio/benchmark", get(portfolio::benchmark))
+        .route("/portfolio/hyperliquid", get(portfolio::hyperliquid))
         .route("/invoices", get(invoices::list))
         .route("/invoices/:id", get(invoices::get))
         .route("/invoices/:id/pdf", get(invoices::pdf))

@@ -19,6 +19,7 @@ import {
   NewsTodaySchema,
   KbDocSchema, CsProductSchema, CsOrderSchema,
   CsConversationSchema, CsMessageSchema, CsEscalationSchema,
+  HyperliquidViewSchema,
   type Account, type Category, type Instrument, type Transaction, type ReviewItem,
   type CashflowCategory, type Cashflow, type Connector, type Goal,
 } from "./schemas";
@@ -438,3 +439,11 @@ export const useDisconnectCsWhatsapp = () => {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["cs-whatsapp-status"] }); },
   });
 };
+
+// ── Hyperliquid equity view hook ───────────────────────────────────────────
+
+export const useHyperliquid = () =>
+  useQuery({
+    queryKey: ["hyperliquid"],
+    queryFn: () => api.get("/portfolio/hyperliquid", HyperliquidViewSchema),
+  });

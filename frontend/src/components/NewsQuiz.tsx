@@ -1,13 +1,70 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { NewsQuiz as Q } from "../api/schemas";
 
-export default function NewsQuiz({ questions }: { questions: Q[] }) {
+export default function NewsQuiz({ questions, date }: { questions: Q[]; date: string }) {
   const [answers, setAnswers] = useState<Record<number, number>>({});
   const [submitted, setSubmitted] = useState(false);
+  const [savedScore, setSavedScore] = useState<{ score: number; total: number } | null>(null);
+
+  const storageKey = `news-quiz-${date}`;
+
+  useEffect(() => {
+    if (!date) return;
+    const raw = localStorage.getItem(storageKey);
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw) as { score: number; total: number };
+        setSavedScore(parsed);
+      } catch {
+        // ignore malformed data
+      }
+    }
+  }, [storageKey, date]);
 
   if (questions.length === 0) return null;
 
+  if (savedScore && !submitted) {
+    return (
+      <section className="card card-pad">
+        <h2 className="card-title">Kuis hari ini</h2>
+        <div style={{ marginTop: 16, display: "flex", alignItems: "center", gap: 12 }}>
+          <p style={{ fontWeight: 600 }}>
+            Skor: {savedScore.score} / {savedScore.total}
+          </p>
+          <button
+            type="button"
+            className="btn btn-outline btn-sm"
+            onClick={() => {
+              localStorage.removeItem(storageKey);
+              setSavedScore(null);
+              setAnswers({});
+              setSubmitted(false);
+            }}
+          >
+            Ulangi
+          </button>
+        </div>
+      </section>
+    );
+  }
+
   const score = questions.filter((q) => answers[q.position] === q.answer_index).length;
+  const answeredCount = Object.keys(answers).length;
+
+  const handleSubmit = () => {
+    const finalScore = questions.filter((q) => answers[q.position] === q.answer_index).length;
+    const result = { score: finalScore, total: questions.length };
+    localStorage.setItem(storageKey, JSON.stringify(result));
+    setSavedScore(result);
+    setSubmitted(true);
+  };
+
+  const handleUlangi = () => {
+    localStorage.removeItem(storageKey);
+    setSavedScore(null);
+    setSubmitted(false);
+    setAnswers({});
+  };
 
   return (
     <section className="card card-pad">
@@ -50,14 +107,18 @@ export default function NewsQuiz({ questions }: { questions: Q[] }) {
         );
       })}
       {!submitted ? (
-        <button
-          type="button"
-          className="btn btn-primary btn-sm"
-          style={{ marginTop: 16 }}
-          onClick={() => setSubmitted(true)}
-        >
-          Selesai
-        </button>
+        <div style={{ marginTop: 16, display: "flex", alignItems: "center", gap: 12 }}>
+          <button
+            type="button"
+            className="btn btn-primary btn-sm"
+            onClick={handleSubmit}
+          >
+            Selesai
+          </button>
+          <span style={{ fontSize: 13, color: "hsl(var(--muted-foreground))" }}>
+            Terjawab {answeredCount}/{questions.length}
+          </span>
+        </div>
       ) : (
         <div style={{ marginTop: 16, display: "flex", alignItems: "center", gap: 12 }}>
           <p style={{ fontWeight: 600 }}>
@@ -66,10 +127,7 @@ export default function NewsQuiz({ questions }: { questions: Q[] }) {
           <button
             type="button"
             className="btn btn-outline btn-sm"
-            onClick={() => {
-              setSubmitted(false);
-              setAnswers({});
-            }}
+            onClick={handleUlangi}
           >
             Ulangi
           </button>

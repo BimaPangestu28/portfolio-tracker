@@ -18,6 +18,7 @@ pub struct RecapData {
     pub todos_next_week: Vec<crate::repo::todos::TodoRow>,
     pub reminders_next_week: Vec<crate::repo::reminders::ReminderRow>,
     pub events_next_week: Vec<crate::repo::events::EventRow>,
+    pub hyperliquid: Option<crate::service::hyperliquid::HlEquitySummary>,
 }
 
 /// Sum IDR outflows whose occurred_on is at/after `since_date` (YYYY-MM-DD).
@@ -111,6 +112,10 @@ pub async fn gather(db: &Db) -> anyhow::Result<RecapData> {
     let events_next_week =
         crate::repo::events::list_between(db, &now_z, &next_week_end).await?;
 
+    let hyperliquid = crate::service::hyperliquid::equity_and_change(db, &week_ago_date)
+        .await
+        .unwrap_or(None);
+
     Ok(RecapData {
         week_label: format!("{}-W{:02}", week.year(), week.week()),
         todos_completed,
@@ -124,6 +129,7 @@ pub async fn gather(db: &Db) -> anyhow::Result<RecapData> {
         todos_next_week,
         reminders_next_week,
         events_next_week,
+        hyperliquid,
     })
 }
 
@@ -145,6 +151,10 @@ pub fn render_data_block(d: &RecapData) -> String {
             "Perubahan seminggu: {sign}Rp {}\n",
             group_id(&delta.abs().round_dp(0))
         ));
+    }
+    if let Some(hl) = &d.hyperliquid {
+        out.push_str(&crate::service::hyperliquid::format_hyperliquid_line(hl));
+        out.push('\n');
     }
     out.push_str(&format!(
         "Pengeluaran minggu ini: Rp {}\n",
@@ -274,6 +284,7 @@ mod tests {
             todos_next_week: vec![],
             reminders_next_week: vec![],
             events_next_week: vec![],
+            hyperliquid: None,
         };
         let block = render_data_block(&d);
         assert!(block.contains("Todo selesai: 4 (dibuat: 6)"), "{block}");
@@ -308,6 +319,7 @@ mod tests {
             todos_next_week: vec![],
             reminders_next_week: vec![],
             events_next_week: vec![],
+            hyperliquid: None,
         };
         d.events_next_week = vec![crate::repo::events::EventRow {
             id: 1,

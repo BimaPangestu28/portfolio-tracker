@@ -22,6 +22,7 @@ import { usePerformance, useSummary, useHistory } from "../api/hooks";
 import { formatIDR, parseNum } from "../lib/format";
 import { QueryState } from "../components/QueryState";
 import { StatCard } from "../components/StatCard";
+import { HyperliquidCard } from "@/components/HyperliquidCard";
 
 /** Period options for the curve window. */
 const PERIODS: { value: string; label: string }[] = [
@@ -254,6 +255,8 @@ export default function PerformancePage() {
           </p>
         </div>
       )}
+
+      <HyperliquidCard />
     </div>
   );
 }

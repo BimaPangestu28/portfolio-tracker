@@ -13,6 +13,8 @@ pub struct ArticleRow {
     pub summary: String,
     /// JSON array of strings.
     pub key_points: String,
+    pub image_url: Option<String>,
+    pub read_minutes: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, sqlx::FromRow)]
@@ -34,6 +36,8 @@ pub struct NewArticle {
     pub score: i64,
     pub summary: String,
     pub key_points_json: String,
+    pub image_url: Option<String>,
+    pub read_minutes: Option<i64>,
 }
 
 pub struct NewQuiz {
@@ -70,10 +74,11 @@ pub async fn insert(
         .bind(date).bind(created_at).execute(&mut *tx).await?;
     for a in articles {
         sqlx::query(
-            "INSERT INTO news_article (digest_date, position, title, url, source, score, summary, key_points)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+            "INSERT INTO news_article (digest_date, position, title, url, source, score, summary, key_points, image_url, read_minutes)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
             .bind(date).bind(a.position).bind(&a.title).bind(&a.url).bind(&a.source)
             .bind(a.score).bind(&a.summary).bind(&a.key_points_json)
+            .bind(&a.image_url).bind(a.read_minutes)
             .execute(&mut *tx).await?;
     }
     for q in quiz {
@@ -91,7 +96,7 @@ pub async fn insert(
 /// Articles for a date, ordered by position.
 pub async fn articles(db: &Db, date: &str) -> anyhow::Result<Vec<ArticleRow>> {
     Ok(sqlx::query_as(
-        "SELECT position, title, url, source, score, summary, key_points
+        "SELECT position, title, url, source, score, summary, key_points, image_url, read_minutes
          FROM news_article WHERE digest_date = ? ORDER BY position")
         .bind(date).fetch_all(db).await?)
 }
@@ -115,6 +120,7 @@ mod tests {
             position: 0, title: "Rust 2.0".into(), url: "https://ex.com/r".into(),
             source: "HN".into(), score: 100, summary: "ringkas".into(),
             key_points_json: "[\"a\",\"b\"]".into(),
+            image_url: Some("https://ex.com/i.png".into()), read_minutes: Some(3),
         }];
         let quizzes = vec![NewQuiz {
             position: 0, article_pos: Some(0), question: "apa?".into(),
@@ -126,6 +132,8 @@ mod tests {
         let a = articles(&db, "2026-06-16").await.unwrap();
         assert_eq!(a.len(), 1);
         assert_eq!(a[0].title, "Rust 2.0");
+        assert_eq!(a[0].image_url.as_deref(), Some("https://ex.com/i.png"));
+        assert_eq!(a[0].read_minutes, Some(3));
         let q = quiz(&db, "2026-06-16").await.unwrap();
         assert_eq!(q.len(), 1);
         assert_eq!(q[0].answer_index, 1);

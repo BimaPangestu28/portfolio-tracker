@@ -87,3 +87,13 @@ pub async fn performance(
             .map_err(AppError::Other)?,
     ))
 }
+
+pub async fn hyperliquid(
+    State(s): State<AppState>,
+) -> Result<Json<crate::service::hyperliquid::HyperliquidView>, AppError> {
+    Ok(Json(
+        crate::service::hyperliquid::build_hyperliquid_view(&s.db)
+            .await
+            .map_err(AppError::Other)?,
+    ))
+}
