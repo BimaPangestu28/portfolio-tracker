@@ -15,6 +15,7 @@ import { QueryState } from "../components/QueryState";
 import { CsvImport } from "../components/CsvImport";
 import { ExtractedEntrySchema, type ReviewItem, type Instrument, type Account } from "../api/schemas";
 import { Upload, FileText, Image as ImageIcon, CheckCircle, AlertTriangle, Check, X, Info } from "lucide-react";
+import { NumberInput } from "@/components/ui/NumberInput";
 
 const DOC_ICON: Record<string, React.ReactNode> = {
   screenshot: <ImageIcon size={18} />,
@@ -215,15 +216,15 @@ function ReviewCard({
         </label>
         <label className="field">
           <span className="field-label">Jumlah</span>
-          <input className="input" value={form.quantity} onChange={set("quantity")} aria-label="Quantity" placeholder={isAmountOnly ? "amount-only" : undefined} />
+          <NumberInput className="input" value={form.quantity} onChange={v => setForm({ ...form, quantity: v })} aria-label="Quantity" placeholder={isAmountOnly ? "amount-only" : undefined} />
         </label>
         <label className="field">
           <span className="field-label">Harga</span>
-          <input className="input" value={form.price_native} onChange={set("price_native")} aria-label="Price" placeholder={isAmountOnly ? "amount-only" : undefined} />
+          <NumberInput className="input" value={form.price_native} onChange={v => setForm({ ...form, price_native: v })} aria-label="Price" placeholder={isAmountOnly ? "amount-only" : undefined} />
         </label>
         <label className="field">
           <span className="field-label">Nominal</span>
-          <input className="input" value={form.amount_native} onChange={set("amount_native")} aria-label="Amount" />
+          <NumberInput className="input" value={form.amount_native} onChange={v => setForm({ ...form, amount_native: v })} aria-label="Amount" />
           {isAmountOnly && (
             <span className="t-xs t-muted">amount-only — unit dihitung otomatis dari NAV (tanpa NAV: nominal di harga 1)</span>
           )}

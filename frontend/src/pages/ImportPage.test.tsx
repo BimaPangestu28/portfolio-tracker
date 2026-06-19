@@ -68,8 +68,8 @@ test("amount-only fund item shows amount, hint, and confirms with amount_native"
 
   render(<ImportPage />, { wrapper });
 
-  // Amount field prefilled from the payload
-  expect(await screen.findByLabelText("Amount")).toHaveValue("13000000");
+  // Amount field prefilled from the payload — displayed with thousand separators
+  expect(await screen.findByLabelText("Amount")).toHaveValue("13.000.000");
   // amount-only hint shown because quantity & price are empty
   expect(screen.getByText(/amount-only/i)).toBeInTheDocument();
 

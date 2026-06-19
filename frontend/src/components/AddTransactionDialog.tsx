@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { useAccounts, useInstruments, useCreateTransaction } from "../api/hooks";
 import { TXN_TYPES, TX_LABEL } from "../lib/txn";
 import { Dialog } from "./Dialog";
+import { NumberInput } from "@/components/ui/NumberInput";
 
 interface AddTransactionDialogProps {
   open: boolean;
@@ -132,34 +133,31 @@ export function AddTransactionDialog({ open, onClose }: AddTransactionDialogProp
         <div className="grid" style={{ gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
           <label className="field">
             <span className="field-label">Jumlah</span>
-            <input
-              type="number"
+            <NumberInput
               className="input"
               placeholder="0"
               value={form.quantity}
-              onChange={set("quantity")}
+              onChange={v => setForm({ ...form, quantity: v })}
               aria-label="Jumlah"
             />
           </label>
           <label className="field">
             <span className="field-label">Harga</span>
-            <input
-              type="number"
+            <NumberInput
               className="input"
               placeholder="0"
               value={form.price_native}
-              onChange={set("price_native")}
+              onChange={v => setForm({ ...form, price_native: v })}
               aria-label="Harga"
             />
           </label>
           <label className="field">
             <span className="field-label">Biaya</span>
-            <input
-              type="number"
+            <NumberInput
               className="input"
               placeholder="0"
               value={form.fee_native}
-              onChange={set("fee_native")}
+              onChange={v => setForm({ ...form, fee_native: v })}
               aria-label="Biaya"
             />
           </label>
