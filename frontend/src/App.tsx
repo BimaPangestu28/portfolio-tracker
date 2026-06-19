@@ -8,6 +8,7 @@ import DashboardPage from "./pages/DashboardPage";
 import PortfolioPage from "./pages/PortfolioPage";
 import PlannerPage from "./pages/PlannerPage";
 import BudgetPage from "./pages/BudgetPage";
+import DcaPage from "./pages/DcaPage";
 import DataPage from "./pages/DataPage";
 import InvoicesPage from "./pages/InvoicesPage";
 import ChatPage from "./pages/ChatPage";
@@ -39,6 +40,7 @@ export default function App() {
         <Route path="portfolio" element={<PortfolioPage />} />
         <Route path="planner" element={<PlannerPage />} />
         <Route path="budget" element={<BudgetPage />} />
+        <Route path="dca" element={<DcaPage />} />
         <Route path="data" element={<DataPage />} />
         <Route path="invoices" element={<InvoicesPage />} />
         <Route path="agenda" element={<AgendaPage />} />
