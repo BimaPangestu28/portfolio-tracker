@@ -16,7 +16,7 @@ import {
   MoverSchema, BenchmarkRowSchema, EventSchema,
   TodoSchema, ReminderSchema, InboxItemSchema,
   InvoiceSchema, ClientSchema,
-  NewsTodaySchema,
+  NewsTodaySchema, NewsDateSchema,
   KbDocSchema, CsProductSchema, CsOrderSchema,
   CsConversationSchema, CsMessageSchema, CsEscalationSchema,
   HyperliquidViewSchema,
@@ -346,6 +346,21 @@ export const useNewsToday = () =>
   useQuery({
     queryKey: ["news", "today"],
     queryFn: () => api.get("/news/today", NewsTodaySchema),
+    staleTime: 60 * 60 * 1000,
+  });
+
+export const useNewsDates = (limit: number, offset = 0) =>
+  useQuery({
+    queryKey: ["news", "dates", limit, offset],
+    queryFn: () => api.get(`/news/dates?limit=${limit}&offset=${offset}`, z.array(NewsDateSchema)),
+    staleTime: 60 * 60 * 1000,
+  });
+
+export const useNewsDigest = (date: string | undefined) =>
+  useQuery({
+    queryKey: ["news", "digest", date],
+    enabled: date != null,
+    queryFn: () => api.get(`/news/digest/${date}`, NewsTodaySchema),
     staleTime: 60 * 60 * 1000,
   });
 
