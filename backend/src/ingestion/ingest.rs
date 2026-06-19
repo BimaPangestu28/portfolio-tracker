@@ -190,7 +190,8 @@ mod tests {
     fn entry(conf: f64, symbol: Option<&str>, qty: Option<&str>) -> ExtractedEntry {
         ExtractedEntry { entry_type:"buy".into(), symbol:symbol.map(String::from), instrument_name:None,
             quantity:qty.map(String::from), price_native:Some("1".into()), fee_native:None, currency:Some("USD".into()),
-            executed_at:None, account_hint:None, note:None, confidence:conf, amount_native:None, force_attention:false }
+            executed_at:None, account_hint:None, note:None, confidence:conf, amount_native:None, force_attention:false,
+            cashflow_category:None, external_ref:None }
     }
 
     #[test]
@@ -221,7 +222,8 @@ mod tests {
             instrument_name:Some("Sucorinvest Bond Fund".into()),
             quantity:None, price_native:None, fee_native:None, currency:Some("IDR".into()),
             executed_at:None, account_hint:Some("Pendidikan Noah".into()), note:None,
-            confidence:0.72, amount_native:Some("13000000".into()), force_attention:false }
+            confidence:0.72, amount_native:Some("13000000".into()), force_attention:false,
+            cashflow_category:None, external_ref:None }
     }
 
     #[test]

@@ -47,6 +47,8 @@ pub fn parse_csv_rows(csv_text: &str, mapping: &ColumnMapping, entry_type_const:
             confidence: 1.0,
             amount_native: get(&cells, "amount_native"),
             force_attention: false,
+            cashflow_category: None,
+            external_ref: None,
         });
     }
     Ok(out)
