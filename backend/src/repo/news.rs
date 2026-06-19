@@ -28,6 +28,13 @@ pub struct QuizRow {
     pub explanation: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, sqlx::FromRow)]
+pub struct DateRow {
+    pub digest_date: String,
+    pub created_at: String,
+    pub article_count: i64,
+}
+
 pub struct NewArticle {
     pub position: i64,
     pub title: String,
@@ -109,6 +116,18 @@ pub async fn quiz(db: &Db, date: &str) -> anyhow::Result<Vec<QuizRow>> {
         .bind(date).fetch_all(db).await?)
 }
 
+/// Distinct digest dates, newest first, with their article counts. Paginated.
+pub async fn dates(db: &Db, limit: i64, offset: i64) -> anyhow::Result<Vec<DateRow>> {
+    Ok(sqlx::query_as(
+        "SELECT d.digest_date, d.created_at, COUNT(a.position) AS article_count
+         FROM news_digest d
+         LEFT JOIN news_article a ON a.digest_date = d.digest_date
+         GROUP BY d.digest_date, d.created_at
+         ORDER BY d.digest_date DESC
+         LIMIT ? OFFSET ?")
+        .bind(limit).bind(offset).fetch_all(db).await?)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -137,5 +156,29 @@ mod tests {
         let q = quiz(&db, "2026-06-16").await.unwrap();
         assert_eq!(q.len(), 1);
         assert_eq!(q[0].answer_index, 1);
+    }
+
+    #[tokio::test]
+    async fn dates_lists_newest_first_with_counts() {
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        let art = |pos: i64| NewArticle {
+            position: pos, title: "t".into(), url: format!("https://ex.com/{pos}"),
+            source: "HN".into(), score: 1, summary: "s".into(),
+            key_points_json: "[]".into(), image_url: None, read_minutes: None,
+        };
+        insert(&db, "2026-06-18", "2026-06-18T00:00:00Z", &[art(0)], &[]).await.unwrap();
+        insert(&db, "2026-06-19", "2026-06-19T00:00:00Z", &[art(0), art(1)], &[]).await.unwrap();
+
+        let all = dates(&db, 30, 0).await.unwrap();
+        assert_eq!(all.len(), 2);
+        assert_eq!(all[0].digest_date, "2026-06-19");
+        assert_eq!(all[0].article_count, 2);
+        assert_eq!(all[1].digest_date, "2026-06-18");
+        assert_eq!(all[1].article_count, 1);
+
+        // pagination: limit 1, offset 1 → the second-newest only
+        let page = dates(&db, 1, 1).await.unwrap();
+        assert_eq!(page.len(), 1);
+        assert_eq!(page[0].digest_date, "2026-06-18");
     }
 }
