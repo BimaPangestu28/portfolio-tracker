@@ -47,8 +47,9 @@ describe("NumberInput", () => {
     render(<Harness />);
     const input = screen.getByLabelText("amount") as HTMLInputElement;
     await user.type(input, "100000");          // value "100.000"
+    input.focus();
     input.setSelectionRange(1, 1);             // caret right after the leading "1"
-    await user.type(input, "9");               // insert -> "1900000" -> "1.900.000"
+    await user.keyboard("9");                  // insert -> "1900000" -> "1.900.000"
     expect(input.value).toBe("1.900.000");
     // caret should sit just after the "9" (2 digits from the left), i.e. index 3 ("1.9|00.000")
     expect(input.selectionStart).toBe(3);
