@@ -71,6 +71,42 @@ fn save_file(batch_id: &str, f: &UploadFile) -> anyhow::Result<(String, String)>
 const PDF_UNSUPPORTED_PAYLOAD: &str =
     "{\"note\":\"PDF belum didukung — unggah ulang sebagai gambar (PNG/JPG).\"}";
 
+/// Try to handle an uploaded PDF as a BCA statement. Returns the staged review
+/// items on success, or `None` if the PDF is not a recognizable BCA statement
+/// (caller then falls back to the "unsupported" payload). Extraction/parse
+/// errors propagate so the API surfaces a real cause.
+async fn try_ingest_bca_pdf(
+    db: &Db,
+    batch_id: &str,
+    f: &UploadFile,
+    kind: &str,
+    path: &str,
+) -> anyhow::Result<Option<Vec<review_items::ReviewItemRow>>> {
+    let text = crate::ingestion::bank::bca_text::extract_text(path).await?;
+    if !crate::ingestion::bank::bca_text::is_bca_statement(&text) {
+        return Ok(None);
+    }
+    let entries = crate::ingestion::bank::parse_statement(&text)?;
+    let mut rows = Vec::with_capacity(entries.len());
+    for e in &entries {
+        let payload = serde_json::to_string(e)?;
+        let row = review_items::create(db, &NewReviewItem {
+            batch_id,
+            source_kind: kind,
+            source_filename: &f.filename,
+            source_path: path,
+            doc_type: "bank_statement_bca",
+            needs_attention: e.force_attention,
+            payload_json: &payload,
+            raw_llm_json: "{}",
+            suggested_instrument_id: None,
+            suggested_account_id: None,
+        }).await?;
+        rows.push(row);
+    }
+    Ok(Some(rows))
+}
+
 /// The vision model declined to read the document — it returned a natural-language
 /// refusal instead of JSON, and did so again on retry. Surfaced as a typed error
 /// (downcastable from the `anyhow::Error`) so the Telegram/API layer can tell the
@@ -121,6 +157,17 @@ pub async fn ingest_batch(db: &Db, client: &NativeLlmClient, batch_id: &str, fil
     for f in files {
         let (kind, path) = save_file(batch_id, f)?;
         if f.media_type == "application/pdf" {
+            match try_ingest_bca_pdf(db, batch_id, f, &kind, &path).await {
+                Ok(Some(rows)) => {
+                    items.extend(rows);
+                    continue;
+                }
+                Ok(None) => { /* not BCA — fall through to unsupported */ }
+                Err(e) => {
+                    tracing::warn!("ingest: BCA PDF handling failed for {}: {e:#}", f.filename);
+                    // fall through to the unsupported payload rather than 500ing
+                }
+            }
             let row = review_items::create(db, &NewReviewItem {
                 batch_id,
                 source_kind: &kind,
