@@ -83,14 +83,18 @@ Let `S = Σ shortfall_i`.
 
 ### Phase 2 — proportional top-up (only when budget exceeds all gaps)
 
-Distribute `R` across all `target_pct > 0` categories by target weight:
+Distribute `R` across all `target_pct > 0` categories by target weight, using a
+fixed divisor of **100** (NOT `Σ target_pct`):
 
-`alloc_i += R × target_pct_i / Σ target_pct`
+`alloc_i += R × target_pct_i / 100`
 
 Reached only when the portfolio is essentially balanced (no under-target gaps
-left), so this is ordinary proportional DCA. `Σ target_pct` is the normalizer
-(may be < 100 if the user intentionally leaves headroom; the leftover simply
-stays as cash that period).
+left), so this is ordinary proportional DCA. The divisor is literally `100`, not
+`Σ target_pct`: when the user's targets sum to less than 100% (intentional
+headroom), the unallocated slack `R × (100 − Σ target_pct) / 100` simply stays
+as cash that period. (Normalizing by `Σ target_pct` would instead spread all of
+`R` and leave nothing as cash — that would contradict the cash-leftover
+behavior, which the `target_under_100_leaves_cash` test pins.)
 
 **Important — the gate is on *current* percentage, the shortfall is on the
 *projected* value.** A category qualifies for Phase 1 only if it is under target
