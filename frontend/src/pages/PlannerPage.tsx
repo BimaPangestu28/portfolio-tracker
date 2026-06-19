@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { useCategories, useCreateCategory, useUpdateCategory, useDeleteCategory, useSummary, type Category } from "../api/hooks";
 import { QueryState } from "../components/QueryState";
 import { formatIDR, parseNum } from "../lib/format";
+import { NumberInput } from "@/components/ui/NumberInput";
 
 /** Inline editor for a category's target percent — saves on blur/Enter. */
 function TargetEditor({ category }: { category: Category }) {
@@ -24,12 +25,12 @@ function TargetEditor({ category }: { category: Category }) {
 
   return (
     <span className="t-h2 num t-muted" style={{ display: "inline-flex", alignItems: "baseline", gap: 2 }}>
-      <input
-        className="input num"
+      <NumberInput
+        className=""
         style={{ width: 64, height: 28, textAlign: "right", fontSize: "inherit", padding: "0 4px" }}
         aria-label={`Target ${category.name}`}
         value={target}
-        onChange={(e) => setTarget(e.target.value)}
+        onChange={(v) => setTarget(v)}
         onBlur={save}
         onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
       />
@@ -314,24 +315,22 @@ export default function PlannerPage() {
           <div className="grid form-stack" style={{ gridTemplateColumns: "1fr 1fr", gap: 12 }}>
             <label className="field">
               <span className="field-label">Target %</span>
-              <input
-                type="number"
+              <NumberInput
                 className="input"
                 placeholder="0"
                 value={form.target_pct}
-                onChange={(e) => setForm({ ...form, target_pct: e.target.value })}
+                onChange={(v) => setForm({ ...form, target_pct: v })}
                 aria-label="Target persen"
                 required
               />
             </label>
             <label className="field">
               <span className="field-label">Toleransi ± %</span>
-              <input
-                type="number"
+              <NumberInput
                 className="input"
                 placeholder="5"
                 value={form.tolerance_band_pct}
-                onChange={(e) => setForm({ ...form, tolerance_band_pct: e.target.value })}
+                onChange={(v) => setForm({ ...form, tolerance_band_pct: v })}
                 aria-label="Toleransi persen"
               />
             </label>

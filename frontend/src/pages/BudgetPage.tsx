@@ -12,6 +12,7 @@ import {
 } from "../api/hooks";
 import { QueryState } from "../components/QueryState";
 import { formatIDR, parseNum } from "../lib/format";
+import { NumberInput } from "@/components/ui/NumberInput";
 
 interface DialogProps {
   open: boolean;
@@ -393,12 +394,11 @@ export default function BudgetPage() {
           <div className="grid form-stack" style={{ gridTemplateColumns: "1fr 1fr", gap: 12 }}>
             <label className="field">
               <span className="field-label">Nominal</span>
-              <input
-                type="number"
+              <NumberInput
                 className="input"
                 placeholder="0"
                 value={entryForm.amount}
-                onChange={setEntry("amount")}
+                onChange={(v) => setEntryForm({ ...entryForm, amount: v })}
                 aria-label="Amount"
                 required
               />
@@ -484,12 +484,11 @@ export default function BudgetPage() {
             </label>
             <label className="field">
               <span className="field-label">Budget Bulanan</span>
-              <input
-                type="number"
+              <NumberInput
                 className="input"
                 placeholder="opsional"
                 value={catForm.monthly_budget}
-                onChange={setCat("monthly_budget")}
+                onChange={(v) => setCatForm({ ...catForm, monthly_budget: v })}
                 aria-label="Monthly budget"
               />
             </label>

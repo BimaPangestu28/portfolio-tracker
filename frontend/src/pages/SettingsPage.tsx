@@ -16,8 +16,10 @@ import {
 } from "../api/hooks";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
+import { Input, inputBaseClass } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { NumberInput } from "@/components/ui/NumberInput";
 import WhatsAppPage from "./WhatsAppPage";
 import TelegramPage from "./TelegramPage";
 import GoogleCalendarCard from "../components/GoogleCalendarCard";
@@ -282,7 +284,7 @@ function GeneralSettings() {
             className="flex flex-wrap items-end gap-2"
           >
             <Input aria-label="Price instrument id" className="w-36" placeholder="instrument_id" value={price.instrument_id} onChange={(e) => setPrice({ ...price, instrument_id: e.target.value })} required />
-            <Input aria-label="Price" className="w-32" placeholder="price" value={price.price} onChange={(e) => setPrice({ ...price, price: e.target.value })} required />
+            <NumberInput aria-label="Price" className={cn(inputBaseClass, "w-32")} placeholder="price" value={price.price} onChange={v => setPrice({ ...price, price: v })} required />
             <Input aria-label="Price currency" className="w-28" placeholder="currency" value={price.currency} onChange={(e) => setPrice({ ...price, currency: e.target.value })} />
             <Button type="submit">Set price</Button>
           </form>
@@ -304,7 +306,7 @@ function GeneralSettings() {
             }}
             className="flex flex-wrap items-end gap-2"
           >
-            <Input aria-label="USD to IDR rate" className="w-40" placeholder="e.g. 16250" value={fx.rate} onChange={(e) => setFx({ rate: e.target.value })} required />
+            <NumberInput aria-label="USD to IDR rate" className={cn(inputBaseClass, "w-40")} placeholder="e.g. 16250" value={fx.rate} onChange={v => setFx({ rate: v })} required />
             <Button type="submit">Set FX</Button>
           </form>
         </CardContent>
