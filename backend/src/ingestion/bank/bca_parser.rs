@@ -87,6 +87,28 @@ fn detail_without_money(detail: &str) -> String {
         .join(" ")
 }
 
+/// True for repeated page furniture in multi-page statements (column headers,
+/// the repeated account-header block, the page-continuation footer). Such lines
+/// have no leading date and must NOT be appended as transaction detail.
+fn is_statement_furniture(line: &str) -> bool {
+    let s: String = line.chars().filter(|c| !c.is_whitespace()).collect::<String>().to_uppercase();
+    const MARKERS: &[&str] = &[
+        "BERSAMBUNG",           // "Bersambung ke halaman berikut"
+        "REKENINGTAHAPAN",      // page header title
+        "NO.REKENING",
+        "PERIODE",
+        "MATAUANG",
+        "KCPPONDOK",            // branch line (KCP ...)
+        "HALAMAN",
+        "BERSAMBUNGKEHALAMAN",
+    ];
+    // Column header row: contains both KETERANGAN and MUTASI.
+    if s.contains("KETERANGAN") && s.contains("MUTASI") {
+        return true;
+    }
+    MARKERS.iter().any(|m| s.contains(m))
+}
+
 pub fn parse_mutations(text: &str, meta: &StatementMeta) -> Vec<BcaMutation> {
     let mut out: Vec<BcaMutation> = Vec::new();
     for line in text.lines() {
@@ -124,7 +146,11 @@ pub fn parse_mutations(text: &str, meta: &StatementMeta) -> Vec<BcaMutation> {
                 }
             }
         } else if let Some(last) = out.last_mut() {
-            // Continuation line: append non-money detail to the current mutation.
+            // Continuation line: append non-money detail to the current mutation,
+            // but skip repeated page furniture from multi-page statements.
+            if is_statement_furniture(line) {
+                continue;
+            }
             let extra = detail_without_money(line.trim());
             if !extra.is_empty() {
                 if !last.deskripsi.is_empty() {
@@ -183,5 +209,38 @@ mod tests {
         assert_eq!(m[2].jenis, "TRSF E-BANKING CR");
         assert_eq!(m[2].amount, "49995500.00");
         assert!(matches!(m[2].direction, Direction::In));
+    }
+
+    // Fix A — multi-page furniture must not bleed into a mutation's description.
+    const MULTIPAGE_ROWS: &str = "\
+       01/05         TRSF E-BANKING DB    0105/FTFVA/WS95271                242,000.00 DB     3,911,064.29
+                                          38165/PT Moratelin
+                    REKENING TAHAPAN BCA
+                    NO. REKENING : 8415525237
+       TANGGAL  KETERANGAN                          CBG         MUTASI         SALDO
+                    Bersambung ke halaman berikut
+       12/05         TRSF E-BANKING CR    1205/FTSCY/WS95051             49,995,500.00        40,831,664.29
+                                          SINAR DIGITAL TERD
+";
+
+    #[test]
+    fn furniture_lines_not_appended_to_mutation_deskripsi() {
+        let m = parse_mutations(MULTIPAGE_ROWS, &meta());
+        assert_eq!(m.len(), 2, "expected exactly 2 mutations, got {}", m.len());
+
+        let desc = &m[0].deskripsi;
+        assert!(desc.contains("PT Moratelin"), "legitimate detail must be kept: {desc}");
+        assert!(!desc.to_uppercase().contains("REKENING"), "REKENING must not bleed in: {desc}");
+        assert!(!desc.to_uppercase().contains("KETERANGAN"), "KETERANGAN must not bleed in: {desc}");
+        assert!(!desc.to_uppercase().contains("BERSAMBUNG"), "BERSAMBUNG must not bleed in: {desc}");
+        assert!(!desc.to_uppercase().contains("HALAMAN"), "HALAMAN must not bleed in: {desc}");
+    }
+
+    #[test]
+    fn legit_detail_not_over_filtered() {
+        // Normal merchant continuation lines must still appear in deskripsi.
+        let m = parse_mutations(ROWS, &meta());
+        assert!(m[0].deskripsi.contains("PT Moratelin"), "PT Moratelin must survive: {}", m[0].deskripsi);
+        assert!(m[1].deskripsi.contains("QRC014"), "QRC014 must survive: {}", m[1].deskripsi);
     }
 }

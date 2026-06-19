@@ -25,6 +25,8 @@ pub fn categorize(haystack: &str) -> BcaCategory {
         BcaCategory { name: "Bunga", kind: "income", is_transfer: false }
     } else if has("PAJAK") {
         BcaCategory { name: "Pajak", kind: "expense", is_transfer: false }
+    } else if has("SETORAN") {
+        BcaCategory { name: "Setoran Tunai", kind: "income", is_transfer: false }
     } else {
         BcaCategory { name: "Lainnya", kind: "expense", is_transfer: false }
     }
@@ -59,5 +61,20 @@ mod tests {
         assert_eq!(categorize("BUNGA").name, "Bunga");
         assert_eq!(categorize("BIAYA ADM").name, "Biaya Bank");
         assert_eq!(categorize("SOMETHING UNRECOGNIZED").name, "Lainnya");
+    }
+
+    // Fix B — SETORAN TUNAI must be categorized as income.
+    #[test]
+    fn setoran_tunai_is_income() {
+        let c = categorize("SETORAN TUNAI 123456789");
+        assert_eq!(c.name, "Setoran Tunai");
+        assert_eq!(c.kind, "income");
+        assert!(!c.is_transfer);
+    }
+
+    #[test]
+    fn unknown_string_still_lainnya() {
+        let c = categorize("RANDOM UNKNOWN TRANSACTION");
+        assert_eq!(c.name, "Lainnya");
     }
 }
