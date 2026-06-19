@@ -1,7 +1,7 @@
 use crate::error::AppError;
 use crate::repo::news as repo;
 use crate::AppState;
-use axum::{extract::State, Json};
+use axum::{extract::{Path, State}, Json};
 use serde::Serialize;
 
 #[derive(Serialize)]
@@ -43,22 +43,17 @@ fn decode_str_array(json: &str, field: &str) -> Vec<String> {
     })
 }
 
-/// Read-only: today's persisted digest. Never triggers generation.
-pub async fn today(State(s): State<AppState>) -> Result<Json<TodayDto>, AppError> {
-    let date = chrono::Utc::now()
-        .with_timezone(&crate::assistant::time::wib())
-        .format("%Y-%m-%d")
-        .to_string();
-
-    let articles = repo::articles(&s.db, &date).await.map_err(AppError::Other)?;
+/// Shared core: build the digest DTO for a WIB date string. Returns
+/// available:false with empty vecs when no articles exist for that date.
+async fn load_digest(db: &crate::db::Db, date: &str) -> Result<TodayDto, AppError> {
+    let articles = repo::articles(db, date).await.map_err(AppError::Other)?;
     if articles.is_empty() {
-        return Ok(Json(TodayDto { available: false, date: None, articles: vec![], quiz: vec![] }));
+        return Ok(TodayDto { available: false, date: None, articles: vec![], quiz: vec![] });
     }
-    let quiz = repo::quiz(&s.db, &date).await.map_err(AppError::Other)?;
-
-    Ok(Json(TodayDto {
+    let quiz = repo::quiz(db, date).await.map_err(AppError::Other)?;
+    Ok(TodayDto {
         available: true,
-        date: Some(date),
+        date: Some(date.to_string()),
         articles: articles
             .into_iter()
             .map(|a| ArticleDto {
@@ -83,7 +78,26 @@ pub async fn today(State(s): State<AppState>) -> Result<Json<TodayDto>, AppError
                 article_position: q.article_pos,
             })
             .collect(),
-    }))
+    })
+}
+
+/// Read-only: today's persisted digest. Never triggers generation.
+pub async fn today(State(s): State<AppState>) -> Result<Json<TodayDto>, AppError> {
+    let date = chrono::Utc::now()
+        .with_timezone(&crate::assistant::time::wib())
+        .format("%Y-%m-%d")
+        .to_string();
+    Ok(Json(load_digest(&s.db, &date).await?))
+}
+
+/// Read-only: the persisted digest for a specific WIB date (YYYY-MM-DD).
+pub async fn digest_by_date(
+    State(s): State<AppState>,
+    Path(date): Path<String>,
+) -> Result<Json<TodayDto>, AppError> {
+    chrono::NaiveDate::parse_from_str(&date, "%Y-%m-%d")
+        .map_err(|_| AppError::BadRequest(format!("invalid date: {date}")))?;
+    Ok(Json(load_digest(&s.db, &date).await?))
 }
 
 #[cfg(test)]
@@ -158,5 +172,58 @@ mod tests {
         assert_eq!(v["quiz"][0]["article_position"], 0);
         assert_eq!(v["articles"][0]["image_url"], "https://ex.com/i.png");
         assert_eq!(v["articles"][0]["read_minutes"], 4);
+    }
+
+    #[serial]
+    #[tokio::test]
+    async fn digest_by_date_returns_stored_digest() {
+        let state = state_with_db().await;
+        crate::repo::news::insert(
+            &state.db, "2026-06-18", "2026-06-18T00:00:00Z",
+            &[crate::repo::news::NewArticle {
+                position: 0, title: "Rust 2.0".into(), url: "https://ex.com/r".into(),
+                source: "HN".into(), score: 10, summary: "rilis".into(),
+                key_points_json: "[\"cepat\"]".into(), image_url: None, read_minutes: Some(4),
+            }],
+            &[crate::repo::news::NewQuiz {
+                position: 0, article_pos: Some(0), question: "apa?".into(),
+                options_json: "[\"x\",\"y\"]".into(), answer_index: 1, explanation: None,
+            }],
+        ).await.unwrap();
+
+        let app = crate::api::router(state);
+        let res = app.oneshot(
+            Request::builder().uri("/news/digest/2026-06-18").body(Body::empty()).unwrap()
+        ).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let bytes = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(v["available"], true);
+        assert_eq!(v["date"], "2026-06-18");
+        assert_eq!(v["articles"][0]["title"], "Rust 2.0");
+        assert_eq!(v["quiz"][0]["answer_index"], 1);
+    }
+
+    #[serial]
+    #[tokio::test]
+    async fn digest_by_date_rejects_malformed_date() {
+        let app = crate::api::router(state_with_db().await);
+        let res = app.oneshot(
+            Request::builder().uri("/news/digest/not-a-date").body(Body::empty()).unwrap()
+        ).await.unwrap();
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[serial]
+    #[tokio::test]
+    async fn digest_by_date_unknown_date_is_unavailable() {
+        let app = crate::api::router(state_with_db().await);
+        let res = app.oneshot(
+            Request::builder().uri("/news/digest/2020-01-01").body(Body::empty()).unwrap()
+        ).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let bytes = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(v["available"], false);
     }
 }
