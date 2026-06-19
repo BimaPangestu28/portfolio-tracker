@@ -41,14 +41,22 @@ export function digitsBeforeCaret(s: string, pos: number): number {
   return n;
 }
 
-/** Index in `s` just after the `n`-th digit (1-based). 0 -> start; overflow -> end. */
+/**
+ * Index in `s` just after the `n`-th digit (1-based). 0 -> start; overflow -> end.
+ * If the character immediately after the nth digit is a comma (Indonesian decimal
+ * separator), the caret advances past it so subsequent typing stays on the correct
+ * side of the separator.
+ */
 export function caretFromDigitCount(s: string, n: number): number {
   if (n <= 0) return 0;
   let count = 0;
   for (let i = 0; i < s.length; i++) {
     if (s[i] >= "0" && s[i] <= "9") {
       count++;
-      if (count === n) return i + 1;
+      if (count === n) {
+        const next = i + 1;
+        return next < s.length && s[next] === "," ? next + 1 : next;
+      }
     }
   }
   return s.length;
