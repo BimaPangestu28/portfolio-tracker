@@ -246,6 +246,7 @@ mod tests {
             created_txn_id: None,
             created_at: "2026-06-05T00:00:00Z".into(),
             confirmed_at: None,
+            external_ref: None,
         }
     }
 

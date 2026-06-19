@@ -149,8 +149,74 @@ pub async fn confirm(db: &Db, item_id: i64, p: &ConfirmPayload) -> anyhow::Resul
         external_id: None,
     };
     let txn = transactions::create(db, &nt).await?;
+
+    // Bank-statement entries also feed the cashflow/Budget view. We read the
+    // category + dedup ref from the stored extraction (the user-facing
+    // ConfirmPayload does not carry them), and key direction off entry_type.
+    if item.doc_type == "bank_statement_bca"
+        && matches!(p.entry_type.as_str(), "deposit" | "withdrawal")
+    {
+        if let Err(e) = write_bank_cashflow(db, &item, p).await {
+            // Don't fail the whole confirm if the cashflow mirror fails; the
+            // txn is the source of truth. Surface it loudly for follow-up.
+            tracing::warn!("confirm: cashflow mirror failed for item {}: {e:#}", item.id);
+        }
+    }
+
     review_items::mark_confirmed(db, item_id, txn.id).await?;
     Ok(txn.id)
+}
+
+/// Mirror a confirmed bank-statement deposit/withdrawal into the cashflow table.
+/// Idempotent on `(source, external_ref)` so re-imports never double-count.
+async fn write_bank_cashflow(
+    db: &Db,
+    item: &crate::repo::review_items::ReviewItemRow,
+    p: &ConfirmPayload,
+) -> anyhow::Result<()> {
+    use crate::repo::{cashflow, cashflow_categories};
+    let stored: crate::ingestion::extract::ExtractedEntry =
+        serde_json::from_str(&item.payload_json)?;
+    let external_ref = stored.external_ref
+        .ok_or_else(|| anyhow::anyhow!("bank_statement item missing external_ref"))?;
+
+    let direction = match p.entry_type.as_str() {
+        "deposit"    => "in",
+        "withdrawal" => "out",
+        other => anyhow::bail!("write_bank_cashflow: unexpected entry_type {other:?}"),
+    };
+    let amount = p.amount_native.clone()
+        .ok_or_else(|| anyhow::anyhow!("bank cashflow needs amount_native"))?;
+    let occurred_on = to_rfc3339(&p.executed_at)
+        .unwrap_or_else(|| p.executed_at.clone());
+    let occurred_on = occurred_on.get(0..10).unwrap_or(&occurred_on).to_string();
+
+    let category_id = match stored.cashflow_category.as_deref() {
+        Some(name) if !name.is_empty() => {
+            let kind = if direction == "in" { "income" } else { "expense" };
+            // ensure_by_name matches on name only; `kind` is fixed at first creation
+            // (first-write-wins). That is fine because cashflow reporting keys on the
+            // cashflow row's own `direction` ("in"/"out"), not the category kind.
+            Some(cashflow_categories::ensure_by_name(db, name, kind).await?.id)
+        }
+        _ => None,
+    };
+
+    cashflow::insert_sourced(
+        db,
+        &cashflow::NewCashflow {
+            account_id: Some(p.account_id),
+            occurred_on,
+            direction: direction.to_string(),
+            amount,
+            currency: p.currency.clone(),
+            category_id,
+            note: p.note.clone().or(stored.note),
+        },
+        "bank_statement_bca",
+        &external_ref,
+    ).await?;
+    Ok(())
 }
 
 pub async fn reject(db: &Db, item_id: i64) -> anyhow::Result<()> {
@@ -184,6 +250,7 @@ mod tests {
             created_txn_id: None,
             created_at: "2026-06-05T00:00:00Z".into(),
             confirmed_at: None,
+            external_ref: None,
         }
     }
 
@@ -272,6 +339,7 @@ mod tests {
             batch_id:"b", source_kind:"image", source_filename:"f.png", source_path:"p",
             doc_type:"trade_confirmation", needs_attention:false, payload_json:"{}", raw_llm_json:"{}",
             suggested_instrument_id:Some(instrument_id), suggested_account_id:Some(account_id),
+            external_ref: None,
         }).await.unwrap();
 
         let payload = ConfirmPayload {
@@ -300,6 +368,7 @@ mod tests {
             batch_id:"b", source_kind:"image", source_filename:"f.png", source_path:"p",
             doc_type:"trade_confirmation", needs_attention:false, payload_json:"{}", raw_llm_json:"{}",
             suggested_instrument_id:Some(instrument_id), suggested_account_id:Some(account_id),
+            external_ref: None,
         }).await.unwrap();
         let payload = ConfirmPayload { account_id, instrument_id, entry_type:"buy".into(),
             executed_at:"2026-01-02T00:00:00Z".into(), quantity:"1".into(), price_native:"100".into(),
@@ -318,6 +387,7 @@ mod tests {
             batch_id:"b", source_kind:"image", source_filename:"f.png", source_path:"p",
             doc_type:"trade_confirmation", needs_attention:false, payload_json:"{}", raw_llm_json:"{}",
             suggested_instrument_id:Some(instrument_id), suggested_account_id:Some(account_id),
+            external_ref: None,
         }).await.unwrap();
         let payload = ConfirmPayload { account_id, instrument_id, entry_type:"buy".into(),
             executed_at:"2026-01-02T00:00:00Z".into(), quantity:"1".into(), price_native:"100".into(),
@@ -335,6 +405,7 @@ mod tests {
             batch_id:"b", source_kind:"image", source_filename:"f.png", source_path:"p",
             doc_type:"holdings_snapshot", needs_attention:false, payload_json:"{}", raw_llm_json:"{}",
             suggested_instrument_id:None, suggested_account_id:None,
+            external_ref: None,
         }).await.unwrap();
         reject(&db, item.id).await.unwrap();
         assert_eq!(review_items::get(&db, item.id).await.unwrap().status, "rejected");
@@ -349,6 +420,7 @@ mod tests {
             batch_id:"b", source_kind:"image", source_filename:"asdc.jpeg", source_path:"p",
             doc_type:"txn_history", needs_attention:false, payload_json:"{}", raw_llm_json:"{}",
             suggested_instrument_id:Some(instrument_id), suggested_account_id:Some(account_id),
+            external_ref: None,
         }).await.unwrap();
         let payload = ConfirmPayload {
             account_id, instrument_id, entry_type:"buy".into(),
@@ -372,6 +444,7 @@ mod tests {
             batch_id:"b", source_kind:"image", source_filename:"asdc.jpeg", source_path:"p",
             doc_type:"txn_history", needs_attention:false, payload_json:"{}", raw_llm_json:"{}",
             suggested_instrument_id:Some(instrument_id), suggested_account_id:Some(account_id),
+            external_ref: None,
         }).await.unwrap();
         let payload = ConfirmPayload {
             account_id, instrument_id, entry_type:"sell".into(),
@@ -394,6 +467,7 @@ mod tests {
             batch_id:"b", source_kind:"image", source_filename:"f.png", source_path:"p",
             doc_type:"txn_history", needs_attention:true, payload_json:"{}", raw_llm_json:"{}",
             suggested_instrument_id:Some(instrument_id), suggested_account_id:Some(account_id),
+            external_ref: None,
         }).await.unwrap();
         let payload = ConfirmPayload {
             account_id, instrument_id, entry_type:"buy".into(),
@@ -417,6 +491,7 @@ mod tests {
             batch_id:"b", source_kind:"image", source_filename:"f.png", source_path:"p",
             doc_type:"txn_history", needs_attention:true, payload_json:"{}", raw_llm_json:"{}",
             suggested_instrument_id:Some(instrument_id), suggested_account_id:Some(account_id),
+            external_ref: None,
         }).await.unwrap();
         let payload = ConfirmPayload {
             account_id, instrument_id, entry_type:"dividend".into(),
@@ -453,6 +528,7 @@ mod tests {
             batch_id:"b", source_kind:"image", source_filename:"asdc.jpeg", source_path:"p",
             doc_type:"txn_history", needs_attention:false, payload_json:"{}", raw_llm_json:"{}",
             suggested_instrument_id:Some(instrument_id), suggested_account_id:Some(account_id),
+            external_ref: None,
         }).await.unwrap();
         confirm(&db, item.id, &amount_only_payload(account_id, instrument_id, "buy", "13000000")).await.unwrap();
         let txns = transactions::list_all(&db).await.unwrap();
@@ -471,6 +547,7 @@ mod tests {
             batch_id:"b", source_kind:"image", source_filename:"asdc.jpeg", source_path:"p",
             doc_type:"txn_history", needs_attention:false, payload_json:"{}", raw_llm_json:"{}",
             suggested_instrument_id:Some(instrument_id), suggested_account_id:Some(account_id),
+            external_ref: None,
         }).await.unwrap();
         confirm(&db, item.id, &amount_only_payload(account_id, instrument_id, "buy", "13000000")).await.unwrap();
         let txns = transactions::list_all(&db).await.unwrap();
@@ -489,6 +566,7 @@ mod tests {
             batch_id:"b", source_kind:"image", source_filename:"asdc.jpeg", source_path:"p",
             doc_type:"txn_history", needs_attention:false, payload_json:"{}", raw_llm_json:"{}",
             suggested_instrument_id:Some(instrument_id), suggested_account_id:Some(account_id),
+            external_ref: None,
         }).await.unwrap();
         confirm(&db, item.id, &amount_only_payload(account_id, instrument_id, "sell", "5000000")).await.unwrap();
         let txns = transactions::list_all(&db).await.unwrap();
@@ -505,6 +583,7 @@ mod tests {
             batch_id:"b", source_kind:"image", source_filename:"a.jpeg", source_path:"p",
             doc_type:"txn_history", needs_attention:false, payload_json:"{}", raw_llm_json:"{}",
             suggested_instrument_id:Some(instrument_id), suggested_account_id:Some(account_id),
+            external_ref: None,
         }).await.unwrap();
         confirm(&db, item1.id, &amount_only_payload(account_id, instrument_id, "buy", "13000000")).await.unwrap();
         // NAV arrives later; a second confirm must NOT switch conventions.
@@ -513,6 +592,7 @@ mod tests {
             batch_id:"b", source_kind:"image", source_filename:"b.jpeg", source_path:"p",
             doc_type:"txn_history", needs_attention:false, payload_json:"{}", raw_llm_json:"{}",
             suggested_instrument_id:Some(instrument_id), suggested_account_id:Some(account_id),
+            external_ref: None,
         }).await.unwrap();
         confirm(&db, item2.id, &amount_only_payload(account_id, instrument_id, "sell", "5000000")).await.unwrap();
         let txns = transactions::list_all(&db).await.unwrap();
@@ -532,6 +612,7 @@ mod tests {
             batch_id:"b", source_kind:"image", source_filename:"a.jpeg", source_path:"p",
             doc_type:"txn_history", needs_attention:false, payload_json:"{}", raw_llm_json:"{}",
             suggested_instrument_id:Some(instrument_id), suggested_account_id:Some(account_id),
+            external_ref: None,
         }).await.unwrap();
         confirm(&db, item.id, &amount_only_payload(account_id, instrument_id, "buy", "1000000")).await.unwrap();
         let txns = transactions::list_all(&db).await.unwrap();
@@ -547,11 +628,125 @@ mod tests {
             batch_id:"b", source_kind:"image", source_filename:"f.png", source_path:"p",
             doc_type:"txn_history", needs_attention:false, payload_json:"{}", raw_llm_json:"{}",
             suggested_instrument_id:Some(instrument_id), suggested_account_id:Some(account_id),
+            external_ref: None,
         }).await.unwrap();
         confirm(&db, item.id, &amount_only_payload(account_id, instrument_id, "buy", "750000")).await.unwrap();
         let txns = transactions::list_all(&db).await.unwrap();
         assert_eq!(txns[0].quantity, dec!(750000));
         assert_eq!(txns[0].price_native, dec!(1));
         assert_eq!(txns[0].note, None, "non-bibit fallback must not add a note");
+    }
+
+    #[tokio::test]
+    async fn confirm_bca_withdrawal_creates_txn_and_cashflow() {
+        use crate::repo::{cashflow, review_items};
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        let now = chrono::Utc::now().to_rfc3339();
+
+        // Seed a Cash instrument and a BCA account (FKs for the txn).
+        let account_id = sqlx::query(
+            "INSERT INTO account (name, account_type, native_currency, created_at) VALUES (?,?,?,?)")
+            .bind("BCA").bind("bank").bind("IDR").bind(&now)
+            .execute(&db).await.unwrap().last_insert_rowid();
+        let instrument_id = sqlx::query(
+            "INSERT INTO instrument (symbol, name, instrument_type, native_currency, price_source) VALUES (?,?,?,?,?)")
+            .bind("CASHIDR").bind("Cash IDR").bind("cash").bind("IDR").bind("manual")
+            .execute(&db).await.unwrap().last_insert_rowid();
+
+        // Stage a BCA withdrawal review item carrying provenance in its payload.
+        let payload = serde_json::json!({
+            "entry_type": "withdrawal",
+            "currency": "IDR",
+            "executed_at": "2026-05-01T00:00:00Z",
+            "amount_native": "242000.00",
+            "cashflow_category": "Transfer",
+            "external_ref": "bca:8415525237:2026-05-01:242000.00:0",
+            "note": "TRSF E-BANKING DB PT Moratelin"
+        }).to_string();
+        let item = review_items::create(&db, &crate::repo::review_items::NewReviewItem {
+            batch_id: "b1", source_kind: "pdf", source_filename: "s.pdf", source_path: "",
+            doc_type: "bank_statement_bca", needs_attention: false,
+            payload_json: &payload, raw_llm_json: "{}",
+            suggested_instrument_id: None, suggested_account_id: None,
+            external_ref: None,
+        }).await.unwrap();
+
+        let p = ConfirmPayload {
+            account_id, instrument_id, entry_type: "withdrawal".into(),
+            executed_at: "2026-05-01T00:00:00Z".into(),
+            quantity: String::new(), price_native: String::new(),
+            fee_native: None, currency: "IDR".into(),
+            fx_to_idr: Some("1".into()), fx_to_usd: Some("1".into()),
+            note: None, amount_native: Some("242000.00".into()),
+        };
+        let txn_id = confirm(&db, item.id, &p).await.unwrap();
+        assert!(txn_id > 0);
+
+        let rows = cashflow::list_all(&db).await.unwrap();
+        assert_eq!(rows.len(), 1, "one cashflow row created");
+        assert_eq!(rows[0].direction, "out");
+        assert_eq!(rows[0].amount, "242000.00");
+        assert_eq!(rows[0].source.as_deref(), Some("bank_statement_bca"));
+        assert_eq!(rows[0].external_ref.as_deref(), Some("bca:8415525237:2026-05-01:242000.00:0"));
+        assert!(rows[0].category_id.is_some(), "Transfer category attached");
+    }
+
+    #[tokio::test]
+    async fn confirm_bca_deposit_creates_txn_and_cashflow() {
+        use crate::repo::{cashflow, cashflow_categories, review_items};
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        let now = chrono::Utc::now().to_rfc3339();
+
+        // Seed a Cash instrument and a BCA account (FKs for the txn).
+        let account_id = sqlx::query(
+            "INSERT INTO account (name, account_type, native_currency, created_at) VALUES (?,?,?,?)")
+            .bind("BCA").bind("bank").bind("IDR").bind(&now)
+            .execute(&db).await.unwrap().last_insert_rowid();
+        let instrument_id = sqlx::query(
+            "INSERT INTO instrument (symbol, name, instrument_type, native_currency, price_source) VALUES (?,?,?,?,?)")
+            .bind("CASHIDR").bind("Cash IDR").bind("cash").bind("IDR").bind("manual")
+            .execute(&db).await.unwrap().last_insert_rowid();
+
+        // Stage a BCA deposit review item carrying provenance in its payload.
+        let payload = serde_json::json!({
+            "entry_type": "deposit",
+            "currency": "IDR",
+            "executed_at": "2026-05-12T00:00:00Z",
+            "amount_native": "49995500.00",
+            "cashflow_category": "Transfer",
+            "external_ref": "bca:8415525237:2026-05-12:49995500.00:0",
+            "note": "TRSF MASUK"
+        }).to_string();
+        let item = review_items::create(&db, &crate::repo::review_items::NewReviewItem {
+            batch_id: "b2", source_kind: "pdf", source_filename: "s.pdf", source_path: "",
+            doc_type: "bank_statement_bca", needs_attention: false,
+            payload_json: &payload, raw_llm_json: "{}",
+            suggested_instrument_id: None, suggested_account_id: None,
+            external_ref: None,
+        }).await.unwrap();
+
+        let p = ConfirmPayload {
+            account_id, instrument_id, entry_type: "deposit".into(),
+            executed_at: "2026-05-12T00:00:00Z".into(),
+            quantity: String::new(), price_native: String::new(),
+            fee_native: None, currency: "IDR".into(),
+            fx_to_idr: Some("1".into()), fx_to_usd: Some("1".into()),
+            note: None, amount_native: Some("49995500.00".into()),
+        };
+        let txn_id = confirm(&db, item.id, &p).await.unwrap();
+        assert!(txn_id > 0);
+
+        let rows = cashflow::list_all(&db).await.unwrap();
+        assert_eq!(rows.len(), 1, "one cashflow row created");
+        assert_eq!(rows[0].direction, "in");
+        assert_eq!(rows[0].amount, "49995500.00");
+        assert_eq!(rows[0].source.as_deref(), Some("bank_statement_bca"));
+        assert_eq!(rows[0].external_ref.as_deref(), Some("bca:8415525237:2026-05-12:49995500.00:0"));
+        assert!(rows[0].category_id.is_some(), "Transfer category attached");
+
+        // The "Transfer" category for a deposit must have kind "income".
+        // kind is first-write-wins; here the deposit is the first Transfer so kind is "income".
+        let cat = cashflow_categories::get(&db, rows[0].category_id.unwrap()).await.unwrap();
+        assert_eq!(cat.kind, "income");
     }
 }

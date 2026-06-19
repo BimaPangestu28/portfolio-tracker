@@ -52,6 +52,7 @@ pub async fn run_sync(db: &Db, conn_row: &connectors::ConnectorRow, connector: &
                     batch_id: &source, source_kind: "connector", source_filename: &conn_row.label, source_path: "(connector)",
                     doc_type: "connector_sync", needs_attention: true, payload_json: &payload, raw_llm_json: "{}",
                     suggested_instrument_id: None, suggested_account_id: Some(conn_row.account_id),
+                    external_ref: None,
                 }).await?;
                 report.staged += 1;
             }

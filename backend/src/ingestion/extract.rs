@@ -33,6 +33,14 @@ pub struct ExtractedEntry {
     /// not be safely corrected; forces the item into the human review queue.
     #[serde(default)]
     pub force_attention: bool,
+    /// Cashflow category name chosen by deterministic bank-statement parsing
+    /// (e.g. BCA). Read at confirm time to attach the cashflow row's category.
+    #[serde(default)]
+    pub cashflow_category: Option<String>,
+    /// Stable provenance key for deduplicating bank-statement rows across
+    /// re-uploads. Set by deterministic parsing, never by the LLM.
+    #[serde(default)]
+    pub external_ref: Option<String>,
 }
 fn default_conf() -> f64 { 1.0 }
 
@@ -208,6 +216,8 @@ mod tests {
             confidence: 1.0,
             amount_native: amount.map(String::from),
             force_attention: false,
+            cashflow_category: None,
+            external_ref: None,
         }
     }
 

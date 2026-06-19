@@ -1,3 +1,4 @@
+pub mod bank;
 pub mod csv;
 pub mod extract;
 pub mod ingest;
