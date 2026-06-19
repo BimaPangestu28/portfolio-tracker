@@ -135,6 +135,7 @@ pub fn router(state: AppState) -> Router {
         .route("/clients", get(invoices::list_clients))
         .route("/news/today", get(news::today))
         .route("/news/digest/:date", get(news::digest_by_date))
+        .route("/news/dates", get(news::dates))
         .route("/goals", get(goals::list_goals).post(goals::create_goal))
         .route("/goals/:id", delete(goals::delete_goal))
         .route(

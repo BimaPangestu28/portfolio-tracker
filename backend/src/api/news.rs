@@ -1,7 +1,7 @@
 use crate::error::AppError;
 use crate::repo::news as repo;
 use crate::AppState;
-use axum::{extract::{Path, State}, Json};
+use axum::{extract::{Path, Query, State}, Json};
 use serde::Serialize;
 
 #[derive(Serialize)]
@@ -32,6 +32,19 @@ pub struct TodayDto {
     pub date: Option<String>,
     pub articles: Vec<ArticleDto>,
     pub quiz: Vec<QuizDto>,
+}
+
+#[derive(Serialize)]
+pub struct NewsDateDto {
+    pub date: String,
+    pub article_count: i64,
+    pub created_at: String,
+}
+
+#[derive(serde::Deserialize)]
+pub struct DatesQuery {
+    pub limit: Option<i64>,
+    pub offset: Option<i64>,
 }
 
 /// Decode a stored JSON string-array column, warning (not silently defaulting)
@@ -88,6 +101,26 @@ pub async fn today(State(s): State<AppState>) -> Result<Json<TodayDto>, AppError
         .format("%Y-%m-%d")
         .to_string();
     Ok(Json(load_digest(&s.db, &date).await?))
+}
+
+/// Read-only: digest dates, newest first, paginated. `limit` defaults to 30
+/// (clamped 1..=100), `offset` defaults to 0.
+pub async fn dates(
+    State(s): State<AppState>,
+    Query(q): Query<DatesQuery>,
+) -> Result<Json<Vec<NewsDateDto>>, AppError> {
+    let limit = q.limit.unwrap_or(30).clamp(1, 100);
+    let offset = q.offset.unwrap_or(0).max(0);
+    let rows = repo::dates(&s.db, limit, offset).await.map_err(AppError::Other)?;
+    Ok(Json(
+        rows.into_iter()
+            .map(|r| NewsDateDto {
+                date: r.digest_date,
+                article_count: r.article_count,
+                created_at: r.created_at,
+            })
+            .collect(),
+    ))
 }
 
 /// Read-only: the persisted digest for a specific WIB date (YYYY-MM-DD).
@@ -225,5 +258,28 @@ mod tests {
         let bytes = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
         let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(v["available"], false);
+    }
+
+    #[serial]
+    #[tokio::test]
+    async fn dates_endpoint_lists_digests_newest_first() {
+        let state = state_with_db().await;
+        let art = crate::repo::news::NewArticle {
+            position: 0, title: "t".into(), url: "https://ex.com/x".into(),
+            source: "HN".into(), score: 1, summary: "s".into(),
+            key_points_json: "[]".into(), image_url: None, read_minutes: None,
+        };
+        crate::repo::news::insert(&state.db, "2026-06-18", "2026-06-18T00:00:00Z", &[art], &[]).await.unwrap();
+
+        let app = crate::api::router(state);
+        let res = app.oneshot(
+            Request::builder().uri("/news/dates").body(Body::empty()).unwrap()
+        ).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let bytes = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(v.as_array().unwrap().len(), 1);
+        assert_eq!(v[0]["date"], "2026-06-18");
+        assert_eq!(v[0]["article_count"], 1);
     }
 }
