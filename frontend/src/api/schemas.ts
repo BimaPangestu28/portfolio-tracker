@@ -586,3 +586,36 @@ export const HyperliquidViewSchema = z.object({
 });
 
 export type HyperliquidView = z.infer<typeof HyperliquidViewSchema>;
+
+// ── DCA Allocation Planner ──────────────────────────────────────────────────
+
+export const DcaSettingsSchema = z.object({
+  id: z.number(),
+  monthly_budget: z.string(),
+  frequency: z.enum(["monthly", "weekly"]),
+  anchor_day: z.number(),
+  rounding_step: z.string(),
+  updated_at: z.string(),
+});
+export type DcaSettings = z.infer<typeof DcaSettingsSchema>;
+
+export const DcaCategoryLineSchema = z.object({
+  category_id: z.number(),
+  name: z.string(),
+  target_pct: z.string(),
+  actual_pct: z.string(),
+  current_value_idr: z.string(),
+  drift_pct: z.string(),
+  allocate_idr: z.string(),
+  phase: z.enum(["rebalance", "proportional", "mixed", "none"]),
+});
+export type DcaCategoryLine = z.infer<typeof DcaCategoryLineSchema>;
+
+export const DcaPlanSchema = z.object({
+  budget_idr: z.string(),
+  total_value_idr: z.string(),
+  mode: z.enum(["rebalance", "mixed", "proportional", "empty"]),
+  lines: z.array(DcaCategoryLineSchema),
+  note: z.string().nullable(),
+});
+export type DcaPlan = z.infer<typeof DcaPlanSchema>;

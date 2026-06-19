@@ -1,5 +1,6 @@
 pub mod allocation;
 pub mod cost_basis;
+pub mod dca;
 pub mod models;
 pub mod performance;
 pub mod valuation;

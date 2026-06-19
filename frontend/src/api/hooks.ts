@@ -20,8 +20,10 @@ import {
   KbDocSchema, CsProductSchema, CsOrderSchema,
   CsConversationSchema, CsMessageSchema, CsEscalationSchema,
   HyperliquidViewSchema,
+  DcaSettingsSchema, DcaPlanSchema,
   type Account, type Category, type Instrument, type Transaction, type ReviewItem,
   type CashflowCategory, type Cashflow, type Connector, type Goal,
+  type DcaSettings,
 } from "./schemas";
 
 export const useSummary = () =>
@@ -447,3 +449,17 @@ export const useHyperliquid = () =>
     queryKey: ["hyperliquid"],
     queryFn: () => api.get("/portfolio/hyperliquid", HyperliquidViewSchema),
   });
+
+// ── DCA Allocation Planner hooks ────────────────────────────────────────────
+
+export const useDcaSettings = () =>
+  useQuery({ queryKey: ["dca-settings"], queryFn: () => api.get("/dca/settings", DcaSettingsSchema) });
+
+export const useDcaPlan = () =>
+  useQuery({ queryKey: ["dca-plan"], queryFn: () => api.get("/dca/plan", DcaPlanSchema) });
+
+export const useUpdateDcaSettings = () =>
+  useInvalidatingMutation(
+    (b: Omit<DcaSettings, "id" | "updated_at">) => api.patch("/dca/settings", DcaSettingsSchema, b),
+    ["dca-settings", "dca-plan"],
+  );

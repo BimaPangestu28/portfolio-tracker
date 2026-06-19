@@ -25,6 +25,7 @@ pub mod invoices;
 pub mod news;
 pub mod hl;
 pub mod cs;
+pub mod dca_settings;
 
 use rust_decimal::Decimal;
 use std::str::FromStr;

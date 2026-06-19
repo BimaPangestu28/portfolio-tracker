@@ -19,8 +19,9 @@ RUN touch src/main.rs && cargo build --release --locked
 FROM debian:bookworm-slim
 # ca-certificates: TLS roots for outbound calls (Anthropic API, price feeds).
 # curl: used by the compose healthcheck.
+# poppler-utils: provides pdftotext for bank-statement PDF text extraction.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates curl \
+ && apt-get install -y --no-install-recommends ca-certificates curl poppler-utils \
  && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /app/target/release/portfolio-tracker /usr/local/bin/portfolio-tracker
