@@ -1,63 +1,54 @@
-import { useNewsToday } from "../api/hooks";
-import NewsQuiz from "../components/NewsQuiz";
+import { useState } from "react";
+import { Link } from "react-router-dom";
+import { useNewsDates, useNewsToday } from "../api/hooks";
+import NewsDigest from "../components/NewsDigest";
 import { QueryState } from "../components/QueryState";
+
+const PAGE = 30;
+
+const formatDate = (iso: string) =>
+  new Date(`${iso}T00:00:00`).toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" });
 
 export default function NewsPage() {
   const q = useNewsToday();
+  const [limit, setLimit] = useState(PAGE);
+  const dates = useNewsDates(limit);
+
   return (
-    <QueryState isLoading={q.isLoading} error={q.error}>
-      {q.data && !q.data.available ? (
-        <p style={{ color: "hsl(var(--muted-foreground))" }}>
-          Digest berita hari ini belum siap. Cek lagi nanti pagi ya.
-        </p>
-      ) : q.data ? (
-        <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
-          <header>
-            <h1 style={{ fontSize: 20, fontWeight: 600, letterSpacing: "-0.015em" }}>Bacaan pagi</h1>
-            <p style={{ fontSize: 13, color: "hsl(var(--muted-foreground))", marginTop: 2 }}>{q.data.date}</p>
-          </header>
-          {q.data.articles.map((a) => (
-            <article key={a.position} className="card card-pad">
-              {a.image_url != null && (
-                <img
-                  src={a.image_url}
-                  alt=""
-                  loading="lazy"
-                  className="w-full h-28 sm:h-40 object-cover rounded-md mb-3"
-                  onError={(e) => { e.currentTarget.style.display = "none"; }}
-                />
-              )}
-              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
-                <span className="badge badge-neutral">{a.source}</span>
-                {a.read_minutes != null && (
-                  <span style={{ fontSize: 12, color: "hsl(var(--muted-foreground))" }}>
-                    ⏱ {a.read_minutes} mnt baca
-                  </span>
-                )}
-              </div>
-              <a
-                href={a.url}
-                target="_blank"
-                rel="noreferrer"
-                style={{ fontSize: 16, fontWeight: 600, textDecoration: "none" }}
-                onMouseEnter={(e) => { (e.target as HTMLAnchorElement).style.textDecoration = "underline"; }}
-                onMouseLeave={(e) => { (e.target as HTMLAnchorElement).style.textDecoration = "none"; }}
-              >
-                {a.title}
-              </a>
-              <p style={{ marginTop: 8 }}>{a.summary}</p>
-              {a.key_points.length > 0 && (
-                <ul style={{ marginTop: 8, paddingLeft: 20, fontSize: 13 }}>
-                  {a.key_points.map((k, i) => (
-                    <li key={i}>{k}</li>
-                  ))}
-                </ul>
-              )}
-            </article>
+    <div style={{ display: "flex", flexDirection: "column", gap: 32 }}>
+      <QueryState isLoading={q.isLoading} error={q.error}>
+        {q.data && !q.data.available ? (
+          <p style={{ color: "hsl(var(--muted-foreground))" }}>
+            Digest berita hari ini belum siap. Cek lagi nanti pagi ya.
+          </p>
+        ) : q.data ? (
+          <NewsDigest date={q.data.date ?? ""} articles={q.data.articles} quiz={q.data.quiz} />
+        ) : null}
+      </QueryState>
+
+      {dates.data && dates.data.length > 0 && (
+        <section style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <h2 style={{ fontSize: 16, fontWeight: 600 }}>Arsip</h2>
+          {dates.data.map((d) => (
+            <Link
+              key={d.date}
+              to={`/news/${d.date}`}
+              className="card card-pad"
+              style={{ textDecoration: "none", display: "flex", justifyContent: "space-between", gap: 8 }}
+            >
+              <span>{formatDate(d.date)}</span>
+              <span style={{ color: "hsl(var(--muted-foreground))", fontSize: 13 }}>
+                {d.article_count} artikel
+              </span>
+            </Link>
           ))}
-          <NewsQuiz questions={q.data.quiz} date={q.data.date ?? ""} />
-        </div>
-      ) : null}
-    </QueryState>
+          {dates.data.length >= limit && (
+            <button className="btn btn-secondary" onClick={() => setLimit((l) => l + PAGE)}>
+              Muat lebih banyak
+            </button>
+          )}
+        </section>
+      )}
+    </div>
   );
 }

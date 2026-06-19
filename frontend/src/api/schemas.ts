@@ -468,6 +468,14 @@ export const NewsTodaySchema = z.object({
 export type NewsToday = z.infer<typeof NewsTodaySchema>;
 export type NewsArticle = z.infer<typeof NewsArticleSchema>;
 
+export const NewsDateSchema = z.object({
+  date: z.string(),
+  article_count: z.number(),
+  created_at: z.string(),
+});
+
+export type NewsDate = z.infer<typeof NewsDateSchema>;
+
 // ── CS Admin schemas ───────────────────────────────────────────────────────
 
 export const KbDocSchema = z.object({

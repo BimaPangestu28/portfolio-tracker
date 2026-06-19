@@ -16,6 +16,7 @@ import SettingsPage from "./pages/SettingsPage";
 import AgendaPage from "./pages/AgendaPage";
 import TugasPage from "./pages/TugasPage";
 import NewsPage from "./pages/NewsPage";
+import NewsDatePage from "./pages/NewsDatePage";
 import CsDocsPage from "./pages/CsDocsPage";
 import CsPricingPage from "./pages/CsPricingPage";
 import CsOrdersPage from "./pages/CsOrdersPage";
@@ -47,6 +48,7 @@ export default function App() {
         <Route path="tugas" element={<TugasPage />} />
         <Route path="chat" element={<ChatPage />} />
         <Route path="news" element={<NewsPage />} />
+        <Route path="news/:date" element={<NewsDatePage />} />
         <Route path="settings" element={<SettingsPage />} />
 
         {/* ── CS Admin ── */}
