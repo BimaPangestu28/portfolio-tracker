@@ -149,8 +149,67 @@ pub async fn confirm(db: &Db, item_id: i64, p: &ConfirmPayload) -> anyhow::Resul
         external_id: None,
     };
     let txn = transactions::create(db, &nt).await?;
+
+    // Bank-statement entries also feed the cashflow/Budget view. We read the
+    // category + dedup ref from the stored extraction (the user-facing
+    // ConfirmPayload does not carry them), and key direction off entry_type.
+    if item.doc_type == "bank_statement_bca"
+        && matches!(p.entry_type.as_str(), "deposit" | "withdrawal")
+    {
+        if let Err(e) = write_bank_cashflow(db, &item, p).await {
+            // Don't fail the whole confirm if the cashflow mirror fails; the
+            // txn is the source of truth. Surface it loudly for follow-up.
+            tracing::warn!("confirm: cashflow mirror failed for item {}: {e:#}", item.id);
+        }
+    }
+
     review_items::mark_confirmed(db, item_id, txn.id).await?;
     Ok(txn.id)
+}
+
+/// Mirror a confirmed bank-statement deposit/withdrawal into the cashflow table.
+/// Idempotent on `(source, external_ref)` so re-imports never double-count.
+async fn write_bank_cashflow(
+    db: &Db,
+    item: &crate::repo::review_items::ReviewItemRow,
+    p: &ConfirmPayload,
+) -> anyhow::Result<()> {
+    use crate::repo::{cashflow, cashflow_categories};
+    let stored: crate::ingestion::extract::ExtractedEntry =
+        serde_json::from_str(&item.payload_json)?;
+    let external_ref = stored.external_ref
+        .ok_or_else(|| anyhow::anyhow!("bank_statement item missing external_ref"))?;
+
+    let direction = if p.entry_type == "deposit" { "in" } else { "out" };
+    let amount = p.amount_native.clone()
+        .ok_or_else(|| anyhow::anyhow!("bank cashflow needs amount_native"))?;
+    let occurred_on = to_rfc3339(&p.executed_at)
+        .unwrap_or_else(|| p.executed_at.clone());
+    let occurred_on = occurred_on.get(0..10).unwrap_or(&occurred_on).to_string();
+
+    let category_id = match stored.cashflow_category.as_deref() {
+        Some(name) if !name.is_empty() => {
+            let kind = if direction == "in" { "income" } else { "expense" };
+            Some(cashflow_categories::ensure_by_name(db, name, kind).await?.id)
+        }
+        _ => None,
+    };
+
+    cashflow::insert_sourced(
+        db,
+        &cashflow::NewCashflow {
+            account_id: Some(p.account_id),
+            occurred_on,
+            direction: direction.to_string(),
+            amount,
+            currency: p.currency.clone(),
+            category_id,
+            note: p.note.clone().or_else(|| stored.note.clone()),
+        },
+        "bank_statement_bca",
+        &external_ref,
+    ).await?;
+    Ok(())
 }
 
 pub async fn reject(db: &Db, item_id: i64) -> anyhow::Result<()> {
@@ -553,5 +612,58 @@ mod tests {
         assert_eq!(txns[0].quantity, dec!(750000));
         assert_eq!(txns[0].price_native, dec!(1));
         assert_eq!(txns[0].note, None, "non-bibit fallback must not add a note");
+    }
+
+    #[tokio::test]
+    async fn confirm_bca_withdrawal_creates_txn_and_cashflow() {
+        use crate::repo::{cashflow, review_items};
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        let now = chrono::Utc::now().to_rfc3339();
+
+        // Seed a Cash instrument and a BCA account (FKs for the txn).
+        let account_id = sqlx::query(
+            "INSERT INTO account (name, account_type, native_currency, created_at) VALUES (?,?,?,?)")
+            .bind("BCA").bind("bank").bind("IDR").bind(&now)
+            .execute(&db).await.unwrap().last_insert_rowid();
+        let instrument_id = sqlx::query(
+            "INSERT INTO instrument (symbol, name, instrument_type, native_currency, price_source) VALUES (?,?,?,?,?)")
+            .bind("CASHIDR").bind("Cash IDR").bind("cash").bind("IDR").bind("manual")
+            .execute(&db).await.unwrap().last_insert_rowid();
+
+        // Stage a BCA withdrawal review item carrying provenance in its payload.
+        let payload = serde_json::json!({
+            "entry_type": "withdrawal",
+            "currency": "IDR",
+            "executed_at": "2026-05-01T00:00:00Z",
+            "amount_native": "242000.00",
+            "cashflow_category": "Transfer",
+            "external_ref": "bca:8415525237:2026-05-01:242000.00:0",
+            "note": "TRSF E-BANKING DB PT Moratelin"
+        }).to_string();
+        let item = review_items::create(&db, &crate::repo::review_items::NewReviewItem {
+            batch_id: "b1", source_kind: "pdf", source_filename: "s.pdf", source_path: "",
+            doc_type: "bank_statement_bca", needs_attention: false,
+            payload_json: &payload, raw_llm_json: "{}",
+            suggested_instrument_id: None, suggested_account_id: None,
+        }).await.unwrap();
+
+        let p = ConfirmPayload {
+            account_id, instrument_id, entry_type: "withdrawal".into(),
+            executed_at: "2026-05-01T00:00:00Z".into(),
+            quantity: String::new(), price_native: String::new(),
+            fee_native: None, currency: "IDR".into(),
+            fx_to_idr: Some("1".into()), fx_to_usd: Some("1".into()),
+            note: None, amount_native: Some("242000.00".into()),
+        };
+        let txn_id = confirm(&db, item.id, &p).await.unwrap();
+        assert!(txn_id > 0);
+
+        let rows = cashflow::list_all(&db).await.unwrap();
+        assert_eq!(rows.len(), 1, "one cashflow row created");
+        assert_eq!(rows[0].direction, "out");
+        assert_eq!(rows[0].amount, "242000.00");
+        assert_eq!(rows[0].source.as_deref(), Some("bank_statement_bca"));
+        assert_eq!(rows[0].external_ref.as_deref(), Some("bca:8415525237:2026-05-01:242000.00:0"));
+        assert!(rows[0].category_id.is_some(), "Transfer category attached");
     }
 }

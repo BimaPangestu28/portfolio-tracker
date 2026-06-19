@@ -106,10 +106,16 @@ pub async fn resolve_qty_price(
         let price = (crate::repo::dec(a)? / units).round_dp(4);
         return Ok((units.normalize().to_string(), price.normalize().to_string()));
     }
-    // amount only: fund-aware derivation (buy/sell only).
+    // amount only: fund-aware derivation (buy/sell); cash-flow entries
+    // (deposit/withdrawal) always record quantity = amount at price 1 since there
+    // are no units to derive — the amount IS the ledger value.
     if let Some(a) = a {
         if matches!(entry_type, "buy" | "sell") {
             return amount_only(db, ins, a, allow_price_one_fallback, note).await;
+        }
+        if matches!(entry_type, "deposit" | "withdrawal") {
+            let amount_dec = crate::repo::dec(a)?;
+            return Ok((amount_dec.normalize().to_string(), "1".to_string()));
         }
     }
     // quantity only (e.g. dividend in units): price defaults to 0.
