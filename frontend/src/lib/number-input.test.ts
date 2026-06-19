@@ -58,4 +58,9 @@ describe("caret helpers", () => {
     expect(caretFromDigitCount("1.250.000", 0)).toBe(0);
     expect(caretFromDigitCount("1.250", 99)).toBe(5);
   });
+  it("advances past a trailing comma after the last digit", () => {
+    // "1.250.000," has 7 digits; the 7th digit '0' is at index 8, next char is ',' at index 9,
+    // so the caret advances past the comma to index 10
+    expect(caretFromDigitCount("1.250.000,", 7)).toBe(10);
+  });
 });
