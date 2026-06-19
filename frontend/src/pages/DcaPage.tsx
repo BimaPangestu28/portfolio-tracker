@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { useDcaSettings, useUpdateDcaSettings, useDcaPlan } from "../api/hooks";
 import { QueryState } from "../components/QueryState";
 import { formatIDR, formatPct, parseNum } from "../lib/format";
+import { NumberInput } from "@/components/ui/NumberInput";
 
 const MODE_LABEL: Record<string, string> = {
   rebalance: "Rebalancing",
@@ -78,8 +79,8 @@ export default function DcaPage() {
           <form className="card-pad" style={{ paddingTop: 16 }} onSubmit={submit}>
             <label className="field">
               <span className="field-label">Budget bulanan (IDR)</span>
-              <input type="number" className="input" placeholder="55000000"
-                     value={form.monthly_budget} onChange={set("monthly_budget")} />
+              <NumberInput className="input" placeholder="55000000"
+                     value={form.monthly_budget} onChange={(v) => setForm((prev) => ({ ...prev, monthly_budget: v }))} />
             </label>
             <div className="grid form-stack" style={{ gridTemplateColumns: "1fr 1fr", gap: 12 }}>
               <label className="field">
@@ -97,8 +98,8 @@ export default function DcaPage() {
             </div>
             <label className="field">
               <span className="field-label">Pembulatan (IDR)</span>
-              <input type="number" className="input" placeholder="10000"
-                     value={form.rounding_step} onChange={set("rounding_step")} />
+              <NumberInput className="input" placeholder="10000"
+                     value={form.rounding_step} onChange={(v) => setForm((prev) => ({ ...prev, rounding_step: v }))} />
             </label>
             <button type="submit" className="btn btn-primary" disabled={save.isPending}
                     style={{ marginTop: 8 }}>

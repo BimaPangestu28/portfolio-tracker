@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { Dialog } from "@/components/Dialog";
 import { useCsProducts, useCreateProduct, useUpdateProduct, useSetProductActive, useDeleteProduct } from "@/api/hooks";
 import type { CsProduct } from "@/api/schemas";
+import { NumberInput } from "@/components/ui/NumberInput";
 
 const EMPTY = { name: "", description: "", price: "", currency: "IDR", availability: "" };
 
@@ -145,7 +146,7 @@ export default function CsPricingPage() {
           <div className="grid form-stack" style={{ gridTemplateColumns: "1fr 1fr", gap: 12 }}>
             <label className="field">
               <span className="field-label">Harga</span>
-              <input type="number" className="input" value={form.price} onChange={set("price")} />
+              <NumberInput className="input" value={form.price} onChange={(v) => setForm({ ...form, price: v })} />
             </label>
             <label className="field">
               <span className="field-label">Mata uang</span>
