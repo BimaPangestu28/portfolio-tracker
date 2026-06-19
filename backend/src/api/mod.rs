@@ -1,5 +1,6 @@
 pub mod auth;
 pub mod cashflow;
+pub mod dca;
 pub mod chat;
 pub mod cs_admin;
 pub mod cs_public;
@@ -164,6 +165,11 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/ingest/review/:id/confirm", post(ingest::confirm_review))
         .route("/ingest/review/:id/reject", post(ingest::reject_review))
+        .route(
+            "/dca/settings",
+            get(dca::get_settings).patch(dca::update_settings),
+        )
+        .route("/dca/plan", get(dca::plan))
         .route("/cs/whatsapp/status",             get(cs_whatsapp::status))
         .route("/cs/whatsapp/connect",            post(cs_whatsapp::connect))
         .route("/cs/whatsapp/disconnect",         post(cs_whatsapp::disconnect))
