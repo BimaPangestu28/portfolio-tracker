@@ -92,18 +92,34 @@ left), so this is ordinary proportional DCA. `Σ target_pct` is the normalizer
 (may be < 100 if the user intentionally leaves headroom; the leftover simply
 stays as cash that period).
 
-### Rounding
+**Important — the gate is on *current* percentage, the shortfall is on the
+*projected* value.** A category qualifies for Phase 1 only if it is under target
+on the **current** basis (`actual_pct_i < target_pct_i − band_i`, where
+`actual_pct_i = value_i / V × 100`). Because `T = V + B > V`, every category's
+target *value* @T exceeds its target value @V — so if we computed "shortfall"
+purely on the T basis, even over-allocated categories would show a positive
+shortfall. The current-% gate is what enforces "starve the over-allocated": an
+over-% category is excluded before any shortfall is computed.
 
-After computing raw `alloc_i`:
+### Rounding (largest-remainder to `rounding_step`)
 
-1. Round each down to the nearest `rounding_step` (default Rp 10,000).
-2. Compute residual `B − Σ rounded_i`.
-3. Add the residual to the category with the largest raw allocation so the
-   displayed total equals `B` exactly.
+After computing raw `alloc_i` (which sum to the amount we intend to allocate —
+equal to `B` when `Σ target_pct = 100`, less when the user leaves headroom):
+
+1. For each category: `base_i = floor(alloc_i / step) × step`,
+   `rem_i = alloc_i − base_i`.
+2. Whole steps left over: `units = floor(Σ alloc_i / step) − Σ (base_i / step)`.
+3. Hand out one `step` each to the `units` categories with the largest `rem_i`.
+4. Final `alloc_i = base_i (+ step if it received one)`.
+
+This guarantees every line is a multiple of `step`, the total never exceeds `B`,
+and — when `Σ target_pct = 100` and `B` is a multiple of `step` — the lines sum
+exactly to `B`. Any remainder (intentional headroom, or rounding crumbs) is
+reported as unallocated cash in the plan note, never silently dropped.
 
 ### Emergent properties (no special-casing needed)
 
-- **Over-allocated → Rp 0** in Phase 1 (negative/zero shortfall).
+- **Over-allocated (by current %) → Rp 0** in Phase 1 (excluded by the gate).
 - **"Lainnya" (target 0%) → Rp 0** always.
 - **Within-band under-target → not rebalanced**, only ever receives Phase-2 money.
 - **Perfectly balanced portfolio → pure proportional DCA.**
@@ -113,15 +129,17 @@ After computing raw `alloc_i`:
 Targets: Crypto 40%, Saham ID 35%, Reksadana 25%. `V = 200,000,000`,
 `B = 55,000,000` → `T = 255,000,000`.
 
-| Category | target_pct | target value @T | current | shortfall |
-|----------|-----------:|----------------:|--------:|----------:|
-| Crypto    | 40% | 102,000,000 |  70,000,000 | 32,000,000 |
-| Saham ID  | 35% |  89,250,000 |  80,000,000 |  9,250,000 |
-| Reksadana | 25% |  63,750,000 |  50,000,000 | 13,750,000 |
+| Category | target_pct | current | current % | gate | target value @T | shortfall |
+|----------|-----------:|--------:|----------:|------|----------------:|----------:|
+| Crypto    | 40% | 60,000,000 | 30% | under → in  | 102,000,000 | 42,000,000 |
+| Saham ID  | 35% | 60,000,000 | 30% | under → in  |  89,250,000 | 29,250,000 |
+| Reksadana | 25% | 80,000,000 | 40% | **over → starved** |  63,750,000 | 0 |
 
-`S = 55,000,000 = B` exactly → mode `rebalance`, each gets its shortfall
-(rounded to Rp 10k, residual to Crypto). If `B` were larger than `S`, the
-overflow would spread by target weight (Phase 2).
+`S = 71,250,000 > B`, so the whole `B` is split proportional to the two
+shortfalls (mode `rebalance`): Crypto `55M × 42 / 71.25 ≈ 32,420,000`,
+Saham ID `55M × 29.25 / 71.25 ≈ 22,580,000`, Reksadana `0` (starved — it's
+over-allocated). If `B` were larger than `S`, the gaps would be filled exactly
+and the overflow spread by target weight (Phase 2).
 
 ## 5. Frequency model
 
