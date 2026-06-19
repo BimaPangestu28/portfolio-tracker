@@ -1749,6 +1749,7 @@ mod tests {
             raw_llm_json: "{}",
             suggested_instrument_id: instrument_id,
             suggested_account_id: account_id,
+            external_ref: None,
         })
         .await
         .unwrap()
@@ -2706,6 +2707,7 @@ mod tests {
                 "amount_native": "13000000", "currency": "IDR", "confidence": 0.72 }"#,
             raw_llm_json: "{}",
             suggested_instrument_id: Some(instrument.id), suggested_account_id: Some(account.id),
+            external_ref: None,
         }).await.unwrap();
         let out = dispatch(&db, "list_pending_reviews", &serde_json::json!({})).await.unwrap();
         assert!(out.contains("nominal 13000000"), "{out}");

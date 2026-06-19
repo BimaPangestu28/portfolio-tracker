@@ -311,6 +311,7 @@ mod tests {
             batch_id:"b", source_kind:"image", source_filename:"f.png", source_path:"p",
             doc_type:"txn_history", needs_attention:false, payload_json:"{}", raw_llm_json:"{}",
             suggested_instrument_id:Some(ins.id), suggested_account_id:Some(acc.id),
+            external_ref: None,
         }).await.unwrap();
         crate::repo::review_items::mark_confirmed(&db, item.id, txn.id).await.unwrap();
 

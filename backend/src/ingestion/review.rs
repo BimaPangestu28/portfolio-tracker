@@ -250,6 +250,7 @@ mod tests {
             created_txn_id: None,
             created_at: "2026-06-05T00:00:00Z".into(),
             confirmed_at: None,
+            external_ref: None,
         }
     }
 
@@ -338,6 +339,7 @@ mod tests {
             batch_id:"b", source_kind:"image", source_filename:"f.png", source_path:"p",
             doc_type:"trade_confirmation", needs_attention:false, payload_json:"{}", raw_llm_json:"{}",
             suggested_instrument_id:Some(instrument_id), suggested_account_id:Some(account_id),
+            external_ref: None,
         }).await.unwrap();
 
         let payload = ConfirmPayload {
@@ -366,6 +368,7 @@ mod tests {
             batch_id:"b", source_kind:"image", source_filename:"f.png", source_path:"p",
             doc_type:"trade_confirmation", needs_attention:false, payload_json:"{}", raw_llm_json:"{}",
             suggested_instrument_id:Some(instrument_id), suggested_account_id:Some(account_id),
+            external_ref: None,
         }).await.unwrap();
         let payload = ConfirmPayload { account_id, instrument_id, entry_type:"buy".into(),
             executed_at:"2026-01-02T00:00:00Z".into(), quantity:"1".into(), price_native:"100".into(),
@@ -384,6 +387,7 @@ mod tests {
             batch_id:"b", source_kind:"image", source_filename:"f.png", source_path:"p",
             doc_type:"trade_confirmation", needs_attention:false, payload_json:"{}", raw_llm_json:"{}",
             suggested_instrument_id:Some(instrument_id), suggested_account_id:Some(account_id),
+            external_ref: None,
         }).await.unwrap();
         let payload = ConfirmPayload { account_id, instrument_id, entry_type:"buy".into(),
             executed_at:"2026-01-02T00:00:00Z".into(), quantity:"1".into(), price_native:"100".into(),
@@ -401,6 +405,7 @@ mod tests {
             batch_id:"b", source_kind:"image", source_filename:"f.png", source_path:"p",
             doc_type:"holdings_snapshot", needs_attention:false, payload_json:"{}", raw_llm_json:"{}",
             suggested_instrument_id:None, suggested_account_id:None,
+            external_ref: None,
         }).await.unwrap();
         reject(&db, item.id).await.unwrap();
         assert_eq!(review_items::get(&db, item.id).await.unwrap().status, "rejected");
@@ -415,6 +420,7 @@ mod tests {
             batch_id:"b", source_kind:"image", source_filename:"asdc.jpeg", source_path:"p",
             doc_type:"txn_history", needs_attention:false, payload_json:"{}", raw_llm_json:"{}",
             suggested_instrument_id:Some(instrument_id), suggested_account_id:Some(account_id),
+            external_ref: None,
         }).await.unwrap();
         let payload = ConfirmPayload {
             account_id, instrument_id, entry_type:"buy".into(),
@@ -438,6 +444,7 @@ mod tests {
             batch_id:"b", source_kind:"image", source_filename:"asdc.jpeg", source_path:"p",
             doc_type:"txn_history", needs_attention:false, payload_json:"{}", raw_llm_json:"{}",
             suggested_instrument_id:Some(instrument_id), suggested_account_id:Some(account_id),
+            external_ref: None,
         }).await.unwrap();
         let payload = ConfirmPayload {
             account_id, instrument_id, entry_type:"sell".into(),
@@ -460,6 +467,7 @@ mod tests {
             batch_id:"b", source_kind:"image", source_filename:"f.png", source_path:"p",
             doc_type:"txn_history", needs_attention:true, payload_json:"{}", raw_llm_json:"{}",
             suggested_instrument_id:Some(instrument_id), suggested_account_id:Some(account_id),
+            external_ref: None,
         }).await.unwrap();
         let payload = ConfirmPayload {
             account_id, instrument_id, entry_type:"buy".into(),
@@ -483,6 +491,7 @@ mod tests {
             batch_id:"b", source_kind:"image", source_filename:"f.png", source_path:"p",
             doc_type:"txn_history", needs_attention:true, payload_json:"{}", raw_llm_json:"{}",
             suggested_instrument_id:Some(instrument_id), suggested_account_id:Some(account_id),
+            external_ref: None,
         }).await.unwrap();
         let payload = ConfirmPayload {
             account_id, instrument_id, entry_type:"dividend".into(),
@@ -519,6 +528,7 @@ mod tests {
             batch_id:"b", source_kind:"image", source_filename:"asdc.jpeg", source_path:"p",
             doc_type:"txn_history", needs_attention:false, payload_json:"{}", raw_llm_json:"{}",
             suggested_instrument_id:Some(instrument_id), suggested_account_id:Some(account_id),
+            external_ref: None,
         }).await.unwrap();
         confirm(&db, item.id, &amount_only_payload(account_id, instrument_id, "buy", "13000000")).await.unwrap();
         let txns = transactions::list_all(&db).await.unwrap();
@@ -537,6 +547,7 @@ mod tests {
             batch_id:"b", source_kind:"image", source_filename:"asdc.jpeg", source_path:"p",
             doc_type:"txn_history", needs_attention:false, payload_json:"{}", raw_llm_json:"{}",
             suggested_instrument_id:Some(instrument_id), suggested_account_id:Some(account_id),
+            external_ref: None,
         }).await.unwrap();
         confirm(&db, item.id, &amount_only_payload(account_id, instrument_id, "buy", "13000000")).await.unwrap();
         let txns = transactions::list_all(&db).await.unwrap();
@@ -555,6 +566,7 @@ mod tests {
             batch_id:"b", source_kind:"image", source_filename:"asdc.jpeg", source_path:"p",
             doc_type:"txn_history", needs_attention:false, payload_json:"{}", raw_llm_json:"{}",
             suggested_instrument_id:Some(instrument_id), suggested_account_id:Some(account_id),
+            external_ref: None,
         }).await.unwrap();
         confirm(&db, item.id, &amount_only_payload(account_id, instrument_id, "sell", "5000000")).await.unwrap();
         let txns = transactions::list_all(&db).await.unwrap();
@@ -571,6 +583,7 @@ mod tests {
             batch_id:"b", source_kind:"image", source_filename:"a.jpeg", source_path:"p",
             doc_type:"txn_history", needs_attention:false, payload_json:"{}", raw_llm_json:"{}",
             suggested_instrument_id:Some(instrument_id), suggested_account_id:Some(account_id),
+            external_ref: None,
         }).await.unwrap();
         confirm(&db, item1.id, &amount_only_payload(account_id, instrument_id, "buy", "13000000")).await.unwrap();
         // NAV arrives later; a second confirm must NOT switch conventions.
@@ -579,6 +592,7 @@ mod tests {
             batch_id:"b", source_kind:"image", source_filename:"b.jpeg", source_path:"p",
             doc_type:"txn_history", needs_attention:false, payload_json:"{}", raw_llm_json:"{}",
             suggested_instrument_id:Some(instrument_id), suggested_account_id:Some(account_id),
+            external_ref: None,
         }).await.unwrap();
         confirm(&db, item2.id, &amount_only_payload(account_id, instrument_id, "sell", "5000000")).await.unwrap();
         let txns = transactions::list_all(&db).await.unwrap();
@@ -598,6 +612,7 @@ mod tests {
             batch_id:"b", source_kind:"image", source_filename:"a.jpeg", source_path:"p",
             doc_type:"txn_history", needs_attention:false, payload_json:"{}", raw_llm_json:"{}",
             suggested_instrument_id:Some(instrument_id), suggested_account_id:Some(account_id),
+            external_ref: None,
         }).await.unwrap();
         confirm(&db, item.id, &amount_only_payload(account_id, instrument_id, "buy", "1000000")).await.unwrap();
         let txns = transactions::list_all(&db).await.unwrap();
@@ -613,6 +628,7 @@ mod tests {
             batch_id:"b", source_kind:"image", source_filename:"f.png", source_path:"p",
             doc_type:"txn_history", needs_attention:false, payload_json:"{}", raw_llm_json:"{}",
             suggested_instrument_id:Some(instrument_id), suggested_account_id:Some(account_id),
+            external_ref: None,
         }).await.unwrap();
         confirm(&db, item.id, &amount_only_payload(account_id, instrument_id, "buy", "750000")).await.unwrap();
         let txns = transactions::list_all(&db).await.unwrap();
@@ -652,6 +668,7 @@ mod tests {
             doc_type: "bank_statement_bca", needs_attention: false,
             payload_json: &payload, raw_llm_json: "{}",
             suggested_instrument_id: None, suggested_account_id: None,
+            external_ref: None,
         }).await.unwrap();
 
         let p = ConfirmPayload {
@@ -705,6 +722,7 @@ mod tests {
             doc_type: "bank_statement_bca", needs_attention: false,
             payload_json: &payload, raw_llm_json: "{}",
             suggested_instrument_id: None, suggested_account_id: None,
+            external_ref: None,
         }).await.unwrap();
 
         let p = ConfirmPayload {

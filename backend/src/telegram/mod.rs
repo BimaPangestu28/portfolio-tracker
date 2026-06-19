@@ -592,6 +592,7 @@ mod tests {
             doc_type: "txn_history", needs_attention: true,
             payload_json: r#"{"entry_type":"buy","symbol":"QQQM","amount_native":"2000000","currency":"IDR"}"#,
             raw_llm_json: "{}", suggested_instrument_id: None, suggested_account_id: None,
+            external_ref: None,
         }).await.unwrap();
         let (seed, marker) = build_upload_seed(&db, std::slice::from_ref(&item)).await;
         assert!(seed.contains("akun: belum dikenali"), "{seed}");

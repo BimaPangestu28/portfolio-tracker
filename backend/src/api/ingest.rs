@@ -85,6 +85,7 @@ pub async fn ingest_csv(State(s): State<AppState>, Json(b): Json<CsvIngestIn>) -
             batch_id: &batch_id, source_kind: "csv", source_filename: &b.filename, source_path: "(csv)",
             doc_type: "csv_import", needs_attention: needs_attention(entry),
             payload_json: &payload, raw_llm_json: "{}", suggested_instrument_id: sug_ins, suggested_account_id: sug_acc,
+            external_ref: None,
         }).await.map_err(AppError::Other)?;
         items.push(row);
     }

@@ -91,7 +91,14 @@ async fn try_ingest_bca_pdf(
     }
     let entries = crate::ingestion::bank::parse_statement(&text)?;
     let mut rows = Vec::with_capacity(entries.len());
+    let mut skipped: usize = 0;
     for e in &entries {
+        if let Some(ref_) = e.external_ref.as_deref() {
+            if review_items::exists_active_by_external_ref(db, ref_).await? {
+                skipped += 1;
+                continue;
+            }
+        }
         let payload = serde_json::to_string(e)?;
         let row = review_items::create(db, &NewReviewItem {
             batch_id,
@@ -104,8 +111,12 @@ async fn try_ingest_bca_pdf(
             raw_llm_json: "{}",
             suggested_instrument_id: None,
             suggested_account_id: None,
+            external_ref: e.external_ref.as_deref(),
         }).await?;
         rows.push(row);
+    }
+    if skipped > 0 {
+        tracing::info!("bca_pdf: skipped {skipped} duplicate review item(s) (already active for same external_ref)");
     }
     Ok(Some(rows))
 }
@@ -182,6 +193,7 @@ pub async fn ingest_batch(db: &Db, client: &NativeLlmClient, batch_id: &str, fil
                 raw_llm_json: "{}",
                 suggested_instrument_id: None,
                 suggested_account_id: None,
+                external_ref: None,
             }).await?;
             items.push(row);
             continue;
@@ -203,6 +215,7 @@ pub async fn ingest_batch(db: &Db, client: &NativeLlmClient, batch_id: &str, fil
                 raw_llm_json: &raw,
                 suggested_instrument_id: None,
                 suggested_account_id: None,
+                external_ref: None,
             }).await?;
             items.push(row);
             continue;
@@ -225,6 +238,7 @@ pub async fn ingest_batch(db: &Db, client: &NativeLlmClient, batch_id: &str, fil
                 raw_llm_json: &raw,
                 suggested_instrument_id: sug_ins,
                 suggested_account_id: sug_acc,
+                external_ref: None,
             }).await?;
             items.push(row);
         }
