@@ -180,7 +180,11 @@ async fn write_bank_cashflow(
     let external_ref = stored.external_ref
         .ok_or_else(|| anyhow::anyhow!("bank_statement item missing external_ref"))?;
 
-    let direction = if p.entry_type == "deposit" { "in" } else { "out" };
+    let direction = match p.entry_type.as_str() {
+        "deposit"    => "in",
+        "withdrawal" => "out",
+        other => anyhow::bail!("write_bank_cashflow: unexpected entry_type {other:?}"),
+    };
     let amount = p.amount_native.clone()
         .ok_or_else(|| anyhow::anyhow!("bank cashflow needs amount_native"))?;
     let occurred_on = to_rfc3339(&p.executed_at)
@@ -204,7 +208,7 @@ async fn write_bank_cashflow(
             amount,
             currency: p.currency.clone(),
             category_id,
-            note: p.note.clone().or_else(|| stored.note.clone()),
+            note: p.note.clone().or(stored.note),
         },
         "bank_statement_bca",
         &external_ref,
@@ -665,5 +669,62 @@ mod tests {
         assert_eq!(rows[0].source.as_deref(), Some("bank_statement_bca"));
         assert_eq!(rows[0].external_ref.as_deref(), Some("bca:8415525237:2026-05-01:242000.00:0"));
         assert!(rows[0].category_id.is_some(), "Transfer category attached");
+    }
+
+    #[tokio::test]
+    async fn confirm_bca_deposit_creates_txn_and_cashflow() {
+        use crate::repo::{cashflow, cashflow_categories, review_items};
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        let now = chrono::Utc::now().to_rfc3339();
+
+        // Seed a Cash instrument and a BCA account (FKs for the txn).
+        let account_id = sqlx::query(
+            "INSERT INTO account (name, account_type, native_currency, created_at) VALUES (?,?,?,?)")
+            .bind("BCA").bind("bank").bind("IDR").bind(&now)
+            .execute(&db).await.unwrap().last_insert_rowid();
+        let instrument_id = sqlx::query(
+            "INSERT INTO instrument (symbol, name, instrument_type, native_currency, price_source) VALUES (?,?,?,?,?)")
+            .bind("CASHIDR").bind("Cash IDR").bind("cash").bind("IDR").bind("manual")
+            .execute(&db).await.unwrap().last_insert_rowid();
+
+        // Stage a BCA deposit review item carrying provenance in its payload.
+        let payload = serde_json::json!({
+            "entry_type": "deposit",
+            "currency": "IDR",
+            "executed_at": "2026-05-12T00:00:00Z",
+            "amount_native": "49995500.00",
+            "cashflow_category": "Transfer",
+            "external_ref": "bca:8415525237:2026-05-12:49995500.00:0",
+            "note": "TRSF MASUK"
+        }).to_string();
+        let item = review_items::create(&db, &crate::repo::review_items::NewReviewItem {
+            batch_id: "b2", source_kind: "pdf", source_filename: "s.pdf", source_path: "",
+            doc_type: "bank_statement_bca", needs_attention: false,
+            payload_json: &payload, raw_llm_json: "{}",
+            suggested_instrument_id: None, suggested_account_id: None,
+        }).await.unwrap();
+
+        let p = ConfirmPayload {
+            account_id, instrument_id, entry_type: "deposit".into(),
+            executed_at: "2026-05-12T00:00:00Z".into(),
+            quantity: String::new(), price_native: String::new(),
+            fee_native: None, currency: "IDR".into(),
+            fx_to_idr: Some("1".into()), fx_to_usd: Some("1".into()),
+            note: None, amount_native: Some("49995500.00".into()),
+        };
+        let txn_id = confirm(&db, item.id, &p).await.unwrap();
+        assert!(txn_id > 0);
+
+        let rows = cashflow::list_all(&db).await.unwrap();
+        assert_eq!(rows.len(), 1, "one cashflow row created");
+        assert_eq!(rows[0].direction, "in");
+        assert_eq!(rows[0].amount, "49995500.00");
+        assert_eq!(rows[0].source.as_deref(), Some("bank_statement_bca"));
+        assert_eq!(rows[0].external_ref.as_deref(), Some("bca:8415525237:2026-05-12:49995500.00:0"));
+        assert!(rows[0].category_id.is_some(), "Transfer category attached");
+
+        // The "Transfer" category for a deposit must have kind "income".
+        let cat = cashflow_categories::get(&db, rows[0].category_id.unwrap()).await.unwrap();
+        assert_eq!(cat.kind, "income");
     }
 }
