@@ -1,6 +1,5 @@
 //! Maps a BCA mutation's KETERANGAN text to a cashflow category.
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq)]
 pub struct BcaCategory {
     pub name: &'static str,
@@ -10,7 +9,6 @@ pub struct BcaCategory {
 
 /// First matching rule wins. `kind` is the default used when the category is
 /// first created; the cashflow row's own direction is what reporting keys on.
-#[allow(dead_code)]
 pub fn categorize(haystack: &str) -> BcaCategory {
     let h = haystack.to_uppercase();
     let has = |needle: &str| h.contains(needle);

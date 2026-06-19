@@ -2,14 +2,12 @@
 
 use crate::ingestion::bank::bca_text::StatementMeta;
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum Direction {
     In,
     Out,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq)]
 pub struct BcaMutation {
     pub date: chrono::NaiveDate,
@@ -89,7 +87,6 @@ fn detail_without_money(detail: &str) -> String {
         .join(" ")
 }
 
-#[allow(dead_code)]
 pub fn parse_mutations(text: &str, meta: &StatementMeta) -> Vec<BcaMutation> {
     let mut out: Vec<BcaMutation> = Vec::new();
     for line in text.lines() {

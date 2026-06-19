@@ -1,9 +1,5 @@
 //! Text extraction and structural detection for BCA "Rekening Tahapan" PDFs.
 
-// Items here are consumed by later tasks (parser, categorizer); suppress dead-code
-// lint until the full ingestion pipeline is wired up.
-#![allow(dead_code)]
-
 /// Statement-level fields needed to build stable external refs and resolve dates.
 #[derive(Debug, Clone, PartialEq)]
 pub struct StatementMeta {
@@ -23,17 +19,6 @@ pub fn is_bca_statement(text: &str) -> bool {
     s.contains("REKENINGTAHAPAN") && s.contains("NO.REKENING")
 }
 
-/// Indonesian month name (as it appears squashed in the PERIODE line) -> month number.
-fn month_from_periode(squashed_text: &str) -> Option<u32> {
-    const MONTHS: [(&str, u32); 12] = [
-        ("JANUARI", 1), ("FEBRUARI", 2), ("MARET", 3), ("APRIL", 4),
-        ("MEI", 5), ("JUNI", 6), ("JULI", 7), ("AGUSTUS", 8),
-        ("SEPTEMBER", 9), ("OKTOBER", 10), ("NOVEMBER", 11), ("DESEMBER", 12),
-    ];
-    let after = squashed_text.split("PERIODE").nth(1)?;
-    MONTHS.iter().find(|(name, _)| after.contains(name)).map(|(_, n)| *n)
-}
-
 /// Extract the account number and statement year from the header.
 pub fn statement_meta(text: &str) -> anyhow::Result<StatementMeta> {
     let s = squashed(text);
@@ -48,7 +33,6 @@ pub fn statement_meta(text: &str) -> anyhow::Result<StatementMeta> {
         anyhow::bail!("could not read account number");
     }
     // Year: the 4-digit run after the month name in the PERIODE line.
-    let _month = month_from_periode(&s); // validated for presence; row dates carry MM
     let after_periode = s.split("PERIODE").nth(1)
         .ok_or_else(|| anyhow::anyhow!("no PERIODE marker"))?;
     let year_str: String = after_periode.chars()

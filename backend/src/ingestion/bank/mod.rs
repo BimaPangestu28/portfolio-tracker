@@ -9,7 +9,6 @@ use bca_parser::Direction;
 /// Parse a BCA statement's `pdftotext -layout` text into candidate ledger
 /// entries with cashflow category + dedup provenance attached. Errors if the
 /// text is not a recognizable BCA statement.
-#[allow(dead_code)]
 pub fn parse_statement(text: &str) -> anyhow::Result<Vec<ExtractedEntry>> {
     if !bca_text::is_bca_statement(text) {
         anyhow::bail!("not a BCA statement");

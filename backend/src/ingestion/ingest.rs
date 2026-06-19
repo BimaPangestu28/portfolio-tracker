@@ -71,10 +71,13 @@ fn save_file(batch_id: &str, f: &UploadFile) -> anyhow::Result<(String, String)>
 const PDF_UNSUPPORTED_PAYLOAD: &str =
     "{\"note\":\"PDF belum didukung — unggah ulang sebagai gambar (PNG/JPG).\"}";
 
-/// Try to handle an uploaded PDF as a BCA statement. Returns the staged review
-/// items on success, or `None` if the PDF is not a recognizable BCA statement
-/// (caller then falls back to the "unsupported" payload). Extraction/parse
-/// errors propagate so the API surfaces a real cause.
+/// Try to handle an uploaded PDF as a BCA statement.
+///
+/// Returns:
+/// - `Ok(Some(items))` — PDF is a recognized BCA statement; items are staged.
+/// - `Ok(None)` — PDF is not a BCA statement; caller stages the unsupported payload.
+/// - `Err(_)` — extraction or parse failed; the CALLER demotes this to the
+///   unsupported payload (logged via `tracing::warn!`), not surfaced to the API.
 async fn try_ingest_bca_pdf(
     db: &Db,
     batch_id: &str,

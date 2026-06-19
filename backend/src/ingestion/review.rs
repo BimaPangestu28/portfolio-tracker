@@ -194,6 +194,9 @@ async fn write_bank_cashflow(
     let category_id = match stored.cashflow_category.as_deref() {
         Some(name) if !name.is_empty() => {
             let kind = if direction == "in" { "income" } else { "expense" };
+            // ensure_by_name matches on name only; `kind` is fixed at first creation
+            // (first-write-wins). That is fine because cashflow reporting keys on the
+            // cashflow row's own `direction` ("in"/"out"), not the category kind.
             Some(cashflow_categories::ensure_by_name(db, name, kind).await?.id)
         }
         _ => None,
@@ -724,6 +727,7 @@ mod tests {
         assert!(rows[0].category_id.is_some(), "Transfer category attached");
 
         // The "Transfer" category for a deposit must have kind "income".
+        // kind is first-write-wins; here the deposit is the first Transfer so kind is "income".
         let cat = cashflow_categories::get(&db, rows[0].category_id.unwrap()).await.unwrap();
         assert_eq!(cat.kind, "income");
     }
