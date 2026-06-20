@@ -34,6 +34,7 @@ pub async fn dispatch(db: &Db, name: &str, input: &serde_json::Value) -> Result<
         "list_instruments" => list_instruments(db).await,
         "create_instrument" => create_instrument(db, input).await,
         "edit_instrument" => edit_instrument(db, input).await,
+        "delete_instrument" => delete_instrument(db, input).await,
         "list_projects" => match crate::clickup::ClickUpClient::from_env() {
             Ok(api) => clickup_list_projects(&api).await,
             Err(e) => Err(format!("clickup belum dikonfigurasi: {e}")),
@@ -890,6 +891,22 @@ async fn edit_instrument(db: &Db, input: &serde_json::Value) -> Result<String, S
         "instrumen #{} {} diperbarui — {} ({}), harga {}",
         ins.id, ins.symbol, ins.name, ins.instrument_type, ins.price_source
     ))
+}
+
+async fn delete_instrument(db: &Db, input: &serde_json::Value) -> Result<String, String> {
+    let id = id_arg(input, "id")?;
+    let ins = crate::repo::instruments::get(db, id).await
+        .map_err(|_| format!("instrumen #{id} nggak ada"))?;
+    let n = crate::repo::instruments::txn_count(db, id).await.map_err(|e| format!("db error: {e}"))?;
+    if n > 0 {
+        return Err(format!(
+            "instrumen #{id} {} masih dipakai {n} transaksi — hapus transaksinya dulu \
+             (list_transactions lalu delete_transaction) sebelum hapus instrumen",
+            ins.symbol
+        ));
+    }
+    crate::repo::instruments::delete(db, id).await.map_err(|e| format!("{e}"))?;
+    Ok(format!("instrumen #{id} {} dihapus", ins.symbol))
 }
 
 async fn list_pending_reviews(db: &Db) -> Result<String, String> {
@@ -3041,5 +3058,37 @@ mod tests {
         // Untouched identity fields stay put.
         assert_eq!(updated.symbol, "ASII");
         assert_eq!(updated.name, ins.name);
+    }
+
+    #[tokio::test]
+    async fn delete_instrument_refuses_when_transactions_exist() {
+        let db = mem_db().await;
+        let acc = crate::repo::accounts::create(&db, &crate::repo::accounts::NewAccount {
+            name: "Pintu".into(), account_type: "exchange".into(), institution: None,
+            native_currency: "IDR".into(), note: None,
+        }).await.unwrap();
+        let ins = seed_instrument(&db, "USDC").await;
+        crate::repo::transactions::create(&db, &crate::repo::transactions::NewTransaction {
+            account_id: acc.id, instrument_id: ins.id, txn_type: "deposit".into(),
+            executed_at: chrono::Utc::now(), quantity: "100".into(), price_native: "1".into(),
+            fee_native: None, currency: "USD".into(), fx_to_idr: "16000".into(), fx_to_usd: "1".into(),
+            note: None, source: None, external_id: None,
+        }).await.unwrap();
+
+        let err = dispatch(&db, "delete_instrument", &serde_json::json!({ "id": ins.id }))
+            .await.unwrap_err();
+        assert!(err.contains("transaksi"), "{err}");
+        // Still present — guard blocked the delete.
+        assert!(crate::repo::instruments::get(&db, ins.id).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn delete_instrument_removes_unused_instrument() {
+        let db = mem_db().await;
+        let ins = seed_instrument(&db, "USDC").await;
+        let out = dispatch(&db, "delete_instrument", &serde_json::json!({ "id": ins.id }))
+            .await.unwrap();
+        assert!(out.contains(&format!("#{}", ins.id)), "{out}");
+        assert!(crate::repo::instruments::get(&db, ins.id).await.is_err());
     }
 }

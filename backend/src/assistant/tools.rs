@@ -284,6 +284,15 @@ pub fn definitions() -> serde_json::Value {
             }
         },
         {
+            "name": "delete_instrument",
+            "description": "Delete an instrument by id (e.g. one added by mistake). Get the id from list_instruments. REFUSES if any transaction still references it — delete those transactions first. Always confirm with the owner before calling — this permanently removes data.",
+            "input_schema": {
+                "type": "object",
+                "properties": { "id": { "type": "integer", "description": "Instrument id from list_instruments." } },
+                "required": ["id"]
+            }
+        },
+        {
             "name": "list_projects",
             "description": "List the owner's freelance projects (ClickUp lists). Use to find which project a task belongs to, and before create_project to avoid duplicates.",
             "input_schema": { "type": "object", "properties": {} }
@@ -518,7 +527,7 @@ mod tests {
                 "get_portfolio_summary", "search_memory", "remember",
                 "create_event", "list_events", "cancel_event",
                 "reject_review", "list_accounts", "create_account",
-                "list_pending_reviews", "confirm_review", "create_transaction", "list_transactions", "edit_transaction", "delete_transaction", "list_instruments", "create_instrument", "edit_instrument",
+                "list_pending_reviews", "confirm_review", "create_transaction", "list_transactions", "edit_transaction", "delete_transaction", "list_instruments", "create_instrument", "edit_instrument", "delete_instrument",
                 "list_projects",
                 "create_project",
                 "create_task",
