@@ -269,6 +269,21 @@ pub fn definitions() -> serde_json::Value {
             }
         },
         {
+            "name": "edit_instrument",
+            "description": "Edit an existing instrument's editable fields: name, instrument_type, price_source, decimals. Get the id from list_instruments. Pass only the fields to change. The symbol and native currency are NOT editable (symbol is the identity; currency would break cost-basis). Echo the change to the owner and get confirmation before calling — this rewrites data.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "id": { "type": "integer", "description": "Instrument id from list_instruments." },
+                    "name": { "type": "string", "description": "New display name." },
+                    "instrument_type": { "type": "string", "description": "crypto|stock_id|stock_us|etf|mutual_fund|cash|bond|gold|other" },
+                    "price_source": { "type": "string", "description": "'manual' or a live source like 'coingecko:usd-coin' / 'yahoo:ASII.JK'." },
+                    "decimals": { "type": "integer", "description": "Fractional precision." }
+                },
+                "required": ["id"]
+            }
+        },
+        {
             "name": "list_projects",
             "description": "List the owner's freelance projects (ClickUp lists). Use to find which project a task belongs to, and before create_project to avoid duplicates.",
             "input_schema": { "type": "object", "properties": {} }
@@ -503,7 +518,7 @@ mod tests {
                 "get_portfolio_summary", "search_memory", "remember",
                 "create_event", "list_events", "cancel_event",
                 "reject_review", "list_accounts", "create_account",
-                "list_pending_reviews", "confirm_review", "create_transaction", "list_transactions", "edit_transaction", "delete_transaction", "list_instruments", "create_instrument",
+                "list_pending_reviews", "confirm_review", "create_transaction", "list_transactions", "edit_transaction", "delete_transaction", "list_instruments", "create_instrument", "edit_instrument",
                 "list_projects",
                 "create_project",
                 "create_task",

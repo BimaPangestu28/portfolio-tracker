@@ -33,6 +33,7 @@ pub async fn dispatch(db: &Db, name: &str, input: &serde_json::Value) -> Result<
         "delete_transaction" => delete_transaction(db, input).await,
         "list_instruments" => list_instruments(db).await,
         "create_instrument" => create_instrument(db, input).await,
+        "edit_instrument" => edit_instrument(db, input).await,
         "list_projects" => match crate::clickup::ClickUpClient::from_env() {
             Ok(api) => clickup_list_projects(&api).await,
             Err(e) => Err(format!("clickup belum dikonfigurasi: {e}")),
@@ -872,6 +873,23 @@ async fn create_instrument(db: &Db, input: &serde_json::Value) -> Result<String,
     .map_err(|e| format!("db error: {e}"))?;
     let verb = if existed { "udah ada" } else { "dibuat" };
     Ok(format!("instrumen #{} {} ({}) {verb}", ins.id, ins.symbol, ins.instrument_type))
+}
+
+async fn edit_instrument(db: &Db, input: &serde_json::Value) -> Result<String, String> {
+    let id = id_arg(input, "id")?;
+    crate::repo::instruments::get(db, id).await.map_err(|_| format!("instrumen #{id} nggak ada"))?;
+    let u = crate::repo::instruments::UpdateInstrument {
+        name: str_arg(input, "name").map(str::to_string),
+        instrument_type: str_arg(input, "instrument_type").map(str::to_string),
+        price_source: str_arg(input, "price_source").map(str::to_string),
+        decimals: optional_id(input, "decimals")?,
+        category_id: None, // not edited from chat — leave unchanged
+    };
+    let ins = crate::repo::instruments::update(db, id, &u).await.map_err(|e| format!("{e}"))?;
+    Ok(format!(
+        "instrumen #{} {} diperbarui — {} ({}), harga {}",
+        ins.id, ins.symbol, ins.name, ins.instrument_type, ins.price_source
+    ))
 }
 
 async fn list_pending_reviews(db: &Db) -> Result<String, String> {
@@ -3006,5 +3024,22 @@ mod tests {
             "name": "USD Coin", "instrument_type": "crypto", "price_source": "manual"
         })).await.unwrap_err();
         assert!(err.contains("symbol"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn edit_instrument_updates_only_passed_fields() {
+        let db = mem_db().await;
+        let ins = seed_instrument(&db, "ASII").await;
+        let out = dispatch(&db, "edit_instrument", &serde_json::json!({
+            "id": ins.id, "price_source": "yahoo:ASII.JK", "instrument_type": "stock_id"
+        })).await.unwrap();
+        assert!(out.contains(&format!("#{}", ins.id)), "{out}");
+
+        let updated = crate::repo::instruments::get(&db, ins.id).await.unwrap();
+        assert_eq!(updated.price_source, "yahoo:ASII.JK");
+        assert_eq!(updated.instrument_type, "stock_id");
+        // Untouched identity fields stay put.
+        assert_eq!(updated.symbol, "ASII");
+        assert_eq!(updated.name, ins.name);
     }
 }
