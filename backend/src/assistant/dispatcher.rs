@@ -32,6 +32,7 @@ pub async fn dispatch(db: &Db, name: &str, input: &serde_json::Value) -> Result<
         "edit_transaction" => edit_transaction(db, input).await,
         "delete_transaction" => delete_transaction(db, input).await,
         "list_instruments" => list_instruments(db).await,
+        "create_instrument" => create_instrument(db, input).await,
         "list_projects" => match crate::clickup::ClickUpClient::from_env() {
             Ok(api) => clickup_list_projects(&api).await,
             Err(e) => Err(format!("clickup belum dikonfigurasi: {e}")),
@@ -843,6 +844,34 @@ async fn create_account(db: &Db, input: &serde_json::Value) -> Result<String, St
     .await
     .map_err(|e| format!("db error: {e}"))?;
     Ok(format!("created account #{} '{}'", account.id, account.name))
+}
+
+async fn create_instrument(db: &Db, input: &serde_json::Value) -> Result<String, String> {
+    let symbol = str_arg(input, "symbol").ok_or("missing required argument 'symbol'")?;
+    let name = str_arg(input, "name").ok_or("missing required argument 'name'")?;
+    let instrument_type =
+        str_arg(input, "instrument_type").ok_or("missing required argument 'instrument_type'")?;
+    let price_source =
+        str_arg(input, "price_source").ok_or("missing required argument 'price_source'")?;
+    // Detect reuse vs create so the echo is honest — find_or_create is idempotent on symbol.
+    let existed = crate::repo::instruments::find_by_symbol(db, symbol)
+        .await
+        .map_err(|e| format!("db error: {e}"))?
+        .is_some();
+    let ins = crate::repo::instruments::find_or_create(db, &crate::repo::instruments::NewInstrument {
+        symbol: symbol.to_string(),
+        name: name.to_string(),
+        instrument_type: instrument_type.to_string(),
+        native_currency: str_arg(input, "native_currency").unwrap_or("IDR").to_string(),
+        category_id: None,
+        price_source: price_source.to_string(),
+        decimals: optional_id(input, "decimals")?,
+        note: str_arg(input, "note").map(str::to_string),
+    })
+    .await
+    .map_err(|e| format!("db error: {e}"))?;
+    let verb = if existed { "udah ada" } else { "dibuat" };
+    Ok(format!("instrumen #{} {} ({}) {verb}", ins.id, ins.symbol, ins.instrument_type))
 }
 
 async fn list_pending_reviews(db: &Db) -> Result<String, String> {
@@ -2949,5 +2978,33 @@ mod tests {
         let updated = crate::repo::transactions::get(&db, t.id).await.unwrap();
         assert_eq!(updated.quantity.to_string(), "1236.7898");
         assert_eq!(updated.price_native.to_string(), "1617.0896");
+    }
+
+    #[tokio::test]
+    async fn create_instrument_creates_then_reuses_by_symbol() {
+        let db = mem_db().await;
+        let out = dispatch(&db, "create_instrument", &serde_json::json!({
+            "symbol": "USDC", "name": "USD Coin", "instrument_type": "crypto",
+            "native_currency": "USD", "price_source": "manual"
+        })).await.unwrap();
+        assert!(out.contains("USDC"), "{out}");
+        assert!(out.contains("dibuat"), "{out}");
+
+        // Idempotent on case-insensitive symbol — second call reuses, no duplicate.
+        let again = dispatch(&db, "create_instrument", &serde_json::json!({
+            "symbol": "usdc", "name": "USD Coin", "instrument_type": "crypto",
+            "native_currency": "USD", "price_source": "manual"
+        })).await.unwrap();
+        assert!(again.contains("udah ada"), "{again}");
+        assert_eq!(crate::repo::instruments::list(&db).await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn create_instrument_requires_symbol() {
+        let db = mem_db().await;
+        let err = dispatch(&db, "create_instrument", &serde_json::json!({
+            "name": "USD Coin", "instrument_type": "crypto", "price_source": "manual"
+        })).await.unwrap_err();
+        assert!(err.contains("symbol"), "{err}");
     }
 }

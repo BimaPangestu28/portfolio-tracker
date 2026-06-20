@@ -252,6 +252,23 @@ pub fn definitions() -> serde_json::Value {
             "input_schema": { "type": "object", "properties": {} }
         },
         {
+            "name": "create_instrument",
+            "description": "Register a new instrument the owner mentions that isn't in list_instruments yet (e.g. USDC, a new stock, a reksadana). Idempotent on symbol — if it already exists it's reused, not duplicated. Before calling, ASK the owner whether they want live pricing (coingecko for crypto, e.g. 'coingecko:usd-coin'; yahoo for stocks, e.g. 'yahoo:ASII.JK') or 'manual' (fine for stablecoins) and put that in price_source. Echo the full instrument (symbol, name, type, currency, price source) and get confirmation before calling — this writes data.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "symbol": { "type": "string", "description": "Ticker/symbol, e.g. 'USDC'. Case-insensitive dedup key." },
+                    "name": { "type": "string", "description": "Display name, e.g. 'USD Coin'." },
+                    "instrument_type": { "type": "string", "description": "crypto|stock_id|stock_us|etf|mutual_fund|cash|bond|gold|other" },
+                    "native_currency": { "type": "string", "description": "ISO code; defaults to IDR." },
+                    "price_source": { "type": "string", "description": "'manual', or a live source like 'coingecko:usd-coin' / 'yahoo:ASII.JK'. Ask the owner first." },
+                    "decimals": { "type": "integer", "description": "Fractional precision; defaults to 8." },
+                    "note": { "type": "string", "description": "Optional note." }
+                },
+                "required": ["symbol", "name", "instrument_type", "price_source"]
+            }
+        },
+        {
             "name": "list_projects",
             "description": "List the owner's freelance projects (ClickUp lists). Use to find which project a task belongs to, and before create_project to avoid duplicates.",
             "input_schema": { "type": "object", "properties": {} }
@@ -486,7 +503,7 @@ mod tests {
                 "get_portfolio_summary", "search_memory", "remember",
                 "create_event", "list_events", "cancel_event",
                 "reject_review", "list_accounts", "create_account",
-                "list_pending_reviews", "confirm_review", "create_transaction", "list_transactions", "edit_transaction", "delete_transaction", "list_instruments",
+                "list_pending_reviews", "confirm_review", "create_transaction", "list_transactions", "edit_transaction", "delete_transaction", "list_instruments", "create_instrument",
                 "list_projects",
                 "create_project",
                 "create_task",
