@@ -32,6 +32,9 @@ pub async fn dispatch(db: &Db, name: &str, input: &serde_json::Value) -> Result<
         "edit_transaction" => edit_transaction(db, input).await,
         "delete_transaction" => delete_transaction(db, input).await,
         "list_instruments" => list_instruments(db).await,
+        "create_instrument" => create_instrument(db, input).await,
+        "edit_instrument" => edit_instrument(db, input).await,
+        "delete_instrument" => delete_instrument(db, input).await,
         "list_projects" => match crate::clickup::ClickUpClient::from_env() {
             Ok(api) => clickup_list_projects(&api).await,
             Err(e) => Err(format!("clickup belum dikonfigurasi: {e}")),
@@ -845,6 +848,67 @@ async fn create_account(db: &Db, input: &serde_json::Value) -> Result<String, St
     Ok(format!("created account #{} '{}'", account.id, account.name))
 }
 
+async fn create_instrument(db: &Db, input: &serde_json::Value) -> Result<String, String> {
+    let symbol = str_arg(input, "symbol").ok_or("missing required argument 'symbol'")?;
+    let name = str_arg(input, "name").ok_or("missing required argument 'name'")?;
+    let instrument_type =
+        str_arg(input, "instrument_type").ok_or("missing required argument 'instrument_type'")?;
+    let price_source =
+        str_arg(input, "price_source").ok_or("missing required argument 'price_source'")?;
+    // Detect reuse vs create so the echo is honest — find_or_create is idempotent on symbol.
+    let existed = crate::repo::instruments::find_by_symbol(db, symbol)
+        .await
+        .map_err(|e| format!("db error: {e}"))?
+        .is_some();
+    let ins = crate::repo::instruments::find_or_create(db, &crate::repo::instruments::NewInstrument {
+        symbol: symbol.to_string(),
+        name: name.to_string(),
+        instrument_type: instrument_type.to_string(),
+        native_currency: str_arg(input, "native_currency").unwrap_or("IDR").to_string(),
+        category_id: None,
+        price_source: price_source.to_string(),
+        decimals: optional_id(input, "decimals")?,
+        note: str_arg(input, "note").map(str::to_string),
+    })
+    .await
+    .map_err(|e| format!("db error: {e}"))?;
+    let verb = if existed { "udah ada" } else { "dibuat" };
+    Ok(format!("instrumen #{} {} ({}) {verb}", ins.id, ins.symbol, ins.instrument_type))
+}
+
+async fn edit_instrument(db: &Db, input: &serde_json::Value) -> Result<String, String> {
+    let id = id_arg(input, "id")?;
+    crate::repo::instruments::get(db, id).await.map_err(|_| format!("instrumen #{id} nggak ada"))?;
+    let u = crate::repo::instruments::UpdateInstrument {
+        name: str_arg(input, "name").map(str::to_string),
+        instrument_type: str_arg(input, "instrument_type").map(str::to_string),
+        price_source: str_arg(input, "price_source").map(str::to_string),
+        decimals: optional_id(input, "decimals")?,
+        category_id: None, // not edited from chat — leave unchanged
+    };
+    let ins = crate::repo::instruments::update(db, id, &u).await.map_err(|e| format!("{e}"))?;
+    Ok(format!(
+        "instrumen #{} {} diperbarui — {} ({}), harga {}",
+        ins.id, ins.symbol, ins.name, ins.instrument_type, ins.price_source
+    ))
+}
+
+async fn delete_instrument(db: &Db, input: &serde_json::Value) -> Result<String, String> {
+    let id = id_arg(input, "id")?;
+    let ins = crate::repo::instruments::get(db, id).await
+        .map_err(|_| format!("instrumen #{id} nggak ada"))?;
+    let n = crate::repo::instruments::txn_count(db, id).await.map_err(|e| format!("db error: {e}"))?;
+    if n > 0 {
+        return Err(format!(
+            "instrumen #{id} {} masih dipakai {n} transaksi — hapus transaksinya dulu \
+             (list_transactions lalu delete_transaction) sebelum hapus instrumen",
+            ins.symbol
+        ));
+    }
+    crate::repo::instruments::delete(db, id).await.map_err(|e| format!("{e}"))?;
+    Ok(format!("instrumen #{id} {} dihapus", ins.symbol))
+}
+
 async fn list_pending_reviews(db: &Db) -> Result<String, String> {
     let items = crate::repo::review_items::list_by_status(db, "pending")
         .await
@@ -933,7 +997,7 @@ async fn create_transaction(db: &Db, input: &serde_json::Value) -> Result<String
             crate::ingestion::matching::suggest_instrument_for_entry(db, Some(name), Some(name))
                 .await
                 .map_err(|e| format!("db error: {e}"))?
-                .ok_or_else(|| format!("instrumen '{name}' belum terdaftar — tambah dulu di Web UI → Data"))?
+                .ok_or_else(|| format!("instrumen '{name}' belum terdaftar — bikin dulu pakai create_instrument, lalu ulangi"))?
         }
     };
     // Resolve account: id wins, else case-insensitive name match.
@@ -2949,5 +3013,82 @@ mod tests {
         let updated = crate::repo::transactions::get(&db, t.id).await.unwrap();
         assert_eq!(updated.quantity.to_string(), "1236.7898");
         assert_eq!(updated.price_native.to_string(), "1617.0896");
+    }
+
+    #[tokio::test]
+    async fn create_instrument_creates_then_reuses_by_symbol() {
+        let db = mem_db().await;
+        let out = dispatch(&db, "create_instrument", &serde_json::json!({
+            "symbol": "USDC", "name": "USD Coin", "instrument_type": "crypto",
+            "native_currency": "USD", "price_source": "manual"
+        })).await.unwrap();
+        assert!(out.contains("USDC"), "{out}");
+        assert!(out.contains("dibuat"), "{out}");
+
+        // Idempotent on case-insensitive symbol — second call reuses, no duplicate.
+        let again = dispatch(&db, "create_instrument", &serde_json::json!({
+            "symbol": "usdc", "name": "USD Coin", "instrument_type": "crypto",
+            "native_currency": "USD", "price_source": "manual"
+        })).await.unwrap();
+        assert!(again.contains("udah ada"), "{again}");
+        assert_eq!(crate::repo::instruments::list(&db).await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn create_instrument_requires_symbol() {
+        let db = mem_db().await;
+        let err = dispatch(&db, "create_instrument", &serde_json::json!({
+            "name": "USD Coin", "instrument_type": "crypto", "price_source": "manual"
+        })).await.unwrap_err();
+        assert!(err.contains("symbol"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn edit_instrument_updates_only_passed_fields() {
+        let db = mem_db().await;
+        let ins = seed_instrument(&db, "ASII").await;
+        let out = dispatch(&db, "edit_instrument", &serde_json::json!({
+            "id": ins.id, "price_source": "yahoo:ASII.JK", "instrument_type": "stock_id"
+        })).await.unwrap();
+        assert!(out.contains(&format!("#{}", ins.id)), "{out}");
+
+        let updated = crate::repo::instruments::get(&db, ins.id).await.unwrap();
+        assert_eq!(updated.price_source, "yahoo:ASII.JK");
+        assert_eq!(updated.instrument_type, "stock_id");
+        // Untouched identity fields stay put.
+        assert_eq!(updated.symbol, "ASII");
+        assert_eq!(updated.name, ins.name);
+    }
+
+    #[tokio::test]
+    async fn delete_instrument_refuses_when_transactions_exist() {
+        let db = mem_db().await;
+        let acc = crate::repo::accounts::create(&db, &crate::repo::accounts::NewAccount {
+            name: "Pintu".into(), account_type: "exchange".into(), institution: None,
+            native_currency: "IDR".into(), note: None,
+        }).await.unwrap();
+        let ins = seed_instrument(&db, "USDC").await;
+        crate::repo::transactions::create(&db, &crate::repo::transactions::NewTransaction {
+            account_id: acc.id, instrument_id: ins.id, txn_type: "deposit".into(),
+            executed_at: chrono::Utc::now(), quantity: "100".into(), price_native: "1".into(),
+            fee_native: None, currency: "USD".into(), fx_to_idr: "16000".into(), fx_to_usd: "1".into(),
+            note: None, source: None, external_id: None,
+        }).await.unwrap();
+
+        let err = dispatch(&db, "delete_instrument", &serde_json::json!({ "id": ins.id }))
+            .await.unwrap_err();
+        assert!(err.contains("transaksi"), "{err}");
+        // Still present — guard blocked the delete.
+        assert!(crate::repo::instruments::get(&db, ins.id).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn delete_instrument_removes_unused_instrument() {
+        let db = mem_db().await;
+        let ins = seed_instrument(&db, "USDC").await;
+        let out = dispatch(&db, "delete_instrument", &serde_json::json!({ "id": ins.id }))
+            .await.unwrap();
+        assert!(out.contains(&format!("#{}", ins.id)), "{out}");
+        assert!(crate::repo::instruments::get(&db, ins.id).await.is_err());
     }
 }

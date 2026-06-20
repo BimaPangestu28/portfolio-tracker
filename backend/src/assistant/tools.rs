@@ -248,8 +248,49 @@ pub fn definitions() -> serde_json::Value {
         },
         {
             "name": "list_instruments",
-            "description": "List the owner's known instruments (id, symbol, name, type). Use to find an instrument_id for confirm_review when a review item's instrument shows 'belum dikenali' but the instrument may already exist under a slightly different name. If it genuinely doesn't exist, tell the user to add it in the web UI → Data (instruments can't be created from chat).",
+            "description": "List the owner's known instruments (id, symbol, name, type). Use to find an instrument_id for confirm_review when a review item's instrument shows 'belum dikenali' but the instrument may already exist under a slightly different name. If it genuinely doesn't exist, create it with create_instrument (after confirming the details with the owner).",
             "input_schema": { "type": "object", "properties": {} }
+        },
+        {
+            "name": "create_instrument",
+            "description": "Register a new instrument the owner mentions that isn't in list_instruments yet (e.g. USDC, a new stock, a reksadana). Idempotent on symbol — if it already exists it's reused, not duplicated. Before calling, ASK the owner whether they want live pricing (coingecko for crypto, e.g. 'coingecko:usd-coin'; yahoo for stocks, e.g. 'yahoo:ASII.JK') or 'manual' (fine for stablecoins) and put that in price_source. Echo the full instrument (symbol, name, type, currency, price source) and get confirmation before calling — this writes data.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "symbol": { "type": "string", "description": "Ticker/symbol, e.g. 'USDC'. Case-insensitive dedup key." },
+                    "name": { "type": "string", "description": "Display name, e.g. 'USD Coin'." },
+                    "instrument_type": { "type": "string", "description": "crypto|stock_id|stock_us|etf|mutual_fund|cash|bond|gold|other" },
+                    "native_currency": { "type": "string", "description": "ISO code; defaults to IDR." },
+                    "price_source": { "type": "string", "description": "'manual', or a live source like 'coingecko:usd-coin' / 'yahoo:ASII.JK'. Ask the owner first." },
+                    "decimals": { "type": "integer", "description": "Fractional precision; defaults to 8." },
+                    "note": { "type": "string", "description": "Optional note." }
+                },
+                "required": ["symbol", "name", "instrument_type", "price_source"]
+            }
+        },
+        {
+            "name": "edit_instrument",
+            "description": "Edit an existing instrument's editable fields: name, instrument_type, price_source, decimals. Get the id from list_instruments. Pass only the fields to change. The symbol and native currency are NOT editable (symbol is the identity; currency would break cost-basis). Echo the change to the owner and get confirmation before calling — this rewrites data.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "id": { "type": "integer", "description": "Instrument id from list_instruments." },
+                    "name": { "type": "string", "description": "New display name." },
+                    "instrument_type": { "type": "string", "description": "crypto|stock_id|stock_us|etf|mutual_fund|cash|bond|gold|other" },
+                    "price_source": { "type": "string", "description": "'manual' or a live source like 'coingecko:usd-coin' / 'yahoo:ASII.JK'." },
+                    "decimals": { "type": "integer", "description": "Fractional precision." }
+                },
+                "required": ["id"]
+            }
+        },
+        {
+            "name": "delete_instrument",
+            "description": "Delete an instrument by id (e.g. one added by mistake). Get the id from list_instruments. REFUSES if any transaction still references it — delete those transactions first. Always confirm with the owner before calling — this permanently removes data.",
+            "input_schema": {
+                "type": "object",
+                "properties": { "id": { "type": "integer", "description": "Instrument id from list_instruments." } },
+                "required": ["id"]
+            }
         },
         {
             "name": "list_projects",
@@ -486,7 +527,7 @@ mod tests {
                 "get_portfolio_summary", "search_memory", "remember",
                 "create_event", "list_events", "cancel_event",
                 "reject_review", "list_accounts", "create_account",
-                "list_pending_reviews", "confirm_review", "create_transaction", "list_transactions", "edit_transaction", "delete_transaction", "list_instruments",
+                "list_pending_reviews", "confirm_review", "create_transaction", "list_transactions", "edit_transaction", "delete_transaction", "list_instruments", "create_instrument", "edit_instrument", "delete_instrument",
                 "list_projects",
                 "create_project",
                 "create_task",
