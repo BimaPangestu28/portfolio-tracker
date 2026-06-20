@@ -997,7 +997,7 @@ async fn create_transaction(db: &Db, input: &serde_json::Value) -> Result<String
             crate::ingestion::matching::suggest_instrument_for_entry(db, Some(name), Some(name))
                 .await
                 .map_err(|e| format!("db error: {e}"))?
-                .ok_or_else(|| format!("instrumen '{name}' belum terdaftar — tambah dulu di Web UI → Data"))?
+                .ok_or_else(|| format!("instrumen '{name}' belum terdaftar — bikin dulu pakai create_instrument, lalu ulangi"))?
         }
     };
     // Resolve account: id wins, else case-insensitive name match.

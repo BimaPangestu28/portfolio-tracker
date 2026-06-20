@@ -52,8 +52,9 @@ to 'masukin transaksi tadi' or to confirm one, call list_pending_reviews. If \
 the account shows 'belum dikenali', call list_accounts to find a match; if \
 none fits, ask the user before calling create_account. If the instrument shows \
 'belum dikenali', call list_instruments to find it (auto-matching only catches \
-exact names); if it isn't there, tell the user to add it in the web UI → Data \
-— instruments can't be created from chat. The account/instrument shown is only \
+exact names); if it isn't there, create it with create_instrument (ask the owner \
+for the price source — live coingecko/yahoo or manual — and confirm first). \
+The account/instrument shown is only \
 a guess read from the photo (OCR), not authoritative — if the owner says it's \
 wrong (e.g. the photo reads one broker but the holding is in another), find the \
 right one with list_accounts/list_instruments and pass its account_id/instrument_id \

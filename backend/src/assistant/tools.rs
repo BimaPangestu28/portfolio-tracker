@@ -248,7 +248,7 @@ pub fn definitions() -> serde_json::Value {
         },
         {
             "name": "list_instruments",
-            "description": "List the owner's known instruments (id, symbol, name, type). Use to find an instrument_id for confirm_review when a review item's instrument shows 'belum dikenali' but the instrument may already exist under a slightly different name. If it genuinely doesn't exist, tell the user to add it in the web UI → Data (instruments can't be created from chat).",
+            "description": "List the owner's known instruments (id, symbol, name, type). Use to find an instrument_id for confirm_review when a review item's instrument shows 'belum dikenali' but the instrument may already exist under a slightly different name. If it genuinely doesn't exist, create it with create_instrument (after confirming the details with the owner).",
             "input_schema": { "type": "object", "properties": {} }
         },
         {
