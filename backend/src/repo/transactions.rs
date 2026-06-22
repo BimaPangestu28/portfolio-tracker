@@ -97,6 +97,23 @@ pub async fn list_for_instrument(db: &Db, instrument_id: i64) -> anyhow::Result<
     raws.into_iter().map(|r| r.into_domain()).collect()
 }
 
+/// Tag (or with `None`, untag) a transaction to a goal. Errors if the txn id
+/// doesn't exist so a bad id is a clear failure, not a silent no-op.
+pub async fn set_txn_goal(db: &Db, id: i64, goal_id: Option<i64>) -> anyhow::Result<()> {
+    get(db, id).await?; // 404s as RowNotFound -> caller maps appropriately
+    sqlx::query("UPDATE txn SET goal_id = ? WHERE id = ?")
+        .bind(goal_id).bind(id).execute(db).await?;
+    Ok(())
+}
+
+/// All transactions tagged to a goal, oldest first. Returns plain domain
+/// `Transaction`s (goal_id is a row-level tag, not part of the domain model).
+pub async fn list_by_goal(db: &Db, goal_id: i64) -> anyhow::Result<Vec<Transaction>> {
+    let raws = sqlx::query_as::<_, TxnRowRaw>("SELECT id, account_id, instrument_id, txn_type, executed_at, quantity, price_native, fee_native, currency, fx_to_idr, fx_to_usd, note FROM txn WHERE goal_id = ? ORDER BY executed_at")
+        .bind(goal_id).fetch_all(db).await?;
+    raws.into_iter().map(|r| r.into_domain()).collect()
+}
+
 /// Recent transactions, newest first, optionally filtered by instrument/account.
 pub async fn list_recent(
     db: &Db,
@@ -552,6 +569,40 @@ mod tests {
         assert_eq!(patched.price_native.to_string(), "9000"); // preserved
         assert_eq!(patched.fee_native.to_string(), "500"); // preserved (NOT NULL)
         assert_eq!(patched.note, Some("original note".into())); // preserved, not cleared
+    }
+
+    #[tokio::test]
+    async fn tag_and_list_by_goal_round_trip() {
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        let acc = accounts::create(&db, &accounts::NewAccount { name:"A".into(), account_type:"manual".into(), institution:None, native_currency:"IDR".into(), note:None }).await.unwrap();
+        let ins = instruments::create(&db, &instruments::NewInstrument { symbol:"BBCA".into(), name:"BCA".into(), instrument_type:"stock_id".into(), native_currency:"IDR".into(), category_id:None, price_source:"manual".into(), decimals:Some(0), note:None }).await.unwrap();
+        let goal = crate::repo::goals::create(&db, &crate::repo::goals::NewGoal { label:"Dana Pendidikan".into(), note:None, target_idr:"200000000".into(), current_kind:"tagged".into(), current_manual_idr:None, sort_order:None, target_date:None }).await.unwrap();
+
+        let buy = |q: &str| NewTransaction { account_id: acc.id, instrument_id: ins.id, txn_type:"buy".into(),
+            executed_at: Utc::now(), quantity:q.into(), price_native:"9000".into(), fee_native:None,
+            currency:"IDR".into(), fx_to_idr:"1".into(), fx_to_usd:"1".into(), note:None, source:None, external_id:None };
+        let t1 = create(&db, &buy("100")).await.unwrap();
+        let t2 = create(&db, &buy("50")).await.unwrap();
+
+        // Initially nothing is tagged.
+        assert!(list_by_goal(&db, goal.id).await.unwrap().is_empty());
+
+        set_txn_goal(&db, t1.id, Some(goal.id)).await.unwrap();
+        set_txn_goal(&db, t2.id, Some(goal.id)).await.unwrap();
+        let tagged = list_by_goal(&db, goal.id).await.unwrap();
+        assert_eq!(tagged.len(), 2);
+
+        // Untag t2.
+        set_txn_goal(&db, t2.id, None).await.unwrap();
+        let after = list_by_goal(&db, goal.id).await.unwrap();
+        assert_eq!(after.len(), 1);
+        assert_eq!(after[0].id, t1.id);
+    }
+
+    #[tokio::test]
+    async fn set_txn_goal_rejects_unknown_txn() {
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        assert!(set_txn_goal(&db, 999, None).await.is_err());
     }
 
     #[tokio::test]

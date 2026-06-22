@@ -502,6 +502,23 @@ pub fn definitions() -> serde_json::Value {
             "name": "cancel_price_alert",
             "description": "Cancel a price alert by id (from list_price_alerts).",
             "input_schema": { "type": "object", "properties": { "id": { "type": "integer", "description": "Alert id" } }, "required": ["id"] }
+        },
+        {
+            "name": "list_goals",
+            "description": "List the owner's financial goals (id, label, target in IDR, and how progress is tracked). Use this to find a goal's id before tagging a transaction to it.",
+            "input_schema": { "type": "object", "properties": {} }
+        },
+        {
+            "name": "tag_transaction_to_goal",
+            "description": "Tag a transaction so its holdings count toward a goal's progress (for goals tracked as 'tagged'). Get transaction_id from list_transactions and goal_id from list_goals. Omit goal_id (or pass null) to UNTAG the transaction. One transaction belongs to at most one goal. Echo the change and confirm before calling — this writes data.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "transaction_id": { "type": "integer", "description": "Transaction id from list_transactions." },
+                    "goal_id": { "type": "integer", "description": "Goal id from list_goals; omit/null to untag." }
+                },
+                "required": ["transaction_id"]
+            }
         }
     ])
 }
@@ -548,6 +565,8 @@ mod tests {
                 "set_price_alert",
                 "list_price_alerts",
                 "cancel_price_alert",
+                "list_goals",
+                "tag_transaction_to_goal",
             ]
         );
         for tool in defs.as_array().unwrap() {
