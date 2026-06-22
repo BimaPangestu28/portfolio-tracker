@@ -98,6 +98,8 @@ pub async fn dispatch(db: &Db, name: &str, input: &serde_json::Value) -> Result<
         "set_price_alert" => set_price_alert(db, input).await,
         "list_price_alerts" => list_price_alerts(db).await,
         "cancel_price_alert" => cancel_price_alert(db, input).await,
+        "list_goals" => list_goals(db).await,
+        "tag_transaction_to_goal" => tag_transaction_to_goal(db, input).await,
         _ => Err(format!("unknown tool: {name}")),
     }
 }
@@ -1490,6 +1492,36 @@ async fn cancel_price_alert(db: &Db, input: &serde_json::Value) -> Result<String
         Ok(format!("price alert #{alert_id} dibatalkan"))
     } else {
         Err(format!("price alert #{alert_id} nggak ada atau sudah tidak aktif"))
+    }
+}
+
+async fn list_goals(db: &Db) -> Result<String, String> {
+    let goals = crate::repo::goals::list(db).await.map_err(|e| format!("db error: {e}"))?;
+    if goals.is_empty() {
+        return Ok("belum ada goal".to_string());
+    }
+    let lines: Vec<String> = goals
+        .iter()
+        .map(|g| format!("#{} {} — target Rp{} ({})", g.id, g.label, g.target_idr, g.current_kind))
+        .collect();
+    Ok(lines.join("\n"))
+}
+
+async fn tag_transaction_to_goal(db: &Db, input: &serde_json::Value) -> Result<String, String> {
+    let txn_id = id_arg(input, "transaction_id")?;
+    let goal_id = optional_id(input, "goal_id")?;
+    if let Some(gid) = goal_id {
+        crate::repo::goals::get(db, gid).await.map_err(|_| format!("goal #{gid} nggak ada"))?;
+    }
+    crate::repo::transactions::set_txn_goal(db, txn_id, goal_id)
+        .await
+        .map_err(|_| format!("transaksi #{txn_id} nggak ada"))?;
+    match goal_id {
+        Some(gid) => {
+            let g = crate::repo::goals::get(db, gid).await.map_err(|e| format!("db error: {e}"))?;
+            Ok(format!("transaksi #{txn_id} di-tag ke goal '{}'", g.label))
+        }
+        None => Ok(format!("transaksi #{txn_id} dilepas dari goal")),
     }
 }
 
@@ -3090,5 +3122,31 @@ mod tests {
             .await.unwrap();
         assert!(out.contains(&format!("#{}", ins.id)), "{out}");
         assert!(crate::repo::instruments::get(&db, ins.id).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn tag_transaction_to_goal_tags_and_untags() {
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        let acc = crate::repo::accounts::create(&db, &crate::repo::accounts::NewAccount { name:"A".into(), account_type:"manual".into(), institution:None, native_currency:"IDR".into(), note:None }).await.unwrap();
+        let ins = crate::repo::instruments::create(&db, &crate::repo::instruments::NewInstrument { symbol:"BBCA".into(), name:"BCA".into(), instrument_type:"stock_id".into(), native_currency:"IDR".into(), category_id:None, price_source:"manual".into(), decimals:Some(0), note:None }).await.unwrap();
+        let goal = crate::repo::goals::create(&db, &crate::repo::goals::NewGoal { label:"Pendidikan".into(), note:None, target_idr:"200000000".into(), current_kind:"tagged".into(), current_manual_idr:None, sort_order:None, target_date:None }).await.unwrap();
+        let t = crate::repo::transactions::create(&db, &crate::repo::transactions::NewTransaction { account_id:acc.id, instrument_id:ins.id, txn_type:"buy".into(), executed_at:chrono::Utc::now(), quantity:"100".into(), price_native:"9000".into(), fee_native:None, currency:"IDR".into(), fx_to_idr:"1".into(), fx_to_usd:"1".into(), note:None, source:None, external_id:None }).await.unwrap();
+
+        let out = dispatch(&db, "tag_transaction_to_goal", &serde_json::json!({ "transaction_id": t.id, "goal_id": goal.id })).await.unwrap();
+        assert!(out.to_lowercase().contains("pendidikan"));
+        assert_eq!(crate::repo::transactions::list_by_goal(&db, goal.id).await.unwrap().len(), 1);
+
+        // Untag (omit goal_id).
+        dispatch(&db, "tag_transaction_to_goal", &serde_json::json!({ "transaction_id": t.id })).await.unwrap();
+        assert!(crate::repo::transactions::list_by_goal(&db, goal.id).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn tag_transaction_to_goal_rejects_unknown_goal() {
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        let acc = crate::repo::accounts::create(&db, &crate::repo::accounts::NewAccount { name:"A".into(), account_type:"manual".into(), institution:None, native_currency:"IDR".into(), note:None }).await.unwrap();
+        let ins = crate::repo::instruments::create(&db, &crate::repo::instruments::NewInstrument { symbol:"BBCA".into(), name:"BCA".into(), instrument_type:"stock_id".into(), native_currency:"IDR".into(), category_id:None, price_source:"manual".into(), decimals:Some(0), note:None }).await.unwrap();
+        let t = crate::repo::transactions::create(&db, &crate::repo::transactions::NewTransaction { account_id:acc.id, instrument_id:ins.id, txn_type:"buy".into(), executed_at:chrono::Utc::now(), quantity:"1".into(), price_native:"1".into(), fee_native:None, currency:"IDR".into(), fx_to_idr:"1".into(), fx_to_usd:"1".into(), note:None, source:None, external_id:None }).await.unwrap();
+        assert!(dispatch(&db, "tag_transaction_to_goal", &serde_json::json!({ "transaction_id": t.id, "goal_id": 999 })).await.is_err());
     }
 }
