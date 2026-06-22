@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
-import { useSummary, useMonthSummary, useConnectors, useChatHistory, useInsights, useGoals } from "./hooks";
+import { useSummary, useMonthSummary, useConnectors, useChatHistory, useInsights, useGoals, usePlanTree } from "./hooks";
 
 function wrapper({ children }: { children: ReactNode }) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -57,4 +57,14 @@ test("useGoals returns an array", async () => {
   const { result } = renderHook(() => useGoals(), { wrapper });
   await waitFor(() => expect(result.current.isSuccess).toBe(true));
   expect(Array.isArray(result.current.data)).toBe(true);
+});
+
+test("usePlanTree fetches and validates the recursive tree", async () => {
+  const { result } = renderHook(() => usePlanTree(), { wrapper });
+  await waitFor(() => expect(result.current.isSuccess).toBe(true));
+  expect(result.current.data?.length).toBe(2);
+  const saham = result.current.data?.[0];
+  expect(saham?.name).toBe("Saham IDX");
+  expect(saham?.children[0]?.name).toBe("BBCA");
+  expect(result.current.data?.[1]?.id).toBe(-1); // synthetic root "Lainnya"
 });

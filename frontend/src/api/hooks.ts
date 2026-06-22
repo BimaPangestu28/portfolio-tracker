@@ -21,9 +21,11 @@ import {
   CsConversationSchema, CsMessageSchema, CsEscalationSchema,
   HyperliquidViewSchema,
   DcaSettingsSchema, DcaPlanSchema,
+  PlanNodeAllocationSchema, PlanNodeRowSchema,
   type Account, type Category, type Instrument, type Transaction, type ReviewItem,
   type CashflowCategory, type Cashflow, type Connector, type Goal,
   type DcaSettings,
+  type PlanNodeAllocation, type PlanNodeRow,
 } from "./schemas";
 
 export const useSummary = () =>
@@ -478,3 +480,38 @@ export const useUpdateDcaSettings = () =>
     (b: Omit<DcaSettings, "id" | "updated_at">) => api.patch("/dca/settings", DcaSettingsSchema, b),
     ["dca-settings", "dca-plan"],
   );
+
+// ── Allocation Planner Tree hooks ───────────────────────────────────────────
+
+export const usePlanTree = () =>
+  useQuery({ queryKey: ["plan-tree"], queryFn: () => api.get("/plan/tree", z.array(PlanNodeAllocationSchema)) });
+
+export const usePlanNodes = () =>
+  useQuery({ queryKey: ["plan-nodes"], queryFn: () => api.get("/plan/nodes", z.array(PlanNodeRowSchema)) });
+
+export type NewPlanNode = {
+  parent_id?: number | null;
+  name: string;
+  target_pct: string;
+  tolerance_band_pct?: string | null;
+  bind_kind: string;
+  category_id?: number | null;
+  instrument_id?: number | null;
+  sort_order?: number | null;
+  color?: string | null;
+};
+
+export const useCreatePlanNode = () =>
+  useInvalidatingMutation((b: NewPlanNode) => api.post("/plan/nodes", PlanNodeRowSchema, b), ["plan-tree", "plan-nodes", "summary"]);
+
+export const useUpdatePlanNode = () =>
+  useInvalidatingMutation(
+    (args: { id: number; patch: { name?: string; target_pct?: string; tolerance_band_pct?: string | null; sort_order?: number; color?: string | null } }) =>
+      api.patch(`/plan/nodes/${args.id}`, PlanNodeRowSchema, args.patch),
+    ["plan-tree", "plan-nodes", "summary"],
+  );
+
+export const useDeletePlanNode = () =>
+  useInvalidatingMutation((id: number) => api.del(`/plan/nodes/${id}`), ["plan-tree", "plan-nodes", "summary"]);
+
+export type { PlanNodeAllocation, PlanNodeRow };

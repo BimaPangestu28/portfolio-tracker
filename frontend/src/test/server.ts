@@ -156,6 +156,40 @@ export const handlers = [
   http.get("/api/portfolio/movers", () => HttpResponse.json([])),
   http.get("/api/portfolio/benchmark", () => HttpResponse.json([])),
 
+  // ── Plan tree ──────────────────────────────────────────────────────────────
+  http.get("/api/plan/tree", () =>
+    HttpResponse.json([
+      {
+        id: 1, name: "Saham IDX", bind_kind: "category",
+        target_pct: "60", tolerance_band_pct: "5",
+        actual_pct: "50", actual_value_idr: "2437500", target_value_idr: "2925000",
+        drift_pct: "-10", out_of_band: true, rebalance_idr: "487500", color: null,
+        children: [
+          {
+            id: 2, name: "BBCA", bind_kind: "instrument",
+            target_pct: "40", tolerance_band_pct: null,
+            actual_pct: "60", actual_value_idr: "1462500", target_value_idr: "1170000",
+            drift_pct: "20", out_of_band: false, rebalance_idr: "-292500", color: null,
+            children: [],
+          },
+        ],
+      },
+      {
+        id: -1, name: "Lainnya", bind_kind: "lainnya",
+        target_pct: "0", tolerance_band_pct: null,
+        actual_pct: "50", actual_value_idr: "2437500", target_value_idr: "0",
+        drift_pct: "50", out_of_band: false, rebalance_idr: "0", color: null,
+        children: [],
+      },
+    ]),
+  ),
+  http.get("/api/plan/nodes", () =>
+    HttpResponse.json([
+      { id: 1, parent_id: null, name: "Saham IDX", target_pct: "60", tolerance_band_pct: "5", bind_kind: "category", category_id: 1, instrument_id: null, sort_order: 0, color: null },
+      { id: 2, parent_id: 1, name: "BBCA", target_pct: "40", tolerance_band_pct: null, bind_kind: "instrument", category_id: null, instrument_id: 7, sort_order: 0, color: null },
+    ]),
+  ),
+
   // ── Hyperliquid ────────────────────────────────────────────────────────────
   // insufficient_data: false keeps HyperliquidCard out of the "Belum cukup data"
   // branch so existing tests using getByText(/belum cukup data/i) stay unambiguous.
