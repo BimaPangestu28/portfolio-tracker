@@ -10,6 +10,7 @@ on:
       - "frontend/**"
       - "whatsapp-gateway/**"
       - "memory-service/**"
+      - "k8s/**"
       - ".github/workflows/build-images.yml"
   workflow_dispatch:
 
@@ -64,7 +65,9 @@ jobs:
       group: deploy-production
       cancel-in-progress: false
     steps:
-      - name: Pin deployments to the new image and wait for rollout
+      - uses: actions/checkout@v4
+
+      - name: Reconcile manifests, pin images, and wait for rollout
         env:
           SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
           SSH_USER: ${{ secrets.DEPLOY_SSH_USER }}
@@ -73,8 +76,18 @@ jobs:
           install -m 700 -d ~/.ssh
           printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
-          # Pin to the immutable :sha tag (not :latest) so what runs is exactly
-          # what this workflow built, and rollback is a one-line `set image`.
+          # Reconcile config/env from the committed always-on manifests so that
+          # k8s/*.yaml edits (env vars, replicas, resources) actually reach the
+          # cluster — `set image` alone never touched these. Deliberately NOT
+          # applied: secret.example.yaml (would clobber real secrets),
+          # 00-namespace (already exists), 50-neo4j (stateful), 31-cs-gateway
+          # (opt-in). Streamed over stdin so no manifests need to live on the host.
+          cat k8s/10-backend.yaml k8s/20-frontend.yaml k8s/30-gateway.yaml k8s/40-ingress.yaml \
+            | ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=accept-new "$SSH_USER@$SSH_HOST" \
+                'kubectl -n portfolio apply -f -'
+          # The apply above resets images to :latest; immediately pin to the
+          # immutable :sha tag so what runs is exactly what this workflow built,
+          # and rollback stays a one-line `set image`.
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=accept-new "$SSH_USER@$SSH_HOST" "
             set -euo pipefail
             kubectl -n portfolio set image deploy/backend  backend=ghcr.io/bimapangestu28/portfolio-backend:$GITHUB_SHA
