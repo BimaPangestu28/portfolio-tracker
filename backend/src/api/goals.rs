@@ -159,13 +159,25 @@ mod tests {
 
     #[test]
     fn goal_response_has_progress_fields() {
-        // Compile-time check: GoalResponse has all the new fields.
-        let _fields: &[&str] = &[
-            "invested_idr",
-            "gain_loss_idr",
-            "progress_pct",
-            "target_date",
-            "required_monthly_idr",
-        ];
+        // Compile-time check that GoalResponse carries the progress fields with
+        // the right types; uses `super::*` so the import is not dead.
+        let r = GoalResponse {
+            id: 1,
+            label: "x".into(),
+            note: None,
+            target_idr: "0".into(),
+            current_kind: "manual".into(),
+            current_manual_idr: None,
+            sort_order: 0,
+            created_at: "".into(),
+            target_date: None,
+            current_idr: "0".into(),
+            invested_idr: None,
+            gain_loss_idr: None,
+            progress_pct: "0".into(),
+            required_monthly_idr: None,
+        };
+        assert_eq!(r.progress_pct, "0");
+        assert!(r.invested_idr.is_none());
     }
 }
