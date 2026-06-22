@@ -36,7 +36,7 @@ import {
   useSummary, useHistory, useInsights, useGoals, useRefreshPrices,
   useMovers, useBenchmark, useReviewItems, useTransactions, useInstruments,
 } from "../api/hooks";
-import { formatIDR, formatUSD, formatPct, formatQty, parseNum } from "../lib/format";
+import { formatIDR, formatIDRShort, formatUSD, formatPct, formatQty, parseNum } from "../lib/format";
 import { txTone, txLabel } from "../lib/txn";
 import { DashboardAgendaCard } from "../components/DashboardAgendaCard";
 import { DashboardTodoCard } from "../components/DashboardTodoCard";
@@ -439,6 +439,12 @@ function AlokasiCard({ allocation, loading }: AloksiProps) {
                 ) : (
                   <>
                     <span className="t-sm flex-1 truncate">{a.name}</span>
+                    <span
+                      className="t-xs num t-muted"
+                      title={formatIDR(a.actual_value_idr)}
+                    >
+                      {formatIDRShort(a.actual_value_idr)}
+                    </span>
                     <span className="t-sm num" style={{ fontWeight: 500 }}>
                       {Number(a.actual_pct).toFixed(1).replace(".", ",")}%
                     </span>
