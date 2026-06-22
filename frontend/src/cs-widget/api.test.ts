@@ -15,7 +15,7 @@ describe("CsApi", () => {
   it("startSession posts site_key + lead fields and returns token", async () => {
     const f = mockFetch(200, { session_token: "tok-1" });
     vi.stubGlobal("fetch", f);
-    const api = new CsApi({ siteKey: "k", apiBase: "/api", title: "x" });
+    const api = new CsApi({ siteKey: "k", apiBase: "/api", title: "x", theme: "light", accent: "#2563eb", accentFg: "#fff" });
     const tok = await api.startSession({ name: "Budi", email: "b@x.com", phone: "" });
     expect(tok).toBe("tok-1");
     const [url, init] = f.mock.calls[0];
@@ -27,13 +27,13 @@ describe("CsApi", () => {
 
   it("sendMessage returns reply", async () => {
     vi.stubGlobal("fetch", mockFetch(200, { reply: "Halo!" }));
-    const api = new CsApi({ siteKey: "k", apiBase: "/api", title: "x" });
+    const api = new CsApi({ siteKey: "k", apiBase: "/api", title: "x", theme: "light", accent: "#2563eb", accentFg: "#fff" });
     expect(await api.sendMessage("tok-1", "halo")).toBe("Halo!");
   });
 
   it("throws the server error message on non-2xx", async () => {
     vi.stubGlobal("fetch", mockFetch(429, { error: "too many messages, slow down" }));
-    const api = new CsApi({ siteKey: "k", apiBase: "/api", title: "x" });
+    const api = new CsApi({ siteKey: "k", apiBase: "/api", title: "x", theme: "light", accent: "#2563eb", accentFg: "#fff" });
     await expect(api.sendMessage("tok", "hi")).rejects.toThrow(/slow down/);
   });
 
@@ -44,7 +44,7 @@ describe("CsApi", () => {
     ];
     const f = mockFetch(200, messages);
     vi.stubGlobal("fetch", f);
-    const api = new CsApi({ siteKey: "site-abc", apiBase: "/api", title: "x" });
+    const api = new CsApi({ siteKey: "site-abc", apiBase: "/api", title: "x", theme: "light", accent: "#2563eb", accentFg: "#fff" });
     const result = await api.history("tok-history");
     expect(result).toEqual(messages);
     const [url, init] = f.mock.calls[0];
@@ -57,7 +57,7 @@ describe("CsApi", () => {
 
   it("surfaces friendly message when fetch rejects (network error)", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("Failed to fetch")));
-    const api = new CsApi({ siteKey: "k", apiBase: "/api", title: "x" });
+    const api = new CsApi({ siteKey: "k", apiBase: "/api", title: "x", theme: "light", accent: "#2563eb", accentFg: "#fff" });
     await expect(api.sendMessage("tok", "hi")).rejects.toThrow(
       "Tidak dapat terhubung ke server. Periksa koneksi internet kamu.",
     );
