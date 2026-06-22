@@ -145,7 +145,11 @@ pub fn router(state: AppState) -> Router {
         .route("/news/digest/:date", get(news::digest_by_date))
         .route("/news/dates", get(news::dates))
         .route("/goals", get(goals::list_goals).post(goals::create_goal))
-        .route("/goals/:id", delete(goals::delete_goal))
+        .route(
+            "/goals/:id",
+            delete(goals::delete_goal).patch(goals::update_goal),
+        )
+        .route("/transactions/:id/goal", post(goals::set_transaction_goal))
         .route(
             "/cashflow",
             get(cashflow::list_cashflow).post(cashflow::create_cashflow),
@@ -497,6 +501,23 @@ mod router_tests {
                 Request::builder().method(method).uri(uri).body(Body::empty()).unwrap()
             ).await.unwrap();
             assert_eq!(res.status(), StatusCode::UNAUTHORIZED, "{method} {uri} should be JWT-protected");
+        }
+        std::env::remove_var("AUTH_PASSWORD");
+        std::env::remove_var("JWT_SECRET");
+    }
+
+    #[serial]
+    #[tokio::test]
+    async fn goal_and_tag_routes_are_protected() {
+        std::env::set_var("AUTH_PASSWORD", "pw");
+        std::env::set_var("JWT_SECRET", "router-test-goals");
+        let app = router(test_state().await);
+        let cases = [("/goals/1", "PATCH"), ("/transactions/1/goal", "POST")];
+        for (uri, method) in cases {
+            let res = app.clone().oneshot(
+                Request::builder().method(method).uri(uri).body(Body::empty()).unwrap()
+            ).await.unwrap();
+            assert_eq!(res.status(), StatusCode::UNAUTHORIZED, "{method} {uri} should be protected");
         }
         std::env::remove_var("AUTH_PASSWORD");
         std::env::remove_var("JWT_SECRET");
