@@ -87,10 +87,14 @@ pub async fn list(db: &Db) -> anyhow::Result<Vec<GoalRow>> {
 }
 
 pub async fn delete(db: &Db, id: i64) -> anyhow::Result<()> {
+    // txn.goal_id REFERENCES goal(id) with foreign_keys=ON would reject the
+    // delete while any txn is still tagged. Untag first, then delete, atomically.
+    let mut tx = db.begin().await?;
+    sqlx::query("UPDATE txn SET goal_id = NULL WHERE goal_id = ?")
+        .bind(id).execute(&mut *tx).await?;
     sqlx::query("DELETE FROM goal WHERE id = ?")
-        .bind(id)
-        .execute(db)
-        .await?;
+        .bind(id).execute(&mut *tx).await?;
+    tx.commit().await?;
     Ok(())
 }
 
@@ -304,5 +308,21 @@ mod tests {
             current_kind: Some("bogus".into()),
             label: None, note: None, target_idr: None, current_manual_idr: None, target_date: None, sort_order: None,
         }).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn delete_goal_untags_its_transactions() {
+        let db = mem_db().await;
+        let acc = crate::repo::accounts::create(&db, &crate::repo::accounts::NewAccount { name:"A".into(), account_type:"manual".into(), institution:None, native_currency:"IDR".into(), note:None }).await.unwrap();
+        let ins = crate::repo::instruments::create(&db, &crate::repo::instruments::NewInstrument { symbol:"BBCA".into(), name:"BCA".into(), instrument_type:"stock_id".into(), native_currency:"IDR".into(), category_id:None, price_source:"manual".into(), decimals:Some(0), note:None }).await.unwrap();
+        let goal = create(&db, &NewGoal { label:"G".into(), note:None, target_idr:"1".into(), current_kind:"tagged".into(), current_manual_idr:None, sort_order:None, target_date:None }).await.unwrap();
+        let t = crate::repo::transactions::create(&db, &crate::repo::transactions::NewTransaction { account_id:acc.id, instrument_id:ins.id, txn_type:"buy".into(), executed_at:chrono::Utc::now(), quantity:"1".into(), price_native:"1".into(), fee_native:None, currency:"IDR".into(), fx_to_idr:"1".into(), fx_to_usd:"1".into(), note:None, source:None, external_id:None }).await.unwrap();
+        crate::repo::transactions::set_txn_goal(&db, t.id, Some(goal.id)).await.unwrap();
+
+        // Must NOT fail with an FK violation.
+        delete(&db, goal.id).await.unwrap();
+
+        assert!(get(&db, goal.id).await.is_err());                       // goal gone
+        assert!(crate::repo::transactions::list_by_goal(&db, goal.id).await.unwrap().is_empty()); // txn untagged
     }
 }
