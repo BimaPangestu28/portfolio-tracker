@@ -1,5 +1,6 @@
 pub mod cashflow;
 pub mod chat;
+pub mod goals;
 pub mod hyperliquid;
 pub mod hyperliquid_sync;
 pub mod insights;
