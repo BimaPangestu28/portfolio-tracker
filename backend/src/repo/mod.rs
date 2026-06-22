@@ -8,6 +8,7 @@ pub mod cashflow;
 pub mod cashflow_categories;
 pub mod categories;
 pub mod chat;
+pub mod plan_nodes;
 pub mod connectors;
 pub mod goals;
 pub mod inbox;
