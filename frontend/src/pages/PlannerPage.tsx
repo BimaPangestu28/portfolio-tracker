@@ -37,6 +37,7 @@ export default function PlannerPage() {
         </div>
         <button type="button" className="btn btn-primary btn-sm" onClick={openAddRoot} aria-label="Tambah kelas aset">
           <Plus size={15} />
+          Tambah Kelas Aset
         </button>
       </div>
 

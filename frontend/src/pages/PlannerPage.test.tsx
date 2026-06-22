@@ -1,4 +1,4 @@
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, within } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import PlannerPage from "./PlannerPage";
 import * as hooks from "../api/hooks";
@@ -42,6 +42,6 @@ describe("PlannerPage", () => {
     vi.mocked(hooks.usePlanTree).mockReturnValue({ data: [], isLoading: false, error: null } as any);
     render(<PlannerPage />);
     fireEvent.click(screen.getByRole("button", { name: /tambah kelas aset/i }));
-    expect(screen.getByText("Tambah Kelas Aset")).toBeInTheDocument();
+    expect(within(screen.getByRole("dialog")).getByText("Tambah Kelas Aset")).toBeInTheDocument();
   });
 });
