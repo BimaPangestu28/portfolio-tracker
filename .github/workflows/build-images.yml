@@ -82,8 +82,13 @@ jobs:
           # applied: secret.example.yaml (would clobber real secrets),
           # 00-namespace (already exists), 50-neo4j (stateful), 31-cs-gateway
           # (opt-in). Streamed over stdin so no manifests need to live on the host.
-          cat k8s/10-backend.yaml k8s/20-frontend.yaml k8s/30-gateway.yaml k8s/40-ingress.yaml \
-            | ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=accept-new "$SSH_USER@$SSH_HOST" \
+          # A leading `---` before each file keeps documents separated even when
+          # a manifest lacks a trailing separator (else the last doc of one file
+          # merges into the first doc of the next and apply fails to decode).
+          for f in k8s/10-backend.yaml k8s/20-frontend.yaml k8s/30-gateway.yaml k8s/40-ingress.yaml; do
+            printf '\n---\n'
+            cat "$f"
+          done | ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=accept-new "$SSH_USER@$SSH_HOST" \
                 'kubectl -n portfolio apply -f -'
           # The apply above resets images to :latest; immediately pin to the
           # immutable :sha tag so what runs is exactly what this workflow built,
