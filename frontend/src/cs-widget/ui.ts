@@ -2,24 +2,52 @@ import { CsApi, type Lead } from "./api";
 import type { WidgetConfig } from "./config";
 import { validateLead } from "./validate";
 
+// Theme tokens resolved at mount time and exposed as CSS custom properties on
+// :host, so the rules below stay theme-agnostic. --accent / --accent-fg come
+// from the embed's data-attributes; the rest switch on light vs dark.
+const THEMES = {
+  light: { bg: "#ffffff", fg: "#111827", sub: "#6b7280", muted: "#f3f4f6", border: "#e5e7eb", inputBg: "#ffffff" },
+  dark: { bg: "#1c1b18", fg: "#f5f3ee", sub: "#a8a29e", muted: "#2a2825", border: "#3a3733", inputBg: "#232220" },
+} as const;
+
 const STYLE = `
 :host { all: initial; }
+* { box-sizing: border-box; }
 .bubble { position: fixed; right: 20px; bottom: 20px; width: 56px; height: 56px; border-radius: 50%;
-  background: #2563eb; color: #fff; font: 24px sans-serif; border: none; cursor: pointer; box-shadow: 0 4px 12px rgba(0,0,0,.25); z-index: 2147483000; }
-.panel { position: fixed; right: 20px; bottom: 88px; width: 340px; max-width: calc(100vw - 40px); height: 460px; max-height: calc(100vh - 120px);
-  background: #fff; border-radius: 12px; box-shadow: 0 8px 30px rgba(0,0,0,.25); display: none; flex-direction: column; overflow: hidden; z-index: 2147483000; font: 14px sans-serif; color: #111; }
+  background: var(--accent); color: var(--accent-fg); font: 24px system-ui, sans-serif; border: none; cursor: pointer;
+  box-shadow: 0 6px 18px rgba(0,0,0,.28); z-index: 2147483000; transition: transform .15s ease, box-shadow .15s ease; }
+.bubble:hover { transform: translateY(-2px); box-shadow: 0 10px 24px rgba(0,0,0,.32); }
+.panel { position: fixed; right: 20px; bottom: 88px; width: 360px; max-width: calc(100vw - 40px); height: 480px; max-height: calc(100vh - 120px);
+  background: var(--bg); border: 1px solid var(--border); border-radius: 16px; box-shadow: 0 16px 48px rgba(0,0,0,.32);
+  display: none; flex-direction: column; overflow: hidden; z-index: 2147483000;
+  font: 14px system-ui, -apple-system, sans-serif; color: var(--fg); }
 .panel.open { display: flex; }
-.header { background: #2563eb; color: #fff; padding: 12px 14px; font-weight: 600; }
-.body { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
-.msg { padding: 8px 10px; border-radius: 10px; max-width: 85%; white-space: pre-wrap; }
-.msg.user { align-self: flex-end; background: #2563eb; color: #fff; }
-.msg.bot { align-self: flex-start; background: #f1f5f9; color: #111; }
-.foot { border-top: 1px solid #e5e7eb; padding: 8px; display: flex; gap: 6px; }
-.foot input, .form input { flex: 1; padding: 8px; border: 1px solid #cbd5e1; border-radius: 8px; font: inherit; }
-.foot button, .form button { padding: 8px 12px; background: #2563eb; color: #fff; border: none; border-radius: 8px; cursor: pointer; }
-.form { padding: 14px; display: flex; flex-direction: column; gap: 8px; }
-.err { color: #b91c1c; font-size: 12px; min-height: 14px; }
+.header { padding: 15px 16px; font-weight: 600; font-size: 15px; color: var(--fg);
+  border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px; }
+.header::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); flex: none; }
+.body { flex: 1; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 8px; }
+.msg { padding: 9px 12px; border-radius: 14px; max-width: 85%; white-space: pre-wrap; line-height: 1.45; }
+.msg.user { align-self: flex-end; background: var(--accent); color: var(--accent-fg); border-bottom-right-radius: 4px; }
+.msg.bot { align-self: flex-start; background: var(--muted); color: var(--fg); border-bottom-left-radius: 4px; }
+.foot { border-top: 1px solid var(--border); padding: 10px; display: flex; gap: 8px; }
+.foot input, .form input { flex: 1; padding: 10px 12px; background: var(--input-bg); color: var(--fg);
+  border: 1px solid var(--border); border-radius: 10px; font: inherit; outline: none; }
+.foot input::placeholder, .form input::placeholder { color: var(--sub); }
+.foot input:focus, .form input:focus { border-color: var(--accent); }
+.foot button, .form button { padding: 10px 16px; background: var(--accent); color: var(--accent-fg);
+  border: none; border-radius: 10px; cursor: pointer; font: inherit; font-weight: 600; transition: opacity .15s ease; }
+.foot button:hover, .form button:hover { opacity: .9; }
+.foot button:disabled, .form button:disabled { opacity: .5; cursor: default; }
+.form { padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+.err { color: #ef4444; font-size: 12px; min-height: 14px; }
 `;
+
+/** Build the `:host { --token: value }` block from the resolved theme + accent. */
+function themeVars(cfg: WidgetConfig): string {
+  const t = THEMES[cfg.theme];
+  return `:host { --accent:${cfg.accent}; --accent-fg:${cfg.accentFg}; --bg:${t.bg}; --fg:${t.fg};` +
+    ` --sub:${t.sub}; --muted:${t.muted}; --border:${t.border}; --input-bg:${t.inputBg}; }`;
+}
 
 export function mountWidget(cfg: WidgetConfig) {
   const api = new CsApi(cfg);
@@ -27,7 +55,7 @@ export function mountWidget(cfg: WidgetConfig) {
   document.body.appendChild(host);
   const root = host.attachShadow({ mode: "open" });
   root.innerHTML = `
-    <style>${STYLE}</style>
+    <style>${themeVars(cfg)}${STYLE}</style>
     <button class="bubble" aria-label="Chat">💬</button>
     <div class="panel" role="dialog" aria-label="chat">
       <div class="header"></div>
