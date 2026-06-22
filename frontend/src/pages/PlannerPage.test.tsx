@@ -1,51 +1,47 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor, fireEvent } from "@testing-library/react";
-import { http, HttpResponse } from "msw";
-import { server } from "../test/server";
+import { render, screen, fireEvent } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import PlannerPage from "./PlannerPage";
+import * as hooks from "../api/hooks";
+import type { PlanNodeAllocation } from "../api/schemas";
 
-function wrapper({ children }: { children: React.ReactNode }) {
-  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return <QueryClientProvider client={qc}>{children}</QueryClientProvider>;
+vi.mock("../api/hooks");
+
+function node(partial: Partial<PlanNodeAllocation> & { id: number; name: string }): PlanNodeAllocation {
+  return {
+    bind_kind: "category", target_pct: "60", tolerance_band_pct: "5",
+    actual_pct: "50", actual_value_idr: "100", target_value_idr: "120",
+    drift_pct: "-10", out_of_band: false, rebalance_idr: "0", color: null,
+    children: [], ...partial,
+  };
 }
 
-test("shows planner header and total-target indicator", async () => {
-  render(<PlannerPage />, { wrapper });
-  expect(screen.getByText("Planner")).toBeInTheDocument();
-  await waitFor(() => expect(screen.getByText(/Total target alokasi/)).toBeInTheDocument());
+beforeEach(() => {
+  vi.mocked(hooks.useUpdatePlanNode).mockReturnValue({ mutate: vi.fn(), isPending: false } as any);
+  vi.mocked(hooks.useDeletePlanNode).mockReturnValue({ mutate: vi.fn(), isPending: false } as any);
+  vi.mocked(hooks.useCreatePlanNode).mockReturnValue({ mutate: vi.fn(), isPending: false } as any);
+  vi.mocked(hooks.useCreateCategory).mockReturnValue({ mutate: vi.fn(), isPending: false } as any);
+  vi.mocked(hooks.useCategories).mockReturnValue({ data: [] } as any);
+  vi.mocked(hooks.useInstruments).mockReturnValue({ data: [] } as any);
+  vi.mocked(hooks.usePlanNodes).mockReturnValue({ data: [] } as any);
 });
 
-test("opens add-category dialog on button click", async () => {
-  render(<PlannerPage />, { wrapper });
-  const btn = screen.getByRole("button", { name: /tambah kategori target/i });
-  fireEvent.click(btn);
-  await waitFor(() => expect(screen.getByRole("dialog")).toBeInTheDocument());
-  expect(screen.getByLabelText("Nama kategori")).toBeInTheDocument();
-  expect(screen.getByLabelText("Target persen")).toBeInTheDocument();
-});
+describe("PlannerPage", () => {
+  it("renders the tree roots and a sibling target-sum indicator", () => {
+    vi.mocked(hooks.usePlanTree).mockReturnValue({
+      data: [node({ id: 1, name: "Saham IDX", target_pct: "60" }), node({ id: 2, name: "Kas", target_pct: "30" })],
+      isLoading: false, error: null,
+    } as any);
+    render(<PlannerPage />);
+    expect(screen.getByText("Saham IDX")).toBeInTheDocument();
+    expect(screen.getByText("Kas")).toBeInTheDocument();
+    // 60 + 30 = 90% sibling sum
+    expect(screen.getByText(/90/)).toBeInTheDocument();
+  });
 
-test("editing a category target PATCHes it on save", async () => {
-  const patches: Array<{ id: string; body: Record<string, unknown> }> = [];
-  const etf = { id: 6, name: "ETF US", target_pct: "30", tolerance_band_pct: "5", sort_order: 0, color: null };
-  server.use(
-    http.get("/api/categories", () => HttpResponse.json([etf])),
-    http.patch("/api/categories/:id", async ({ params, request }) => {
-      const body = (await request.json()) as Record<string, unknown>;
-      patches.push({ id: String(params.id), body });
-      return HttpResponse.json({ ...etf, target_pct: String(body.target_pct ?? etf.target_pct) });
-    }),
-  );
-  render(<PlannerPage />, { wrapper });
-  const input = await screen.findByLabelText("Target ETF US");
-  fireEvent.change(input, { target: { value: "65" } });
-  fireEvent.blur(input);
-  await waitFor(() => expect(patches).toHaveLength(1));
-  expect(patches[0]).toEqual({ id: "6", body: { target_pct: "65" } });
-});
-
-test("shows empty categories state", async () => {
-  render(<PlannerPage />, { wrapper });
-  await waitFor(() =>
-    expect(screen.queryByText(/Belum ada kategori/) || screen.queryByText(/on target/)).toBeTruthy(),
-  );
+  it("opens the add-root dialog from the header button", () => {
+    vi.mocked(hooks.usePlanTree).mockReturnValue({ data: [], isLoading: false, error: null } as any);
+    render(<PlannerPage />);
+    fireEvent.click(screen.getByRole("button", { name: /tambah kelas aset/i }));
+    expect(screen.getByText("Tambah Kelas Aset")).toBeInTheDocument();
+  });
 });
