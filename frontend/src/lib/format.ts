@@ -12,6 +12,23 @@ export function formatIDR(v: string | number): string {
   return idr.format(parseNum(v));
 }
 
+const idrShortNum = new Intl.NumberFormat("id-ID", { maximumFractionDigits: 1 });
+
+/**
+ * Abbreviated Rupiah for space-tight UI (allocation chips, drift rows):
+ * miliar→"M" and juta→"jt" with one decimal, ribu→"rb" rounded whole. Values
+ * under a thousand fall back to the full formatIDR. Pair with formatIDR in a
+ * `title`/tooltip when the exact figure still matters.
+ */
+export function formatIDRShort(v: string | number): string {
+  const n = parseNum(v);
+  const abs = Math.abs(n);
+  if (abs >= 1e9) return `Rp ${idrShortNum.format(n / 1e9)} M`;
+  if (abs >= 1e6) return `Rp ${idrShortNum.format(n / 1e6)} jt`;
+  if (abs >= 1e3) return `Rp ${idrShortNum.format(Math.round(n / 1e3))} rb`;
+  return formatIDR(n);
+}
+
 export function formatUSD(v: string | number): string {
   return usd.format(parseNum(v));
 }

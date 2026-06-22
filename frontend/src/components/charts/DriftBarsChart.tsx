@@ -8,6 +8,7 @@
  */
 import type { CategoryAllocation } from "../../api/schemas";
 import { UNCATEGORIZED_CATEGORY_ID } from "../../api/schemas";
+import { formatIDR, formatIDRShort } from "../../lib/format";
 
 function categoryColor(name: string): string {
   const key = (name ?? "").toLowerCase();
@@ -53,6 +54,13 @@ export function DriftBarsChart({ allocation }: Props) {
 
   const pct = (v: number) => `${(v / scaleMax) * 100}%`;
 
+  // Target nominal = portfolio total × target%, so the IDR pair mirrors the
+  // "actual% / target%" line. Total is derived from the same allocation data.
+  const total = allocation.reduce(
+    (s, c) => s + Math.max(0, Number(c.actual_value_idr)),
+    0,
+  );
+
   return (
     <div className="flex col gap-3">
       {allocation.map((c) => {
@@ -66,6 +74,8 @@ export function DriftBarsChart({ allocation }: Props) {
         // The synthetic "Lainnya" bucket has no target, so the tolerance band and
         // target marker are meaningless — show just the actual fill.
         const isUncategorized = c.category_id === UNCATEGORIZED_CATEGORY_ID;
+        const actualIdr = Number(c.actual_value_idr);
+        const targetIdr = total * (target / 100);
 
         return (
           <div key={c.category_id} className="flex col gap-1">
@@ -78,10 +88,24 @@ export function DriftBarsChart({ allocation }: Props) {
                 />
                 {c.name}
               </span>
-              <span className="t-xs num t-muted">
-                {isUncategorized
-                  ? `${actual.toFixed(1).replace(".", ",")}% · tanpa target`
-                  : `${actual.toFixed(1).replace(".", ",")}% / ${target}%`}
+              <span className="flex col items-end" style={{ gap: 2 }}>
+                <span className="t-xs num t-muted">
+                  {isUncategorized
+                    ? `${actual.toFixed(1).replace(".", ",")}% · tanpa target`
+                    : `${actual.toFixed(1).replace(".", ",")}% / ${target}%`}
+                </span>
+                <span
+                  className="t-xs num t-muted"
+                  title={
+                    isUncategorized
+                      ? `Aktual ${formatIDR(actualIdr)}`
+                      : `Aktual ${formatIDR(actualIdr)} · Target ${formatIDR(targetIdr)}`
+                  }
+                >
+                  {isUncategorized
+                    ? formatIDRShort(actualIdr)
+                    : `${formatIDRShort(actualIdr)} / ${formatIDRShort(targetIdr)}`}
+                </span>
               </span>
             </div>
             {/* Drift track */}
