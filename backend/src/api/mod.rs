@@ -14,6 +14,7 @@ pub mod inbox;
 pub mod ingest;
 pub mod invoices;
 pub mod news;
+pub mod plan;
 pub mod reminders;
 pub mod todos;
 pub mod upwork;
@@ -106,6 +107,13 @@ pub fn router(state: AppState) -> Router {
             "/categories/:id",
             delete(crud::delete_category).patch(crud::update_category),
         )
+        .route("/plan/tree", get(plan::get_tree))
+        .route("/plan/nodes", get(plan::list_nodes).post(plan::create_node))
+        .route(
+            "/plan/nodes/:id",
+            delete(plan::delete_node).patch(plan::update_node),
+        )
+        .route("/plan/nodes/:id/move", post(plan::move_node))
         .route(
             "/instruments",
             get(crud::list_instruments).post(crud::create_instrument),
@@ -489,6 +497,23 @@ mod router_tests {
                 Request::builder().method(method).uri(uri).body(Body::empty()).unwrap()
             ).await.unwrap();
             assert_eq!(res.status(), StatusCode::UNAUTHORIZED, "{method} {uri} should be JWT-protected");
+        }
+        std::env::remove_var("AUTH_PASSWORD");
+        std::env::remove_var("JWT_SECRET");
+    }
+
+    #[serial]
+    #[tokio::test]
+    async fn plan_routes_are_protected() {
+        std::env::set_var("AUTH_PASSWORD", "pw");
+        std::env::set_var("JWT_SECRET", "router-test-plan");
+        let app = router(test_state().await);
+        let cases = [("/plan/tree", "GET"), ("/plan/nodes", "GET"), ("/plan/nodes", "POST"), ("/plan/nodes/1", "PATCH"), ("/plan/nodes/1/move", "POST")];
+        for (uri, method) in cases {
+            let res = app.clone().oneshot(
+                Request::builder().method(method).uri(uri).body(Body::empty()).unwrap()
+            ).await.unwrap();
+            assert_eq!(res.status(), StatusCode::UNAUTHORIZED, "{method} {uri} should be protected");
         }
         std::env::remove_var("AUTH_PASSWORD");
         std::env::remove_var("JWT_SECRET");
