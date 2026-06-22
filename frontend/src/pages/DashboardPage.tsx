@@ -1209,13 +1209,19 @@ export default function DashboardPage() {
         />
       ) : null}
 
-      {/* ── 2. Alokasi (50% — left half on desktop, full on mobile) ───────── */}
+      {/* ── 2. Alokasi + Tujuan Keuangan side by side (50/50) ─────────────── */}
       <div className="grid gap-5 lay-2">
         {summary.isLoading ? (
           <CardSkeleton rows={3} height={12} />
         ) : summary.data ? (
           <AlokasiCard allocation={summary.data.allocation} loading={false} />
         ) : null}
+
+        {goals.isLoading ? (
+          <CardSkeleton rows={2} height={60} />
+        ) : (
+          <GoalsCard goals={goals.data ?? []} />
+        )}
       </div>
 
       {/* ── 2b. Target vs Aktual (full width) ─────────────────────────────── */}
@@ -1263,15 +1269,6 @@ export default function DashboardPage() {
       <div className="grid gap-5 lay-2">
         <MoversCard movers={movers.data ?? []} loading={movers.isLoading} />
         <HyperliquidCard />
-      </div>
-
-      {/* ── 5b. Tujuan Keuangan full row ──────────────────────────────────── */}
-      <div className="grid gap-5 lay-2">
-        {goals.isLoading ? (
-          <CardSkeleton rows={2} height={60} />
-        ) : (
-          <GoalsCard goals={goals.data ?? []} />
-        )}
       </div>
 
       {/* ── 5b. Hyperliquid equity card ───────────────────────────────────── */}
