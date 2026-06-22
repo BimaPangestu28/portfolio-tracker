@@ -88,7 +88,6 @@ export function PlanTreeNode({ node, depth, onAddChild }: Props) {
           ) : (
             <span className="t-sm num" style={{ display: "inline-flex", alignItems: "baseline", gap: 2 }}>
               <NumberInput
-                className=""
                 style={{ width: 56, height: 26, textAlign: "right", fontSize: "inherit", padding: "0 4px" }}
                 aria-label={`Target ${node.name}`}
                 value={target}
@@ -125,7 +124,7 @@ export function PlanTreeNode({ node, depth, onAddChild }: Props) {
       </div>
 
       {!synthetic && node.out_of_band && rebalance !== 0 && (
-        <div className="t-xs warn num" style={{ paddingLeft: depth * 22 + 32, padding: "0 0 6px", fontWeight: 500 }}>
+        <div className="t-xs warn num" style={{ paddingLeft: depth * 22 + 32, paddingBottom: 6, fontWeight: 500 }}>
           {rebalance > 0 ? "Beli " : "Pangkas "}{formatIDR(Math.abs(rebalance))}
         </div>
       )}
