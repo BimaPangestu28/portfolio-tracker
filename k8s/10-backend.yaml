@@ -72,6 +72,13 @@ spec:
                   name: portfolio-secrets
                   key: CS_GATEWAY_TOKEN
                   optional: true   # CS WhatsApp is opt-in; backend must start without it
+            # Public CS widget: enables the /public/cs/* endpoints. Both values are
+            # non-secret (the key ships in page JS); the Origin allowlist + rate
+            # limits are the real guard. Origins must be exact (no trailing slash).
+            - name: CS_ALLOWED_ORIGINS
+              value: "https://catalystlabs.id,https://www.catalystlabs.id"
+            - name: CS_WIDGET_KEY
+              value: "catalystlabs-cs"
             - name: AUTH_PASSWORD
               valueFrom:
                 secretKeyRef:
