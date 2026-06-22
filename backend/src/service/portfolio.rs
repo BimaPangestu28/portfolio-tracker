@@ -4,9 +4,10 @@ use crate::domain::allocation::{
 };
 use crate::domain::cost_basis::compute_cost_basis;
 use crate::domain::models::TxnType;
+use crate::domain::plan_alloc::{compute_plan_tree, PlanNodeAllocation, PlanNodeInput};
 use crate::domain::valuation::{build_position, group_by_instrument, PriceContext, Position};
 use crate::domain::xirr::{xirr, CashFlow};
-use crate::repo::{categories, dec, instruments, prices, transactions};
+use crate::repo::{categories, dec, instruments, plan_nodes, prices, transactions};
 use rust_decimal::Decimal;
 use serde::Serialize;
 
@@ -178,12 +179,83 @@ pub async fn build_summary(db: &Db) -> anyhow::Result<PortfolioSummary> {
     })
 }
 
+/// Build the recursive allocation tree (plan_node overlay). Reuses build_summary's
+/// per-instrument market values so valuation stays single-sourced.
+pub async fn build_plan_tree(db: &Db) -> anyhow::Result<Vec<PlanNodeAllocation>> {
+    let summary = build_summary(db).await?;
+    let total = summary.net_worth_idr;
+
+    let mut instrument_value = std::collections::HashMap::new();
+    for p in &summary.positions {
+        instrument_value.insert(p.instrument_id, p.market_value_idr);
+    }
+    let mut instrument_category = std::collections::HashMap::new();
+    for ins in instruments::list(db).await? {
+        instrument_category.insert(ins.id, ins.category_id);
+    }
+
+    let mut inputs = Vec::new();
+    for r in plan_nodes::list(db).await? {
+        inputs.push(PlanNodeInput {
+            id: r.id,
+            parent_id: r.parent_id,
+            name: r.name,
+            target_pct: dec(&r.target_pct)?,
+            tolerance_band_pct: r.tolerance_band_pct.as_deref().map(dec).transpose()?,
+            bind_kind: r.bind_kind,
+            category_id: r.category_id,
+            instrument_id: r.instrument_id,
+            sort_order: r.sort_order,
+            color: r.color,
+        });
+    }
+
+    Ok(compute_plan_tree(&inputs, &instrument_value, &instrument_category, total))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::domain::models::TxnType;
     use crate::repo::dec;
     use chrono::Utc;
+
+    #[tokio::test]
+    async fn plan_tree_breaks_category_into_instrument_and_lainnya() {
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        let acct = crate::repo::accounts::create(&db, &crate::repo::accounts::NewAccount{ name:"X".into(), account_type:"manual".into(), institution:None, native_currency:"IDR".into(), note:None }).await.unwrap();
+        let cat = categories::create(&db, &categories::NewCategory { name:"Saham IDX".into(), target_pct:"100".into(), tolerance_band_pct:Some("5".into()), sort_order:None, color:None }).await.unwrap();
+        // Migration backfill only covers categories that existed at connect() time; this
+        // category was created afterward, so create its root plan_node explicitly (this is
+        // what the frontend "add allocation" flow will do for new categories).
+        let root = crate::repo::plan_nodes::create(&db, &crate::repo::plan_nodes::NewPlanNode{
+            parent_id: None, name: "Saham".into(), target_pct: "100".into(),
+            tolerance_band_pct: Some("5".into()), bind_kind: "category".into(),
+            category_id: Some(cat.id), instrument_id: None, sort_order: None, color: None,
+        }).await.unwrap();
+
+        // Two stocks in the category, each worth 100 IDR.
+        let bbca = instruments::create(&db, &instruments::NewInstrument{ symbol:"BBCA".into(), name:"BBCA".into(), instrument_type:"stock".into(), native_currency:"IDR".into(), category_id:Some(cat.id), price_source:"manual".into(), decimals:Some(0), note:None }).await.unwrap();
+        let bbri = instruments::create(&db, &instruments::NewInstrument{ symbol:"BBRI".into(), name:"BBRI".into(), instrument_type:"stock".into(), native_currency:"IDR".into(), category_id:Some(cat.id), price_source:"manual".into(), decimals:Some(0), note:None }).await.unwrap();
+        for ins in [bbca.id, bbri.id] {
+            transactions::create(&db, &transactions::NewTransaction{ account_id:acct.id, instrument_id:ins, txn_type:"buy".into(), executed_at:chrono::Utc::now(), quantity:"1".into(), price_native:"100".into(), fee_native:None, currency:"IDR".into(), fx_to_idr:"1".into(), fx_to_usd:"1".into(), note:None, source:None, external_id:None }).await.unwrap();
+            prices::upsert_latest(&db, ins, dec("100").unwrap(), "IDR", "test", "2099-01-01").await.unwrap();
+        }
+        // Break out BBCA as an instrument child of the category root.
+        crate::repo::plan_nodes::create(&db, &crate::repo::plan_nodes::NewPlanNode{
+            parent_id: Some(root.id), name: "BBCA".into(), target_pct: "50".into(),
+            tolerance_band_pct: None, bind_kind: "instrument".into(),
+            category_id: None, instrument_id: Some(bbca.id), sort_order: None, color: None,
+        }).await.unwrap();
+
+        let tree = build_plan_tree(&db).await.unwrap();
+        let saham = tree.iter().find(|n| n.id == root.id).unwrap();
+        assert_eq!(saham.actual_value_idr, dec("200").unwrap()); // both stocks
+        let bbca_node = saham.children.iter().find(|n| n.name == "BBCA").unwrap();
+        assert_eq!(bbca_node.actual_value_idr, dec("100").unwrap());
+        let lain = saham.children.iter().find(|n| n.name == "Lainnya").unwrap();
+        assert_eq!(lain.actual_value_idr, dec("100").unwrap()); // BBRI remainder
+    }
 
     #[tokio::test]
     async fn resolve_fx_gaps_backfills_from_fx_rate_table() {
