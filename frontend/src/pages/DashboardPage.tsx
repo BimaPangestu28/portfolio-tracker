@@ -1209,14 +1209,17 @@ export default function DashboardPage() {
         />
       ) : null}
 
-      {/* ── 2. Alokasi + Drift side by side ───────────────────────────────── */}
-      <div className="grid gap-5 lay-2-125">
+      {/* ── 2. Alokasi (50% — left half on desktop, full on mobile) ───────── */}
+      <div className="grid gap-5 lay-2">
         {summary.isLoading ? (
           <CardSkeleton rows={3} height={12} />
         ) : summary.data ? (
           <AlokasiCard allocation={summary.data.allocation} loading={false} />
         ) : null}
+      </div>
 
+      {/* ── 2b. Target vs Aktual (full width) ─────────────────────────────── */}
+      <div className="grid gap-5">
         {summary.isLoading ? (
           <CardSkeleton rows={4} height={30} />
         ) : summary.data ? (
