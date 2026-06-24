@@ -50,10 +50,12 @@ test("unrealized P&L sub shows percent of cost basis, not the raw IDR amount", a
 
 test("dashboard shows net worth IDR from summary", async () => {
   renderPage();
-  // The MSW handler returns net_worth_idr "4875000"
-  await waitFor(() =>
-    expect(screen.getByText(/Rp\s*4\.875\.000/)).toBeInTheDocument(),
-  );
+  // The MSW handler returns net_worth_idr "4875000". The plan tree returns the same total
+  // (2×2437500), so "Rp 4.875.000" may appear in both the hero and the donut center.
+  await waitFor(() => {
+    const matches = screen.getAllByText(/Rp\s*4\.875\.000/);
+    expect(matches.length).toBeGreaterThanOrEqual(1);
+  });
 });
 
 test("dashboard shows net worth USD from summary", async () => {
@@ -162,6 +164,10 @@ test("dashboard shows Rekomendasi Rebalancing section", async () => {
 });
 
 test("dashboard shows 'portofolio seimbang' when allocation is empty (MSW returns [])", async () => {
+  // Override plan/tree to return empty so no out-of-band categories exist.
+  server.use(
+    http.get("/api/plan/tree", () => HttpResponse.json([])),
+  );
   renderPage();
   await waitFor(() =>
     expect(screen.getByText(/Portofolio seimbang/i)).toBeInTheDocument(),
@@ -305,6 +311,34 @@ test("dashboard renders Refresh harga button", async () => {
   await waitFor(() =>
     expect(screen.getByRole("button", { name: /Refresh harga/i })).toBeInTheDocument(),
   );
+});
+
+// ── Allocation source (Task 6) ────────────────────────────────────────────────
+
+import { describe, it, expect } from "vitest";
+
+// Relies on the MSW handlers in src/test/server.ts, including GET /api/plan/tree
+// (added in Task 1) whose root "Saham IDX" has actual_value_idr 2437500.
+function renderDashboard() {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(
+    <QueryClientProvider client={qc}>
+      <MemoryRouter>
+        <DashboardPage />
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+}
+
+describe("DashboardPage allocation source", () => {
+  it("renders the asset-allocation card driven by the plan tree", async () => {
+    renderDashboard();
+    expect(await screen.findByText("Alokasi Aset")).toBeInTheDocument();
+    // "Saham IDX" comes from the plan-tree handler, not the flat summary allocation.
+    // It may appear in both the legend and the drift bars chart, so use findAllByText.
+    const matches = await screen.findAllByText("Saham IDX");
+    expect(matches.length).toBeGreaterThanOrEqual(1);
+  });
 });
 
 // ── FX breakdown on Unrealized P&L card ──────────────────────────────────────

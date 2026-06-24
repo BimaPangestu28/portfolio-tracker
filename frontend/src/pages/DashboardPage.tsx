@@ -34,8 +34,9 @@ import { cn } from "@/lib/utils";
 
 import {
   useSummary, useHistory, useInsights, useGoals, useRefreshPrices,
-  useMovers, useBenchmark, useReviewItems, useTransactions, useInstruments,
+  useMovers, useBenchmark, useReviewItems, useTransactions, useInstruments, usePlanTree,
 } from "../api/hooks";
+import { treeRootsToAllocation } from "../lib/plan-tree";
 import { formatIDR, formatIDRShort, formatUSD, formatPct, formatQty, parseNum } from "../lib/format";
 import { txTone, txLabel } from "../lib/txn";
 import { DashboardAgendaCard } from "../components/DashboardAgendaCard";
@@ -1120,14 +1121,15 @@ export default function DashboardPage() {
   const pendingReviews = useReviewItems("pending");
   const transactions = useTransactions();
   const instruments = useInstruments();
+  const planTree = usePlanTree();
+  const allocation = treeRootsToAllocation(planTree.data ?? []);
 
   const isLoadingCore = summary.isLoading || insights.isLoading;
 
-  const outOfBandCount = summary.data?.allocation.filter((c) => c.out_of_band).length ?? 0;
-  const activeCategories =
-    summary.data?.allocation.filter(
-      (c) => Number(c.actual_value_idr) > 0 && c.category_id !== UNCATEGORIZED_CATEGORY_ID,
-    ).length ?? 0;
+  const outOfBandCount = allocation.filter((c) => c.out_of_band).length;
+  const activeCategories = allocation.filter(
+    (c) => Number(c.actual_value_idr) > 0 && c.category_id !== UNCATEGORIZED_CATEGORY_ID,
+  ).length;
   const staleCount =
     summary.data?.positions.filter((p) => p.price_stale && parseNum(p.quantity) !== 0).length ?? 0;
 
@@ -1211,11 +1213,11 @@ export default function DashboardPage() {
 
       {/* ── 2. Alokasi + Tujuan Keuangan side by side (50/50) ─────────────── */}
       <div className="grid gap-5 lay-2">
-        {summary.isLoading ? (
+        {planTree.isLoading ? (
           <CardSkeleton rows={3} height={12} />
-        ) : summary.data ? (
-          <AlokasiCard allocation={summary.data.allocation} loading={false} />
-        ) : null}
+        ) : (
+          <AlokasiCard allocation={allocation} loading={false} />
+        )}
 
         {goals.isLoading ? (
           <CardSkeleton rows={2} height={60} />
@@ -1226,20 +1228,20 @@ export default function DashboardPage() {
 
       {/* ── 2b. Target vs Aktual (full width) ─────────────────────────────── */}
       <div className="grid gap-5">
-        {summary.isLoading ? (
+        {planTree.isLoading ? (
           <CardSkeleton rows={4} height={30} />
-        ) : summary.data ? (
-          <DriftCard allocation={summary.data.allocation} loading={false} />
-        ) : null}
+        ) : (
+          <DriftCard allocation={allocation} loading={false} />
+        )}
       </div>
 
       {/* ── 3. Rebalancing + Kesehatan side by side ───────────────────────── */}
       <div className="grid gap-5 lay-2">
-        {summary.isLoading ? (
+        {planTree.isLoading ? (
           <CardSkeleton rows={3} height={44} />
-        ) : summary.data ? (
-          <RebalancingCard allocation={summary.data.allocation} />
-        ) : null}
+        ) : (
+          <RebalancingCard allocation={allocation} />
+        )}
 
         {isLoadingCore ? (
           <CardSkeleton rows={4} height={36} />

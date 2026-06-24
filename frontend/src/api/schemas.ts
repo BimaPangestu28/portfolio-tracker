@@ -627,3 +627,53 @@ export const DcaPlanSchema = z.object({
   note: z.string().nullable(),
 });
 export type DcaPlan = z.infer<typeof DcaPlanSchema>;
+
+// Recursive allocation tree node (GET /plan/tree). Decimals are strings.
+export type PlanNodeAllocation = {
+  id: number;
+  name: string;
+  bind_kind: string;
+  target_pct: string;
+  tolerance_band_pct?: string | null;
+  actual_pct: string;
+  actual_value_idr: string;
+  target_value_idr: string;
+  drift_pct: string;
+  out_of_band: boolean;
+  rebalance_idr: string;
+  color?: string | null;
+  children: PlanNodeAllocation[];
+};
+
+export const PlanNodeAllocationSchema: z.ZodType<PlanNodeAllocation> = z.lazy(() =>
+  z.object({
+    id: z.number(),
+    name: z.string(),
+    bind_kind: z.string(),
+    target_pct: z.string(),
+    tolerance_band_pct: z.string().nullable().optional(),
+    actual_pct: z.string(),
+    actual_value_idr: z.string(),
+    target_value_idr: z.string(),
+    drift_pct: z.string(),
+    out_of_band: z.boolean(),
+    rebalance_idr: z.string(),
+    color: z.string().nullable().optional(),
+    children: z.array(PlanNodeAllocationSchema),
+  }),
+);
+
+// Raw plan node row (GET /plan/nodes, POST/PATCH responses).
+export const PlanNodeRowSchema = z.object({
+  id: z.number(),
+  parent_id: z.number().nullable().optional(),
+  name: z.string(),
+  target_pct: z.string(),
+  tolerance_band_pct: z.string().nullable().optional(),
+  bind_kind: z.string(),
+  category_id: z.number().nullable().optional(),
+  instrument_id: z.number().nullable().optional(),
+  sort_order: z.number(),
+  color: z.string().nullable().optional(),
+});
+export type PlanNodeRow = z.infer<typeof PlanNodeRowSchema>;
